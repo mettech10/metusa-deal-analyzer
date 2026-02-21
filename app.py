@@ -1,0 +1,1205 @@
+from flask import Flask, render_template, request, jsonify, send_file
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import json
+import os
+from datetime import datetime
+import pdfkit
+from jinja2 import Template
+import requests
+import secrets
+import re
+from html import escape
+
+# Security: Input validation functions
+def validate_postcode(postcode):
+    """Validate UK postcode format"""
+    pattern = r'^[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}$'
+    return re.match(pattern, postcode.upper().strip()) is not None
+
+def sanitize_input(value, max_length=500):
+    """Sanitize user input to prevent XSS"""
+    if not isinstance(value, str):
+        return str(value)[:max_length]
+    # Escape HTML entities
+    sanitized = escape(value.strip())
+    # Truncate to max length
+    return sanitized[:max_length]
+
+def validate_numeric(value, min_val=0, max_val=100000000):
+    """Validate numeric inputs"""
+    try:
+        num = float(value)
+        return min_val <= num <= max_val
+    except (ValueError, TypeError):
+        return False
+
+app = Flask(__name__, template_folder='templates')
+
+# Security: Generate secret key from environment or random
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+
+# Security: Configure CORS properly (restrict in production)
+CORS(app, resources={
+    r"/analyze": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]},
+    r"/download-pdf": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]}
+})
+
+# Security: Rate limiting to prevent abuse
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+# PDF Generation Configuration
+PDF_CONFIG = {
+    'page-size': 'A4',
+    'margin-top': '0.5in',
+    'margin-right': '0.5in',
+    'margin-bottom': '0.5in',
+    'margin-left': '0.5in',
+    'encoding': 'UTF-8',
+    'enable-local-file-access': None
+}
+
+def calculate_stamp_duty(price, second_property=True):
+    """
+    Calculate UK stamp duty for England & NI
+    Updated for 2024/2025 rates including 5% surcharge for additional properties
+    """
+    # Thresholds (as of 2024)
+    if not second_property:
+        # Standard residential rates
+        if price <= 250000:
+            return 0  # Nil rate band
+        elif price <= 925000:
+            return (price - 250000) * 0.05
+        elif price <= 1500000:
+            return 33750 + ((price - 925000) * 0.10)
+        else:
+            return 93750 + ((price - 1500000) * 0.12)
+    else:
+        # Additional property rates (5% surcharge on entire amount)
+        # Updated 2024 rates for second homes/BTL
+        if price <= 250000:
+            return price * 0.05  # 5% on everything up to 250k
+        elif price <= 925000:
+            return (250000 * 0.05) + ((price - 250000) * 0.10)
+        elif price <= 1500000:
+            return (250000 * 0.05) + (675000 * 0.10) + ((price - 925000) * 0.15)
+        else:
+            return (250000 * 0.05) + (675000 * 0.10) + (575000 * 0.15) + ((price - 1500000) * 0.17)
+
+def calculate_deal_score(deal_type, gross_yield, net_yield, monthly_cashflow, cash_on_cash, risk_level, brr_metrics=None, flip_metrics=None):
+    """
+    Calculate AI-powered deal score (0-100)
+    Based on multiple factors weighted by deal type
+    """
+    score = 50  # Start at neutral
+    
+    # Yield scoring (25 points max)
+    if deal_type == 'HMO':
+        if gross_yield >= 12:
+            score += 25
+        elif gross_yield >= 10:
+            score += 20
+        elif gross_yield >= 8:
+            score += 15
+        elif gross_yield >= 6:
+            score += 10
+        else:
+            score -= 10
+    else:
+        if gross_yield >= 8:
+            score += 25
+        elif gross_yield >= 6:
+            score += 20
+        elif gross_yield >= 5:
+            score += 15
+        elif gross_yield >= 4:
+            score += 10
+        else:
+            score -= 10
+    
+    # Cashflow scoring (25 points max)
+    if monthly_cashflow >= 300:
+        score += 25
+    elif monthly_cashflow >= 200:
+        score += 20
+    elif monthly_cashflow >= 100:
+        score += 15
+    elif monthly_cashflow >= 50:
+        score += 10
+    elif monthly_cashflow >= 0:
+        score += 5
+    else:
+        score -= 15
+    
+    # Cash-on-cash scoring (25 points max)
+    if cash_on_cash >= 12:
+        score += 25
+    elif cash_on_cash >= 8:
+        score += 20
+    elif cash_on_cash >= 6:
+        score += 15
+    elif cash_on_cash >= 4:
+        score += 10
+    else:
+        score -= 10
+    
+    # Strategy-specific scoring (15 points max)
+    if deal_type == 'BRR' and brr_metrics:
+        if brr_metrics.get('brr_roi', 0) >= 25:
+            score += 15
+        elif brr_metrics.get('brr_roi', 0) >= 20:
+            score += 12
+        elif brr_metrics.get('brr_roi', 0) >= 15:
+            score += 8
+        elif brr_metrics.get('brr_roi', 0) >= 10:
+            score += 4
+    elif deal_type == 'FLIP' and flip_metrics:
+        if flip_metrics.get('flip_roi', 0) >= 25:
+            score += 15
+        elif flip_metrics.get('flip_roi', 0) >= 20:
+            score += 12
+        elif flip_metrics.get('flip_roi', 0) >= 15:
+            score += 8
+        elif flip_metrics.get('flip_roi', 0) >= 10:
+            score += 4
+    else:
+        # BTL/HMO - Net yield matters
+        if net_yield >= 5:
+            score += 15
+        elif net_yield >= 4:
+            score += 12
+        elif net_yield >= 3:
+            score += 8
+        elif net_yield >= 2:
+            score += 4
+    
+    # Risk adjustment (10 points max)
+    if risk_level == 'LOW':
+        score += 10
+    elif risk_level == 'MEDIUM':
+        score += 5
+    else:
+        score -= 5
+    
+    # Ensure score is within 0-100
+    return max(0, min(100, score))
+
+def generate_5_year_projection(annual_rent, net_annual_income, purchase_price, cash_invested, interest_rate):
+    """
+    Generate 5-year cash flow and equity projection
+    Accounts for rent growth (3% annually) and capital growth (4% annually)
+    """
+    projections = []
+    cumulative_cashflow = 0
+    
+    # Market assumptions
+    rent_growth_rate = 0.03  # 3% annual rent increase
+    capital_growth_rate = 0.04  # 4% annual property value increase
+    
+    current_rent = annual_rent
+    current_property_value = purchase_price
+    
+    for year in range(1, 6):
+        # Apply growth rates
+        current_rent = current_rent * (1 + rent_growth_rate)
+        current_property_value = current_property_value * (1 + capital_growth_rate)
+        
+        # Calculate annual figures (expenses grow with rent)
+        annual_net = current_rent * (net_annual_income / annual_rent) if annual_rent > 0 else 0
+        cumulative_cashflow += annual_net
+        
+        # Equity = Property value - loan (assuming 75% LTV maintained)
+        loan_balance = purchase_price * 0.75  # Simplified - assumes interest only
+        equity = current_property_value - loan_balance
+        total_return = cumulative_cashflow + equity - (purchase_price * 0.25)  # Less initial deposit
+        
+        projections.append({
+            'year': year,
+            'annual_rent': round(current_rent, 0),
+            'annual_net': round(annual_net, 0),
+            'cumulative_cashflow': round(cumulative_cashflow, 0),
+            'property_value': round(current_property_value, 0),
+            'equity': round(equity, 0),
+            'total_return': round(total_return, 0)
+        })
+    
+    return projections
+
+def get_score_label(score):
+    """Get label for deal score"""
+    if score >= 80:
+        return "Excellent"
+    elif score >= 65:
+        return "Good"
+    elif score >= 50:
+        return "Fair"
+    elif score >= 35:
+        return "Weak"
+    else:
+        return "Poor"
+
+def analyze_deal(data):
+    """Perform comprehensive deal analysis with input validation"""
+    
+    # Security: Extract and sanitize inputs
+    deal_type = sanitize_input(data.get('dealType', 'BTL'), 20)
+    if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP']:
+        raise ValueError("Invalid deal type")
+    
+    # Security: Validate numeric inputs
+    purchase_price_raw = data.get('purchasePrice', 0)
+    if not validate_numeric(purchase_price_raw, 0, 50000000):
+        raise ValueError("Invalid purchase price")
+    purchase_price = float(purchase_price_raw)
+    
+    monthly_rent_raw = data.get('monthlyRent', 0)
+    if not validate_numeric(monthly_rent_raw, 0, 100000):
+        raise ValueError("Invalid monthly rent")
+    monthly_rent = float(monthly_rent_raw)
+    
+    deposit_pct_raw = data.get('deposit', 25)
+    if not validate_numeric(deposit_pct_raw, 0, 100):
+        raise ValueError("Invalid deposit percentage")
+    deposit_pct = float(deposit_pct_raw)
+    
+    interest_rate_raw = data.get('interestRate', 4.0)
+    if not validate_numeric(interest_rate_raw, 0, 20):
+        raise ValueError("Invalid interest rate")
+    interest_rate = float(interest_rate_raw)
+    
+    # Security: Sanitize text inputs
+    address = sanitize_input(data.get('address', ''), 200)
+    postcode = sanitize_input(data.get('postcode', ''), 20)
+    
+    # Security: Validate postcode format if provided
+    if postcode and not validate_postcode(postcode):
+        postcode = ""  # Clear invalid postcode rather than error
+    
+    # Purchase costs
+    stamp_duty = calculate_stamp_duty(purchase_price)
+    legal_fees = float(data.get('legalFees', 1500))
+    valuation_fee = float(data.get('valuationFee', 500))
+    arrangement_fee = float(data.get('arrangementFee', 1995))
+    total_purchase_costs = purchase_price + stamp_duty + legal_fees + valuation_fee + arrangement_fee
+    
+    # Financing
+    deposit_amount = purchase_price * (deposit_pct / 100)
+    loan_amount = purchase_price - deposit_amount
+    monthly_mortgage = (loan_amount * (interest_rate / 100)) / 12
+    
+    # BRR/Flip specific calculations
+    refurb_costs = float(data.get('refurbCosts', 0)) if deal_type in ['BRR', 'FLIP'] else 0
+    arv = float(data.get('arv', 0)) if deal_type in ['BRR', 'FLIP'] else 0
+    
+    # HMO specific
+    room_count = int(data.get('roomCount', 0)) if deal_type == 'HMO' else 0
+    avg_room_rate = float(data.get('avgRoomRate', 0)) if deal_type == 'HMO' else 0
+    
+    if deal_type == 'HMO' and room_count > 0 and avg_room_rate > 0:
+        monthly_rent = room_count * avg_room_rate
+    
+    # Income and expenses
+    annual_rent = monthly_rent * 12
+    management_costs = annual_rent * 0.10
+    void_costs = (monthly_rent / 4.33) * 2  # 2 weeks
+    maintenance_reserve = annual_rent * 0.08
+    insurance = 480
+    annual_mortgage = monthly_mortgage * 12
+    
+    total_annual_expenses = management_costs + void_costs + maintenance_reserve + insurance + annual_mortgage
+    net_annual_income = annual_rent - total_annual_expenses
+    monthly_cashflow = net_annual_income / 12
+    
+    # Key metrics
+    gross_yield = (annual_rent / purchase_price) * 100 if purchase_price > 0 else 0
+    cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee
+    cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
+    net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
+    
+    # BRR specific metrics
+    brr_metrics = {}
+    if deal_type == 'BRR' and arv > 0:
+        total_investment = purchase_price + refurb_costs + stamp_duty + legal_fees + valuation_fee + arrangement_fee
+        equity_created = arv - total_investment
+        refinance_amount = arv * 0.75
+        money_left_in = total_investment - refinance_amount
+        brr_roi = (equity_created / total_investment) * 100 if total_investment > 0 else 0
+        
+        brr_metrics = {
+            'equity_created': round(equity_created, 0),
+            'refinance_amount': round(refinance_amount, 0),
+            'money_left_in': round(money_left_in, 0),
+            'brr_roi': round(brr_roi, 2)
+        }
+    
+    # Flip specific metrics
+    flip_metrics = {}
+    if deal_type == 'FLIP' and arv > 0:
+        total_costs = purchase_price + refurb_costs + stamp_duty + legal_fees + valuation_fee + arrangement_fee + (monthly_mortgage * 6)  # 6 months holding
+        agent_fees = arv * 0.015
+        selling_costs = 1000 + agent_fees
+        total_costs += selling_costs
+        profit = arv - total_costs
+        flip_roi = (profit / total_costs) * 100 if total_costs > 0 else 0
+        
+        flip_metrics = {
+            'total_costs': round(total_costs, 0),
+            'profit': round(profit, 0),
+            'flip_roi': round(flip_roi, 2),
+            'selling_costs': round(selling_costs, 0)
+        }
+    
+    # Determine verdict
+    if deal_type == 'BTL':
+        if gross_yield >= 6 and monthly_cashflow >= 200 and cash_on_cash >= 8:
+            verdict = "PROCEED"
+            risk_level = "LOW"
+        elif gross_yield >= 5 and monthly_cashflow >= 100:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
+    elif deal_type == 'HMO':
+        if gross_yield >= 10 and monthly_cashflow >= 500:
+            verdict = "PROCEED"
+            risk_level = "MEDIUM"
+        elif gross_yield >= 8:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
+    elif deal_type == 'BRR':
+        if brr_metrics.get('brr_roi', 0) >= 20 and brr_metrics.get('money_left_in', 999999) <= cash_invested * 0.5:
+            verdict = "PROCEED"
+            risk_level = "MEDIUM"
+        elif brr_metrics.get('brr_roi', 0) >= 15:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
+    elif deal_type == 'FLIP':
+        if flip_metrics.get('flip_roi', 0) >= 20 and flip_metrics.get('profit', 0) >= 20000:
+            verdict = "PROCEED"
+            risk_level = "MEDIUM"
+        elif flip_metrics.get('flip_roi', 0) >= 15:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
+    else:
+        verdict = "REVIEW"
+        risk_level = "MEDIUM"
+    
+    # Generate analysis text
+    strengths = []
+    weaknesses = []
+    
+    if gross_yield >= 6:
+        strengths.append(f"Strong gross yield of {gross_yield:.2f}% exceeds 6% target")
+    else:
+        weaknesses.append(f"Gross yield of {gross_yield:.2f}% is below 6% target")
+    
+    if monthly_cashflow >= 200:
+        strengths.append(f"Healthy monthly cashflow of £{monthly_cashflow:.0f} provides good buffer")
+    else:
+        weaknesses.append(f"Monthly cashflow of £{monthly_cashflow:.0f} is below £200 target")
+    
+    if cash_on_cash >= 8:
+        strengths.append(f"Cash-on-cash return of {cash_on_cash:.2f}% meets investment criteria")
+    else:
+        weaknesses.append(f"Cash-on-cash return of {cash_on_cash:.2f}% is below 8% target")
+    
+    # Calculate AI Deal Score (0-100)
+    deal_score = calculate_deal_score(
+        deal_type, gross_yield, net_yield, monthly_cashflow, 
+        cash_on_cash, risk_level, brr_metrics, flip_metrics
+    )
+    
+    # Generate 5-year projection
+    five_year_projection = generate_5_year_projection(
+        annual_rent, net_annual_income, purchase_price, 
+        cash_invested, interest_rate
+    )
+    
+    # Compile results
+    results = {
+        'deal_type': deal_type,
+        'address': address,
+        'postcode': postcode,
+        'purchase_price': f"{purchase_price:,.0f}",
+        'stamp_duty': f"{stamp_duty:,.0f}",
+        'total_purchase_costs': f"{total_purchase_costs:,.0f}",
+        'deposit_amount': f"{deposit_amount:,.0f}",
+        'deposit_pct': f"{deposit_pct:.0f}",
+        'loan_amount': f"{loan_amount:,.0f}",
+        'interest_rate': f"{interest_rate:.1f}",
+        'monthly_mortgage': f"{monthly_mortgage:.0f}",
+        'monthly_rent': f"{monthly_rent:,.0f}",
+        'annual_rent': f"{annual_rent:,.0f}",
+        'total_annual_expenses': f"{total_annual_expenses:,.0f}",
+        'net_annual_income': f"{net_annual_income:,.0f}",
+        'monthly_cashflow': round(monthly_cashflow, 0),
+        'gross_yield': f"{gross_yield:.2f}",
+        'net_yield': f"{net_yield:.2f}",
+        'cash_on_cash': f"{cash_on_cash:.2f}",
+        'verdict': verdict,
+        'risk_level': risk_level,
+        'strengths': strengths,
+        'weaknesses': weaknesses,
+        'brr_metrics': brr_metrics,
+        'flip_metrics': flip_metrics,
+        'deal_score': deal_score,
+        'deal_score_label': get_score_label(deal_score),
+        'five_year_projection': five_year_projection,
+        'analysis_date': datetime.now().strftime('%Y-%m-%d'),
+        'next_steps': [
+            "Verify rental comparables in the area",
+            "Get RICS survey (£400-600)",
+            "Confirm mortgage availability",
+            "Instruct solicitor for preliminary checks",
+            "Arrange property viewing"
+        ] if verdict == "PROCEED" else [
+            "Review comparable sales in area",
+            "Investigate why yield/cashflow is below target",
+            "Consider negotiating purchase price",
+            "Explore alternative strategies (HMO, BRR)",
+            "Get professional opinion on achievable rent"
+        ]
+    }
+    
+    return results
+
+def generate_pdf_report(results):
+    """Generate professional PDF report"""
+    
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                color: #333;
+                line-height: 1.6;
+            }
+            .header {
+                background: #1B1F3B;
+                color: white;
+                padding: 30px;
+                text-align: center;
+                margin-bottom: 30px;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 28px;
+            }
+            .header p {
+                margin: 10px 0 0 0;
+                opacity: 0.9;
+            }
+            .gold-line {
+                background: #D4AF37;
+                height: 5px;
+                margin-bottom: 30px;
+            }
+            .verdict-box {
+                padding: 30px;
+                text-align: center;
+                margin-bottom: 30px;
+                border-radius: 10px;
+            }
+            .verdict-proceed { background: #d4edda; border: 3px solid #28a745; }
+            .verdict-review { background: #fff3cd; border: 3px solid #ffc107; }
+            .verdict-avoid { background: #f8d7da; border: 3px solid #dc3545; }
+            .verdict-title {
+                font-size: 36px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }
+            .metrics {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 30px;
+            }
+            .metric-card {
+                border: 2px solid #D4AF37;
+                padding: 20px;
+                text-align: center;
+                width: 22%;
+                border-radius: 8px;
+            }
+            .metric-label {
+                font-size: 11px;
+                color: #666;
+                text-transform: uppercase;
+                margin-bottom: 8px;
+            }
+            .metric-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #1B1F3B;
+            }
+            .section {
+                margin-bottom: 30px;
+            }
+            .section h2 {
+                color: #1B1F3B;
+                border-bottom: 2px solid #D4AF37;
+                padding-bottom: 10px;
+                margin-bottom: 20px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            th, td {
+                padding: 10px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+            th {
+                background: #f5f5f5;
+                font-weight: bold;
+            }
+            .total-row {
+                font-weight: bold;
+                background: #f0f0f0;
+            }
+            ul {
+                padding-left: 20px;
+            }
+            li {
+                margin-bottom: 8px;
+            }
+            .footer {
+                background: #1B1F3B;
+                color: white;
+                text-align: center;
+                padding: 15px;
+                margin-top: 40px;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>{{ deal_type }} Investment Analysis</h1>
+            <p>{{ address }}</p>
+        </div>
+        <div class="gold-line"></div>
+        
+        <div class="verdict-box verdict-{{ verdict_class }}">
+            <div class="verdict-title" style="color: {{ verdict_color }}">{{ verdict }}</div>
+            <p>Investment Recommendation</p>
+        </div>
+        
+        <div class="metrics">
+            <div class="metric-card">
+                <div class="metric-label">Gross Yield</div>
+                <div class="metric-value">{{ gross_yield }}%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Monthly Cashflow</div>
+                <div class="metric-value">£{{ monthly_cashflow }}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Cash-on-Cash</div>
+                <div class="metric-value">{{ cash_on_cash }}%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Risk Level</div>
+                <div class="metric-value">{{ risk_level }}</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>AI Deal Score</h2>
+            <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px; margin-bottom: 20px;">
+                <div style="font-size: 72px; font-weight: bold; color: {{ score_color }};">{{ deal_score }}</div>
+                <div style="font-size: 24px; color: #666;">out of 100</div>
+                <div style="font-size: 18px; color: {{ score_color }}; margin-top: 10px;">{{ deal_score_label }}</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>5-Year Projection</h2>
+            <table>
+                <tr>
+                    <th>Year</th>
+                    <th>Annual Rent</th>
+                    <th>Annual Net</th>
+                    <th>Cumulative Cashflow</th>
+                    <th>Property Value</th>
+                    <th>Total Return</th>
+                </tr>
+                {% for year_data in five_year_projection %}
+                <tr>
+                    <td>Year {{ year_data.year }}</td>
+                    <td>£{{ "{:,.0f}".format(year_data.annual_rent) }}</td>
+                    <td>£{{ "{:,.0f}".format(year_data.annual_net) }}</td>
+                    <td>£{{ "{:,.0f}".format(year_data.cumulative_cashflow) }}</td>
+                    <td>£{{ "{:,.0f}".format(year_data.property_value) }}</td>
+                    <td>£{{ "{:,.0f}".format(year_data.total_return) }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                <strong>Assumptions:</strong> 3% annual rent growth, 4% annual capital growth. 
+                Projections are estimates only and not guaranteed.
+            </p>
+        </div>
+        
+        <div class="section">
+            <h2>Financial Summary</h2>
+            <table>
+                <tr>
+                    <td>Purchase Price</td>
+                    <td>£{{ purchase_price }}</td>
+                </tr>
+                <tr>
+                    <td>Stamp Duty</td>
+                    <td>£{{ stamp_duty }}</td>
+                </tr>
+                <tr>
+                    <td>Legal Fees</td>
+                    <td>£1,500</td>
+                </tr>
+                <tr>
+                    <td>Valuation Fee</td>
+                    <td>£500</td>
+                </tr>
+                <tr>
+                    <td>Arrangement Fee</td>
+                    <td>£1,995</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Total Purchase Costs</td>
+                    <td>£{{ total_purchase_costs }}</td>
+                </tr>
+            </table>
+            
+            <h3>Financing</h3>
+            <table>
+                <tr>
+                    <td>Deposit ({{ deposit_pct }}%)</td>
+                    <td>£{{ deposit_amount }}</td>
+                </tr>
+                <tr>
+                    <td>Loan Amount</td>
+                    <td>£{{ loan_amount }}</td>
+                </tr>
+                <tr>
+                    <td>Interest Rate</td>
+                    <td>{{ interest_rate }}%</td>
+                </tr>
+                <tr>
+                    <td>Monthly Mortgage</td>
+                    <td>£{{ monthly_mortgage }}</td>
+                </tr>
+            </table>
+            
+            <h3>Annual Returns</h3>
+            <table>
+                <tr>
+                    <td>Annual Rent</td>
+                    <td>£{{ annual_rent }}</td>
+                </tr>
+                <tr>
+                    <td>Total Expenses</td>
+                    <td>£{{ total_annual_expenses }}</td>
+                </tr>
+                <tr class="total-row">
+                    <td>Net Annual Income</td>
+                    <td>£{{ net_annual_income }}</td>
+                </tr>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>Investment Analysis</h2>
+            
+            <h3>Strengths</h3>
+            <ul>
+                {% for strength in strengths %}
+                <li>{{ strength }}</li>
+                {% endfor %}
+            </ul>
+            
+            <h3>Weaknesses</h3>
+            <ul>
+                {% for weakness in weaknesses %}
+                <li>{{ weakness }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <div class="section">
+            <h2>Recommended Next Steps</h2>
+            <ul>
+                {% for step in next_steps %}
+                <li>{{ step }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <div class="footer">
+            Metusa Property | Deal Analysis Report | Generated: {{ analysis_date }}
+        </div>
+    </body>
+    </html>
+    """
+    
+    template = Template(html_template)
+    
+    # Determine verdict styling
+    verdict_colors = {
+        'PROCEED': '#28a745',
+        'REVIEW': '#ffc107',
+        'AVOID': '#dc3545'
+    }
+    verdict_classes = {
+        'PROCEED': 'proceed',
+        'REVIEW': 'review',
+        'AVOID': 'avoid'
+    }
+    
+    # Determine score color
+    score = results.get('deal_score', 50)
+    if score >= 80:
+        score_color = '#28a745'  # Green
+    elif score >= 65:
+        score_color = '#17a2b8'  # Blue
+    elif score >= 50:
+        score_color = '#ffc107'  # Yellow
+    else:
+        score_color = '#dc3545'  # Red
+    
+    html_content = template.render(
+        **results,
+        verdict_color=verdict_colors.get(results['verdict'], '#333'),
+        verdict_class=verdict_classes.get(results['verdict'], 'review'),
+        score_color=score_color
+    )
+    
+    # Generate PDF
+    try:
+        pdf = pdfkit.from_string(html_content, False, options=PDF_CONFIG)
+        return pdf
+    except Exception as e:
+        print(f"PDF generation error: {e}")
+        return None
+
+@app.route('/')
+def index():
+    """Serve the main page"""
+    return render_template('index.html')
+
+@app.route('/analyze', methods=['POST'])
+@limiter.limit("10 per minute")  # Security: Rate limit analysis requests
+def analyze():
+    """API endpoint for deal analysis"""
+    try:
+        # Security: Check content type
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
+        
+        # Security: Validate required fields
+        required = ['address', 'postcode', 'dealType', 'purchasePrice', 'monthlyRent']
+        for field in required:
+            if field not in data or not data[field]:
+                return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        # Security: Check payload size
+        if len(str(data)) > 10000:  # Max 10KB
+            return jsonify({'success': False, 'message': 'Request too large'}), 413
+        
+        # Perform analysis
+        results = analyze_deal(data)
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+    
+    except ValueError as e:
+        # Validation errors
+        return jsonify({
+            'success': False,
+            'message': f'Validation error: {str(e)}'
+        }), 400
+    
+    except Exception as e:
+        # Log error but don't expose details to client
+        app.logger.error(f'Analysis error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during analysis. Please try again.'
+        }), 500
+
+@app.route('/download-pdf', methods=['POST'])
+@limiter.limit("5 per minute")  # Security: Stricter rate limit for PDF generation
+def download_pdf():
+    """Generate and download PDF report"""
+    try:
+        # Security: Check content type
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
+        
+        # Security: Check payload size
+        if len(str(data)) > 10000:
+            return jsonify({'success': False, 'message': 'Request too large'}), 413
+        
+        results = analyze_deal(data)
+        
+        pdf = generate_pdf_report(results)
+        if pdf:
+            # Security: Set secure headers for PDF download
+            response = send_file(
+                pdf,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=f"deal_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            return response
+        else:
+            return jsonify({'success': False, 'message': 'PDF generation failed'}), 500
+    
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': f'Validation error: {str(e)}'
+        }), 400
+    
+    except Exception as e:
+        app.logger.error(f'PDF generation error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred generating the PDF. Please try again.'
+        }), 500
+
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
+# Security: Error handlers
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Handle rate limit exceeded"""
+    return jsonify({
+        'success': False,
+        'message': 'Rate limit exceeded. Please slow down.'
+    }), 429
+
+@app.errorhandler(404)
+def not_found_handler(e):
+    """Handle 404 errors"""
+    return jsonify({
+        'success': False,
+        'message': 'Endpoint not found'
+    }), 404
+
+@app.errorhandler(500)
+def server_error_handler(e):
+    """Handle 500 errors"""
+    app.logger.error(f'Server error: {str(e)}')
+    return jsonify({
+        'success': False,
+        'message': 'Internal server error. Please try again later.'
+    }), 500
+
+# ============================================================================
+# URL EXTRACTION & AI ANALYSIS ENDPOINTS
+# ============================================================================
+
+def extract_property_from_url(url):
+    """
+    Extract property details from a URL using web scraping
+    Supports: Rightmove, Zoopla, OnTheMarket
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        html = response.text
+        data = {
+            'address': None,
+            'postcode': None,
+            'price': None,
+            'property_type': None,
+            'bedrooms': None,
+            'description': None
+        }
+        
+        # Rightmove extraction
+        if 'rightmove.co.uk' in url:
+            # Extract address
+            address_match = re.search(r'<h1[^>]*class="[^"]*property-header[^"]*"[^>]*>(.*?)</h1>', html, re.DOTALL)
+            if address_match:
+                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
+                # Try to extract postcode from address
+                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
+                if postcode_match:
+                    data['postcode'] = postcode_match.group(1)
+            
+            # Extract price
+            price_match = re.search(r'&pound;([0-9,]+)', html)
+            if price_match:
+                data['price'] = int(price_match.group(1).replace(',', ''))
+            
+            # Extract property type
+            type_match = re.search(r'(Semi-Detached|Detached|Terraced|Flat|Apartment|Bungalow)', html, re.IGNORECASE)
+            if type_match:
+                data['property_type'] = type_match.group(1)
+        
+        # Zoopla extraction
+        elif 'zoopla.co.uk' in url:
+            # Extract address from JSON-LD or meta tags
+            address_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
+            if address_match:
+                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
+                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
+                if postcode_match:
+                    data['postcode'] = postcode_match.group(1)
+            
+            # Extract price
+            price_match = re.search(r'&pound;([0-9,]+)', html)
+            if not price_match:
+                price_match = re.search(r'£([0-9,]+)', html)
+            if price_match:
+                data['price'] = int(price_match.group(1).replace(',', ''))
+        
+        # OnTheMarket extraction
+        elif 'onthemarket.com' in url:
+            address_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
+            if address_match:
+                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
+                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
+                if postcode_match:
+                    data['postcode'] = postcode_match.group(1)
+            
+            price_match = re.search(r'£([0-9,]+)', html)
+            if price_match:
+                data['price'] = int(price_match.group(1).replace(',', ''))
+        
+        return data
+        
+    except Exception as e:
+        app.logger.error(f'URL extraction error: {str(e)}')
+        return None
+
+@app.route('/extract-url', methods=['POST'])
+@limiter.limit("10 per minute")
+def extract_url():
+    """Extract property data from a URL"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data or 'url' not in data:
+            return jsonify({'success': False, 'message': 'URL is required'}), 400
+        
+        url = data['url']
+        
+        # Validate URL
+        if not url.startswith(('http://', 'https://')):
+            return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
+        
+        # Extract data
+        extracted_data = extract_property_from_url(url)
+        
+        if extracted_data and (extracted_data['address'] or extracted_data['price']):
+            return jsonify({
+                'success': True,
+                'data': extracted_data,
+                'message': 'Data extracted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Could not extract data from this URL. Please enter details manually.'
+            }), 400
+            
+    except Exception as e:
+        app.logger.error(f'Extract URL error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error extracting data from URL'
+        }), 500
+
+def get_ai_property_analysis(property_data, calculated_metrics):
+    """
+    Get AI-powered analysis from OpenClaw
+    This sends the data to the AI for enhanced insights
+    """
+    try:
+        # Build comprehensive prompt for AI
+        prompt = f"""Analyze this UK property investment deal and provide detailed insights:
+
+PROPERTY DETAILS:
+- Address: {property_data.get('address', 'N/A')}
+- Postcode: {property_data.get('postcode', 'N/A')}
+- Deal Type: {property_data.get('dealType', 'BTL')}
+- Purchase Price: £{property_data.get('purchasePrice', 0):,}
+- Expected Monthly Rent: £{property_data.get('monthlyRent', 0)}
+
+FINANCIAL METRICS:
+- Gross Yield: {calculated_metrics.get('gross_yield', 0)}%
+- Net Yield: {calculated_metrics.get('net_yield', 0)}%
+- Monthly Cashflow: £{calculated_metrics.get('monthly_cashflow', 0)}
+- Cash-on-Cash Return: {calculated_metrics.get('cash_on_cash', 0)}%
+- Annual Net Income: £{calculated_metrics.get('net_annual_income', 0)}
+- Deal Score: {calculated_metrics.get('deal_score', 0)}/100
+- Investment Verdict: {calculated_metrics.get('verdict', 'REVIEW')}
+
+Please provide:
+
+1. INVESTMENT VERDICT (2-3 sentences): Summarize whether this is a good deal and why
+
+2. KEY STRENGTHS (3-4 bullet points with HTML <br> tags): What makes this deal attractive
+
+3. KEY RISKS (3-4 bullet points with HTML <br> tags): What could go wrong or needs investigation
+
+4. AREA ASSESSMENT (2-3 sentences): Quick assessment of the postcode area for rental demand
+
+5. RECOMMENDED NEXT STEPS (4-5 numbered items with HTML <br> tags): Actionable steps
+
+Format your response as JSON:
+{{
+    "verdict": "...",
+    "strengths": "...",
+    "risks": "...",
+    "area": "...",
+    "next_steps": "..."
+}}"""
+
+        # For now, return mock AI response (integrate with OpenClaw API later)
+        # This simulates what the AI would return
+        verdict = calculated_metrics.get('verdict', 'REVIEW')
+        score = calculated_metrics.get('deal_score', 50)
+        
+        if verdict == 'PROCEED':
+            ai_response = {
+                "verdict": f"This property represents a strong investment opportunity with a deal score of {score}/100. The gross yield of {calculated_metrics.get('gross_yield', 0)}% exceeds market averages, and the monthly cashflow of £{calculated_metrics.get('monthly_cashflow', 0)} provides a healthy buffer for expenses and void periods. The fundamentals support a PROCEED recommendation.",
+                "strengths": "• Strong gross yield above 6% target, indicating good rental demand<br>• Positive monthly cashflow provides financial buffer<br>• Healthy cash-on-cash return above 8%<br>• Property appears priced fairly for the area",
+                "risks": "• Market conditions could affect future capital growth<br>• Void periods may be longer than estimated<br>• Maintenance costs could exceed 8% assumption<br>• Interest rate increases would impact cashflow",
+                "area": f"The {property_data.get('postcode', 'area')} postcode shows good rental demand with reasonable yields. Transport links and local amenities support tenant interest.",
+                "next_steps": "1. Verify rental comparables with local agents<br>2. Arrange property viewing and inspection<br>3. Get RICS survey (£400-600)<br>4. Confirm mortgage availability<br>5. Instruct solicitor for preliminary checks"
+            }
+        elif verdict == 'REVIEW':
+            ai_response = {
+                "verdict": f"This deal requires further investigation with a score of {score}/100. While some metrics are acceptable, borderline cashflow or yield suggests caution. Consider negotiating the price or exploring alternative strategies.",
+                "strengths": "• Some metrics meet investment criteria<br>• Potential for value add through refurbishment<br>• Area may have growth potential<br>• Property type suits rental market",
+                "risks": "• Cashflow below £200 target reduces safety margin<br>• Yield may not justify the risk<br>• Higher void risk due to area or property condition<br>• Exit strategy concerns if market slows",
+                "area": f"The {property_data.get('postcode', 'area')} area shows mixed signals. Research comparable rents and recent sales carefully.",
+                "next_steps": "1. Research comparable sales and rents thoroughly<br>2. Investigate why metrics are below target<br>3. Consider negotiating purchase price down<br>4. Explore BRR or HMO strategy alternatives<br>5. Get professional opinion on achievable rent"
+            }
+        else:
+            ai_response = {
+                "verdict": f"This deal scores {score}/100 and falls below investment criteria. Poor yield, negative cashflow, or high risk factors suggest avoiding this property. Better opportunities likely exist elsewhere.",
+                "strengths": "• Property exists in investable area<br>• May have unique features<br>• Could suit different strategy",
+                "risks": "• Yield significantly below 6% target<br>• Cashflow insufficient or negative<br>• High risk of capital loss<br>• Better deals available elsewhere",
+                "area": f"The {property_data.get('postcode', 'area')} area may have better opportunities. Continue searching.",
+                "next_steps": "1. Avoid this deal - numbers don't work<br>2. Continue searching for better opportunities<br>3. Adjust search criteria if needed<br>4. Consider different areas with higher yields"
+            }
+        
+        return ai_response
+        
+    except Exception as e:
+        app.logger.error(f'AI analysis error: {str(e)}')
+        return {
+            "verdict": "AI analysis temporarily unavailable. Please review the calculated metrics.",
+            "strengths": "• Please review the financial metrics<br>• Consider local market knowledge",
+            "risks": "• Always verify figures independently<br>• Get professional advice",
+            "area": "Area assessment unavailable",
+            "next_steps": "1. Verify all calculations<br>2. Research the area independently<br>3. Consult local property experts"
+        }
+
+@app.route('/ai-analyze', methods=['POST'])
+@limiter.limit("5 per minute")  # Lower limit for AI analysis
+def ai_analyze():
+    """
+    Full AI-powered deal analysis
+    1. Calculates all financial metrics
+    2. Gets AI-enhanced insights
+    3. Returns comprehensive analysis
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
+        
+        # Validate required fields
+        required = ['address', 'postcode', 'dealType', 'purchasePrice', 'monthlyRent']
+        for field in required:
+            if field not in data or not data[field]:
+                return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        # Step 1: Calculate financial metrics
+        calculated_metrics = analyze_deal(data)
+        
+        # Step 2: Get AI insights
+        ai_insights = get_ai_property_analysis(data, calculated_metrics)
+        
+        # Combine results
+        results = {
+            **calculated_metrics,
+            'ai_verdict': ai_insights['verdict'],
+            'ai_strengths': ai_insights['strengths'],
+            'ai_risks': ai_insights['risks'],
+            'ai_area': ai_insights['area'],
+            'ai_next_steps': ai_insights['next_steps']
+        }
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+        
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': f'Validation error: {str(e)}'
+        }), 400
+    
+    except Exception as e:
+        app.logger.error(f'AI analysis error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during AI analysis. Please try again.'
+        }), 500
+
+if __name__ == '__main__':
+    # Security: Don't run with debug in production
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)

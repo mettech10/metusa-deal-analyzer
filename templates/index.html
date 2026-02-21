@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metusa Deal Analyzer | AI-Powered Property Investment Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --navy: #1B1F3B;
+            --gold: #D4AF37;
+            --white: #FFFFFF;
+            --gray: #6C757D;
+            --success: #28A745;
+            --warning: #FD7E14;
+            --danger: #DC3545;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--navy) 0%, #2d3561 100%);
+            min-height: 100vh;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        .header { text-align: center; margin-bottom: 40px; color: var(--white); }
+        .header h1 { font-size: 2.8rem; margin-bottom: 10px; }
+        .header p { font-size: 1.2rem; opacity: 0.9; }
+        .trust-badges { display: flex; justify-content: center; gap: 30px; margin-top: 20px; flex-wrap: wrap; }
+        .trust-badge { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; opacity: 0.9; }
+        .form-card { background: var(--white); border-radius: 20px; padding: 40px; box-shadow: 0 25px 80px rgba(0,0,0,0.3); }
+        .input-mode-tabs { display: flex; gap: 10px; margin-bottom: 30px; background: #f0f0f0; padding: 5px; border-radius: 12px; }
+        .mode-tab { flex: 1; padding: 15px 20px; border: none; background: transparent; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 1rem; transition: all 0.3s ease; color: #666; }
+        .mode-tab.active { background: var(--navy); color: var(--white); box-shadow: 0 4px 15px rgba(27, 31, 59, 0.3); }
+        .input-section { display: none; animation: fadeIn 0.3s ease; }
+        .input-section.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .url-input-container { text-align: center; padding: 30px 0; }
+        .url-input-wrapper { position: relative; max-width: 600px; margin: 0 auto 20px; }
+        .url-input { width: 100%; padding: 20px 60px 20px 20px; font-size: 1.1rem; border: 3px solid #e0e0e0; border-radius: 12px; transition: all 0.3s ease; }
+        .url-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.1); }
+        .url-submit-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: var(--navy); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        .supported-platforms { display: flex; justify-content: center; gap: 20px; margin-top: 20px; flex-wrap: wrap; }
+        .platform-badge { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: #f8f9fa; border-radius: 20px; font-size: 0.85rem; color: #666; }
+        .platform-badge.supported { background: #d4edda; color: #155724; }
+        .form-section { margin-bottom: 35px; }
+        .section-title { color: var(--navy); font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 3px solid var(--gold); }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full-width { grid-column: 1 / -1; }
+        label { font-weight: 600; margin-bottom: 8px; color: #555; font-size: 0.9rem; }
+        label .required { color: var(--danger); }
+        input, select { padding: 14px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 1rem; transition: all 0.3s ease; }
+        input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.1); }
+        .input-with-prefix { position: relative; }
+        .input-prefix { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--gray); font-weight: 600; pointer-events: none; }
+        .input-with-prefix input { padding-left: 40px; }
+        .submit-section { margin-top: 40px; text-align: center; }
+        .submit-btn { background: linear-gradient(135deg, var(--gold) 0%, #b8962e 100%); color: var(--navy); border: none; padding: 18px 50px; font-size: 1.2rem; font-weight: 700; border-radius: 12px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 10px 30px rgba(212, 175, 55, 0.3); }
+        .submit-btn:hover { transform: translateY(-3px); box-shadow: 0 15px 40px rgba(212, 175, 55, 0.4); }
+        .loading { display: none; text-align: center; padding: 40px; }
+        .loading.visible { display: block; }
+        .spinner { width: 60px; height: 60px; border: 4px solid #e0e0e0; border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .results { display: none; animation: fadeIn 0.5s ease; }
+        .results.visible { display: block; }
+        .verdict-box { padding: 30px; border-radius: 15px; text-align: center; margin-bottom: 30px; }
+        .verdict-box.proceed { background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border: 3px solid var(--success); }
+        .verdict-box.review { background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%); border: 3px solid var(--warning); }
+        .verdict-box.avoid { background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); border: 3px solid var(--danger); }
+        .verdict-title { font-size: 2.5rem; font-weight: 700; margin-bottom: 10px; }
+        .verdict-box.proceed .verdict-title { color: var(--success); }
+        .verdict-box.review .verdict-title { color: var(--warning); }
+        .verdict-box.avoid .verdict-title { color: var(--danger); }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .metric-card { background: #f8f9fa; padding: 25px; border-radius: 12px; text-align: center; border: 2px solid transparent; }
+        .metric-label { font-size: 0.85rem; color: var(--gray); text-transform: uppercase; margin-bottom: 10px; }
+        .metric-value { font-size: 2rem; font-weight: 700; color: var(--navy); }
+        .ai-analysis-section { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px; padding: 30px; margin: 30px 0; border: 2px solid var(--gold); }
+        .ai-analysis-section h3 { color: var(--navy); margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .ai-insight { background: white; padding: 20px; border-radius: 10px; margin-bottom: 15px; border-left: 4px solid var(--gold); }
+        .ai-insight h4 { color: var(--navy); margin-bottom: 10px; font-size: 1rem; }
+        .ai-insight p { color: #555; line-height: 1.6; }
+        .action-buttons { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+        .btn { padding: 14px 30px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; border: none; font-size: 1rem; }
+        .btn-primary { background: var(--navy); color: var(--white); }
+        .btn-secondary { background: var(--white); color: var(--navy); border: 2px solid var(--navy); }
+        .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-top: 50px; text-align: center; }
+        @media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 600px) { .features { grid-template-columns: 1fr; } }
+        .feature { color: var(--white); padding: 20px; }
+        .feature-icon { font-size: 3rem; margin-bottom: 15px; }
+        .error-message { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; }
+        .error-message.visible { display: block; }
+        .extracted-data { background: #e8f5e9; border: 2px solid #4caf50; border-radius: 10px; padding: 20px; margin: 20px 0; display: none; }
+        .extracted-data.visible { display: block; }
+        .extracted-field { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #c8e6c9; }
+        .extracted-label { font-weight: 600; color: #555; }
+        .extracted-value { color: #2e7d32; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏠 Metusa Deal Analyzer</h1>
+            <p>AI-Powered Property Investment Analysis</p>
+            <div class="trust-badges">
+                <div class="trust-badge"><span>⚡</span> Instant Analysis</div>
+                <div class="trust-badge"><span>🤖</span> AI Powered</div>
+                <div class="trust-badge"><span>📊</span> Professional Reports</div>
+            </div>
+        </div>
+        
+        <div class="form-card">
+            <div class="input-mode-tabs">
+                <button class="mode-tab active" onclick="switchMode('url')">
+                    <span>🔗</span> Property URL
+                </button>
+                <button class="mode-tab" onclick="switchMode('manual')">
+                    <span>📝</span> Enter Details
+                </button>
+            </div>
+            
+            <div class="error-message" id="errorMessage"></div>
+            
+            <!-- URL Section -->
+            <div class="input-section active" id="urlSection">
+                <div class="url-input-container">
+                    <h3 style="margin-bottom: 15px; color: var(--navy);">Paste Property Listing URL</h3>
+                    <p style="color: #666; margin-bottom: 25px;">We'll automatically extract the property details using AI</p>
+                    
+                    <div class="url-input-wrapper">
+                        <input type="url" class="url-input" id="propertyUrl" placeholder="https://www.rightmove.co.uk/properties/...">
+                        <button class="url-submit-btn" onclick="analyzeUrl()">Analyze</button>
+                    </div>
+                    
+                    <div class="supported-platforms">
+                        <div class="platform-badge supported"><span>✅</span> Rightmove</div>
+                        <div class="platform-badge supported"><span>✅</span> Zoopla</div>
+                        <div class="platform-badge supported"><span>✅</span> OnTheMarket</div>
+                        <div class="platform-badge"><span>🔄</span> Others (AI will try)</div>
+                    </div>
+                </div>
+                
+                <div class="extracted-data" id="extractedData">
+                    <h4 style="color: #2e7d32; margin-bottom: 15px;"><span>✅</span> Data Extracted Successfully</h4>
+                    <div class="extracted-field">
+                        <span class="extracted-label">Address:</span>
+                        <span class="extracted-value" id="extAddress">-</span>
+                    </div>
+                    <div class="extracted-field">
+                        <span class="extracted-label">Price:</span>
+                        <span class="extracted-value" id="extPrice">-</span>
+                    </div>
+                    <div class="extracted-field">
+                        <span class="extracted-label">Type:</span>
+                        <span class="extracted-value" id="extType">-</span>
+                    </div>
+                    <p style="margin-top: 15px; color: #666; font-size: 0.9rem;">Review the details and add any missing information, then click "AI Analyze This Deal"</p>
+                </div>
+            </div>
+            
+            <!-- Manual Section -->
+            <div class="input-section" id="manualSection">
+                <form id="dealForm">
+                    <div class="form-section">
+                        <h2 class="section-title">📍 Property Details</h2>
+                        <div class="form-group full-width">
+                            <label>Property Address <span class="required">*</span></label>
+                            <input type="text" id="address" name="address" placeholder="e.g., 42 Oakfield Avenue, Manchester" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Postcode <span class="required">*</span></label>
+                                <input type="text" id="postcode" name="postcode" placeholder="M14 6LT" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Deal Type <span class="required">*</span></label>
+                                <select id="dealType" name="dealType" required>
+                                    <option value="">Select strategy...</option>
+                                    <option value="BTL">Buy-to-Let (BTL)</option>
+                                    <option value="BRR">Buy Refurb Refinance (BRR)</option>
+                                    <option value="HMO">HMO (Multi-let)</option>
+                                    <option value="FLIP">Flip / Renovation</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h2 class="section-title">💰 Financial Details</h2>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Purchase Price <span class="required">*</span></label>
+                                <div class="input-with-prefix">
+                                    <span class="input-prefix">£</span>
+                                    <input type="number" id="purchasePrice" name="purchasePrice" placeholder="185000" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Monthly Rent <span class="required">*</span></label>
+                                <div class="input-with-prefix">
+                                    <span class="input-prefix">£</span>
+                                    <input type="number" id="monthlyRent" name="monthlyRent" placeholder="950" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Deposit (%)</label>
+                                <input type="number" id="deposit" name="deposit" value="25" min="0" max="100">
+                            </div>
+                            <div class="form-group">
+                                <label>Interest Rate (%)</label>
+                                <input type="number" id="interestRate" name="interestRate" value="4.0" step="0.1" min="0" max="20">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="submit-section">
+                        <button type="submit" class="submit-btn">🤖 AI Analyze This Deal</button>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <h3>🤖 AI is analyzing your deal...</h3>
+                <p>This takes about 10-20 seconds</p>
+            </div>
+            
+            <div class="results" id="results">
+                <div class="verdict-box" id="verdictBox">
+                    <div class="verdict-title" id="verdictTitle">PROCEED</div>
+                    <p id="verdictSubtitle">Good Deal — All metrics exceed targets</p>
+                </div>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Gross Yield</div>
+                        <div class="metric-value" id="grossYield">6.16%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Monthly Cashflow</div>
+                        <div class="metric-value" id="monthlyCashflow">£226</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Cash-on-Cash</div>
+                        <div class="metric-value" id="cashOnCash">8.42%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">AI Deal Score</div>
+                        <div class="metric-value" id="dealScore">75/100</div>
+                    </div>
+                </div>
+                
+                <div class="ai-analysis-section">
+                    <h3><span>🤖</span> AI Investment Analysis</h3>
+                    <div class="ai-insight">
+                        <h4>🎯 Investment Verdict</h4>
+                        <p id="aiVerdict">Analysis loading...</p>
+                    </div>
+                    <div class="ai-insight">
+                        <h4>✅ Key Strengths</h4>
+                        <p id="aiStrengths">Analysis loading...</p>
+                    </div>
+                    <div class="ai-insight">
+                        <h4>⚠️ Key Risks</h4>
+                        <p id="aiRisks">Analysis loading...</p>
+                    </div>
+                    <div class="ai-insight">
+                        <h4>📍 Area Assessment</h4>
+                        <p id="aiArea">Analysis loading...</p>
+                    </div>
+                    <div class="ai-insight">
+                        <h4>📝 Recommended Next Steps</h4>
+                        <p id="aiNextSteps">Analysis loading...</p>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn btn-primary" onclick="downloadPDF()">📄 Download PDF Report</button>
+                    <button class="btn btn-secondary" onclick="resetForm()">🔄 Analyze Another Deal</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🔗</div>
+                <h3>URL Analysis</h3>
+                <p>Paste any property link - AI extracts all details automatically</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🤖</div>
+                <h3>AI Powered</h3>
+                <p>Smart analysis with investment insights and recommendations</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📊</div>
+                <h3>Professional Reports</h3>
+                <p>Investor-grade PDF reports with full breakdown</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function switchMode(mode) {
+            document.querySelectorAll('.mode-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.input-section').forEach(section => section.classList.remove('active'));
+            
+            event.target.closest('.mode-tab').classList.add('active');
+            document.getElementById(mode + 'Section').classList.add('active');
+        }
+        
+        async function analyzeUrl() {
+            const url = document.getElementById('propertyUrl').value;
+            if (!url) {
+                showError('Please enter a property URL');
+                return;
+            }
+            
+            document.getElementById('loading').classList.add('visible');
+            
+            try {
+                const response = await fetch('/extract-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Show extracted data
+                    document.getElementById('extAddress').textContent = result.data.address || 'Not found';
+                    document.getElementById('extPrice').textContent = result.data.price ? '£' + result.data.price : 'Not found';
+                    document.getElementById('extType').textContent = result.data.property_type || 'Not found';
+                    document.getElementById('extractedData').classList.add('visible');
+                    
+                    // Fill form with extracted data
+                    if (result.data.address) document.getElementById('address').value = result.data.address;
+                    if (result.data.postcode) document.getElementById('postcode').value = result.data.postcode;
+                    if (result.data.price) document.getElementById('purchasePrice').value = result.data.price;
+                    
+                    // Switch to manual mode to show form
+                    switchMode('manual');
+                } else {
+                    showError(result.message || 'Could not extract data from URL');
+                }
+            } catch (error) {
+                showError('Error analyzing URL. Please try manual entry.');
+            } finally {
+                document.getElementById('loading').classList.remove('visible');
+            }
+        }
+        
+        document.getElementById('dealForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData);
+            
+            document.getElementById('manualSection').style.display = 'none';
+            document.getElementById('loading').classList.add('visible');
+            
+            try {
+                const response = await fetch('/ai-analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayResults(result.results);
+                } else {
+                    showError(result.message);
+                }
+            } catch (error) {
+                showError('Analysis failed. Please try again.');
+            }
+        });
+        
+        function displayResults(results) {
+            document.getElementById('loading').classList.remove('visible');
+            document.getElementById('results').classList.add('visible');
+            
+            document.getElementById('verdictTitle').textContent = results.verdict;
+            document.getElementById('verdictBox').className = 'verdict-box ' + results.verdict.toLowerCase();
+            document.getElementById('grossYield').textContent = results.gross_yield + '%';
+            document.getElementById('monthlyCashflow').textContent = '£' + results.monthly_cashflow;
+            document.getElementById('cashOnCash').textContent = results.cash_on_cash + '%';
+            document.getElementById('dealScore').textContent = results.deal_score + '/100';
+            
+            // AI insights
+            document.getElementById('aiVerdict').textContent = results.ai_verdict;
+            document.getElementById('aiStrengths').innerHTML = results.ai_strengths;
+            document.getElementById('aiRisks').innerHTML = results.ai_risks;
+            document.getElementById('aiArea').textContent = results.ai_area;
+            document.getElementById('aiNextSteps').innerHTML = results.ai_next_steps;
+        }
+        
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.classList.add('visible');
+            setTimeout(() => errorEl.classList.remove('visible'), 5000);
+        }
+        
+        function downloadPDF() {
+            alert('PDF download coming soon!');
+        }
+        
+        function resetForm() {
+            document.getElementById('results').classList.remove('visible');
+            document.getElementById('manualSection').style.display = 'block';
+            document.getElementById('dealForm').reset();
+            document.getElementById('extractedData').classList.remove('visible');
+        }
+    </script>
+</body>
+</html>
