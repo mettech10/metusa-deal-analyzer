@@ -93,8 +93,11 @@ export async function POST(req: Request) {
     }
 
     // Step 2: Send scraped data to AI analysis
+    // Note: scrapedData has {data: {...}, success: true} structure from /extract-url
+    const propertyPayload = scrapedData.data || scrapedData
     console.log("[v0] FLASK PROXY: Step 2 - AI analysis via /ai-analyze")
-    const aiRes = await sendToFlask("/ai-analyze", { ...scrapedData, url })
+    console.log("[v0] FLASK PROXY: Sending property data:", propertyPayload)
+    const aiRes = await sendToFlask("/ai-analyze", { ...propertyPayload, url })
 
     if (!aiRes.ok) {
       return aiRes
