@@ -2,20 +2,12 @@ export async function POST(req: Request) {
   const body = await req.json()
   const { mode } = body
 
-  const flaskUrl = process.env.FLASK_API_URL
+  const flaskUrl =
+    process.env.FLASK_API_URL || "https://metusa-deal-analyzer.onrender.com"
 
   console.log("[v0] Flask API URL:", flaskUrl)
   console.log("[v0] Request mode:", mode)
-
-  if (!flaskUrl) {
-    return Response.json(
-      {
-        error:
-          "Flask API URL is not configured. Please set FLASK_API_URL in environment variables.",
-      },
-      { status: 500 }
-    )
-  }
+  console.log("[v0] FLASK_API_URL env set:", !!process.env.FLASK_API_URL)
 
   // Build the full endpoint URLs for each Flask route
   const baseUrl = flaskUrl.replace(/\/+$/, "")
