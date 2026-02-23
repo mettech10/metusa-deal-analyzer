@@ -34,12 +34,9 @@ class ScraplingPropertyExtractor:
         self.scraper = None
         if SCRAPLING_AVAILABLE:
             try:
-                # Initialize Scrapling Fetcher with stealth mode
-                self.scraper = Fetcher(
-                    stealth=True,  # Bypass anti-bot measures
-                    auto_match=True  # Adaptive parsing
-                )
-                print("[Scraper] Scrapling Fetcher initialized with stealth mode")
+                # Initialize Scrapling Fetcher
+                self.scraper = Fetcher()
+                print("[Scraper] Scrapling Fetcher initialized")
             except Exception as e:
                 print(f"[Scraper] Failed to initialize Scrapling: {e}")
                 self.scraper = None
@@ -155,14 +152,48 @@ class ScraplingPropertyExtractor:
                     except:
                         continue
         
-        # Postcode extraction with validation
+        # Postcode extraction with better validation
         all_postcodes = re.findall(r'([A-Z]{1,2}[\d][A-Z\d]?\s?[\d][A-Z]{2})', html)
-        valid_postcodes = [pc for pc in set(all_postcodes) 
-                          if len(pc.replace(' ', '')) >= 5 
-                          and pc[0] not in 'QVXZ']
         
-        if valid_postcodes:
-            data['postcode'] = valid_postcodes[0]
+        # Filter valid UK postcodes
+        valid_postcodes = []
+        for pc in set(all_postcodes):
+            pc_clean = pc.replace(' ', '')
+            # UK postcode rules
+            if len(pc_clean) < 5 or len(pc_clean) > 8:
+                continue
+            if pc_clean[0] in 'QVXZ':  # Invalid first letters
+                continue
+            if pc_clean[1] in 'IJZ' and len(pc_clean) == 5:  # Invalid second letters for short codes
+                continue
+            # Check format looks real (not like D03DM which has 0 in wrong place)
+            if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$', pc):
+                valid_postcodes.append(pc)
+        
+        # Try to find postcode near address
+        if data.get('address'):
+            # Look for postcode pattern in title near address
+            title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+            if title_match:
+                title = title_match.group(1)
+                # Extract area code from title (e.g., "M45" from "Whitefield, M45")
+                area_match = re.search(r'([A-Z]{1,2}\d{1,2})[A-Z]?\s*$', title)
+                if area_match:
+                    area_code = area_match.group(1)
+                    for pc in valid_postcodes:
+                        if pc.replace(' ', '').startswith(area_code):
+                            data['postcode'] = pc
+                            break
+        
+        # Fallback to first valid postcode
+        if not data.get('postcode') and valid_postcodes:
+            # Prefer postcodes that look most real
+            for pc in valid_postcodes:
+                if re.match(r'^[A-Z]{1,2}\d[A-Z]?\s\d[A-Z]{2}$', pc):  # Standard format
+                    data['postcode'] = pc
+                    break
+            if not data.get('postcode'):
+                data['postcode'] = valid_postcodes[0]
         
         # Bedrooms
         match = re.search(r'(\d+)\s*bed', text, re.IGNORECASE)
