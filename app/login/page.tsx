@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, Suspense } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -37,7 +37,7 @@ function GoogleIcon() {
   )
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const searchParams = useSearchParams()
   const authError = searchParams.get("error")
 
@@ -332,5 +332,26 @@ export default function LoginPage() {
         </div>
       </main>
     </div>
+  )
+}
+
+// Loading fallback for Suspense
+function LoginLoading() {
+  return (
+    <div className="flex min-h-screen flex-col bg-background items-center justify-center">
+      <div className="flex items-center gap-2">
+        <Loader2 className="size-6 animate-spin text-primary" />
+        <span className="text-muted-foreground">Loading...</span>
+      </div>
+    </div>
+  )
+}
+
+// Main page component wrapped in Suspense
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginLoading />}>
+      <LoginForm />
+    </Suspense>
   )
 }
