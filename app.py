@@ -835,10 +835,16 @@ def analyze():
             return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
         
         # Security: Validate required fields
-        required = ['address', 'postcode', 'dealType', 'purchasePrice', 'monthlyRent']
+        required = ['address', 'postcode', 'dealType', 'purchasePrice']
         for field in required:
-            if field not in data or not data[field]:
+            if field not in data:
                 return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        # Estimate monthly rent if not provided (based on purchase price as proxy)
+        if not data.get('monthlyRent') or data['monthlyRent'] == 0:
+            # Rough estimate: 0.5% of purchase price per month
+            data['monthlyRent'] = int(data['purchasePrice'] * 0.005)
+            app.logger.info(f"Estimated monthly rent: £{data['monthlyRent']} for price £{data['purchasePrice']}")
         
         # Security: Check payload size
         if len(str(data)) > 10000:  # Max 10KB
@@ -1372,10 +1378,15 @@ def ai_analyze():
             return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
         
         # Validate required fields
-        required = ['address', 'postcode', 'dealType', 'purchasePrice', 'monthlyRent']
+        required = ['address', 'postcode', 'dealType', 'purchasePrice']
         for field in required:
-            if field not in data or not data[field]:
+            if field not in data:
                 return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        # Estimate monthly rent if not provided
+        if not data.get('monthlyRent') or data['monthlyRent'] == 0:
+            data['monthlyRent'] = int(data['purchasePrice'] * 0.005)
+            app.logger.info(f"Estimated monthly rent: £{data['monthlyRent']}")
         
         # Step 1: Calculate financial metrics
         calculated_metrics = analyze_deal(data)
@@ -1814,4 +1825,5 @@ def get_uk_transport_summary():
 if __name__ == '__main__':
     # Security: Don't run with debug in production
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    app.run(debug=debug_mode, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', os.environ.get('FLASK_PORT', 5002)))
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
