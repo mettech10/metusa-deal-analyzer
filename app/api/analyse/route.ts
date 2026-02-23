@@ -1,68 +1,26 @@
+// DealCheck UK - Flask Backend Proxy (Render deployment)
+// Endpoints: /extract-url (scrape), /ai-analyze (AI analysis)
+// Updated: 2026-02-23
+
+const FLASK_BASE =
+  process.env.FLASK_API_URL?.replace(/\/+$/, "") ||
+  "https://metusa-deal-analyzer.onrender.com"
+
 export async function POST(req: Request) {
   const body = await req.json()
   const { mode } = body
 
-  const flaskUrl =
-    process.env.FLASK_API_URL || "https://metusa-deal-analyzer.onrender.com"
+  console.log("[v0] === NEW Flask API Route ===")
+  console.log("[v0] FLASK_BASE:", FLASK_BASE)
+  console.log("[v0] FLASK_API_URL env:", process.env.FLASK_API_URL)
+  console.log("[v0] Mode:", mode)
 
-  console.log("[v0] Flask API URL:", flaskUrl)
-  console.log("[v0] Request mode:", mode)
-  console.log("[v0] FLASK_API_URL env set:", !!process.env.FLASK_API_URL)
-
-  // Build the full endpoint URLs for each Flask route
-  const baseUrl = flaskUrl.replace(/\/+$/, "")
-  const extractUrlEndpoint = `${baseUrl}/extract-url`
-  const aiAnalyzeEndpoint = `${baseUrl}/ai-analyze`
-
-  console.log("[v0] Flask base URL:", baseUrl)
-  console.log("[v0] Extract URL endpoint:", extractUrlEndpoint)
-  console.log("[v0] AI Analyze endpoint:", aiAnalyzeEndpoint)
-
-  // ── URL Mode: First scrape the URL, then run AI analysis ─────────
   if (mode === "url") {
-    const { url } = body
-
-    if (!url || typeof url !== "string") {
-      return Response.json(
-        { error: "A valid property listing URL is required." },
-        { status: 400 }
-      )
-    }
-
-    // Step 1: Scrape the property listing URL
-    console.log("[v0] Step 1: Scraping URL via /extract-url")
-    const scrapeResult = await callFlaskAPI(extractUrlEndpoint, { url })
-
-    if (scrapeResult.status !== 200) {
-      return scrapeResult
-    }
-
-    // Step 2: Send scraped data to AI analysis
-    const scrapedData = await scrapeResult.json()
-    console.log("[v0] Scraped data keys:", Object.keys(scrapedData))
-
-    console.log("[v0] Step 2: Sending to /ai-analyze")
-    return await callFlaskAPI(aiAnalyzeEndpoint, {
-      ...scrapedData,
-      url,
-    })
+    return handleUrlMode(body)
   }
 
-  // ── Manual Mode: Send property data directly to AI analysis ──────
   if (mode === "manual") {
-    const { propertyData, calculationResults } = body
-
-    if (!propertyData || !calculationResults) {
-      return Response.json(
-        { error: "Property data and calculation results are required." },
-        { status: 400 }
-      )
-    }
-
-    return await callFlaskAPI(aiAnalyzeEndpoint, {
-      propertyData,
-      calculationResults,
-    })
+    return handleManualMode(body)
   }
 
   return Response.json(
@@ -71,104 +29,147 @@ export async function POST(req: Request) {
   )
 }
 
-// ── Shared function to call your Flask backend on Render ───────────
-async function callFlaskAPI(
+// ── URL Mode: scrape via /extract-url then analyse via /ai-analyze ──
+async function handleUrlMode(body: { url?: string }) {
+  const { url } = body
+
+  if (!url || typeof url !== "string") {
+    return Response.json(
+      { error: "A valid property listing URL is required." },
+      { status: 400 }
+    )
+  }
+
+  // Step 1: Scrape the listing
+  const extractUrl = `${FLASK_BASE}/extract-url`
+  console.log("[v0] Step 1 - Scraping:", extractUrl)
+
+  const scrapeRes = await safeFetch(extractUrl, { url })
+  if (scrapeRes.error) {
+    return Response.json({ error: scrapeRes.error }, { status: scrapeRes.status })
+  }
+
+  console.log("[v0] Scrape response keys:", Object.keys(scrapeRes.data))
+
+  // Step 2: Send scraped data to AI analysis
+  const analyzeUrl = `${FLASK_BASE}/ai-analyze`
+  console.log("[v0] Step 2 - Analysing:", analyzeUrl)
+
+  const analyzeRes = await safeFetch(analyzeUrl, {
+    ...scrapeRes.data,
+    url,
+  })
+  if (analyzeRes.error) {
+    return Response.json({ error: analyzeRes.error }, { status: analyzeRes.status })
+  }
+
+  console.log("[v0] Analyze response keys:", Object.keys(analyzeRes.data))
+  return Response.json(normalizeResponse(analyzeRes.data))
+}
+
+// ── Manual Mode: send property data directly to /ai-analyze ─────────
+async function handleManualMode(body: {
+  propertyData?: unknown
+  calculationResults?: unknown
+}) {
+  const { propertyData, calculationResults } = body
+
+  if (!propertyData || !calculationResults) {
+    return Response.json(
+      { error: "Property data and calculation results are required." },
+      { status: 400 }
+    )
+  }
+
+  const analyzeUrl = `${FLASK_BASE}/ai-analyze`
+  console.log("[v0] Manual mode - Analysing:", analyzeUrl)
+
+  const analyzeRes = await safeFetch(analyzeUrl, {
+    propertyData,
+    calculationResults,
+  })
+  if (analyzeRes.error) {
+    return Response.json({ error: analyzeRes.error }, { status: analyzeRes.status })
+  }
+
+  console.log("[v0] Manual analyze response keys:", Object.keys(analyzeRes.data))
+  return Response.json(normalizeResponse(analyzeRes.data))
+}
+
+// ── Safe fetch wrapper with timeout + error handling ────────────────
+async function safeFetch(
   url: string,
   payload: Record<string, unknown>
-) {
+): Promise<
+  | { data: Record<string, unknown>; error?: never; status?: never }
+  | { error: string; status: number; data?: never }
+> {
   try {
     const controller = new AbortController()
-    // Render free tier can be slow to wake up -- give it 120 seconds
-    const timeout = setTimeout(() => controller.abort(), 120000)
+    const timeout = setTimeout(() => controller.abort(), 120_000)
 
-    console.log("[v0] Sending to Flask:", url)
-    console.log("[v0] Payload keys:", Object.keys(payload))
+    console.log("[v0] Fetching:", url)
 
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
 
     clearTimeout(timeout)
 
-    console.log("[v0] Flask response status:", res.status)
-    console.log(
-      "[v0] Flask response content-type:",
-      res.headers.get("content-type")
-    )
+    console.log("[v0] Response status:", res.status)
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error")
-      console.error("[v0] Flask error body:", errText)
-      return Response.json(
-        {
-          error: `Backend returned ${res.status}: ${errText}`,
-        },
-        { status: res.status }
-      )
+      console.error("[v0] Error body:", errText)
+      return { error: `Backend error (${res.status}): ${errText}`, status: res.status }
     }
 
-    const contentType = res.headers.get("content-type") || ""
-
-    // If Flask streams text, pass it through
-    if (
-      contentType.includes("text/event-stream") ||
-      contentType.includes("text/plain")
-    ) {
-      return new Response(res.body, {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "no-cache",
-        },
-      })
-    }
-
-    // JSON response from Flask
     const data = await res.json()
-    console.log("[v0] Flask response keys:", Object.keys(data))
-
-    // Extract analysis text from whatever shape Flask returns
-    const analysisText =
-      data.aiAnalysis ||
-      data.analysis ||
-      data.result ||
-      data.response ||
-      data.text ||
-      data.content ||
-      data.message ||
-      data.output ||
-      (typeof data === "string" ? data : "")
-
-    // If Flask returns property data too, forward it
-    const responsePayload: Record<string, unknown> = {
-      aiAnalysis:
-        typeof analysisText === "string"
-          ? analysisText
-          : JSON.stringify(analysisText, null, 2),
-    }
-
-    if (data.propertyData) {
-      responsePayload.propertyData = data.propertyData
-    }
-    if (data.calculationResults) {
-      responsePayload.calculationResults = data.calculationResults
-    }
-
-    return Response.json(responsePayload)
+    return { data }
   } catch (err) {
-    console.error("[v0] Flask fetch error:", err)
+    console.error("[v0] Fetch failed:", err)
 
-    const message =
-      err instanceof Error && err.name === "AbortError"
-        ? "Request timed out after 120 seconds. Your Render service may be starting up (free tier cold start). Please try again in a moment."
-        : err instanceof Error
-          ? `Failed to connect to backend: ${err.message}`
-          : "Failed to connect to backend. Please check your API configuration."
+    if (err instanceof Error && err.name === "AbortError") {
+      return {
+        error:
+          "Request timed out (120s). Your Render service may be waking up from sleep. Please try again in 30 seconds.",
+        status: 504,
+      }
+    }
 
-    return Response.json({ error: message }, { status: 502 })
+    return {
+      error:
+        err instanceof Error
+          ? `Connection failed: ${err.message}`
+          : "Failed to connect to backend.",
+      status: 502,
+    }
   }
+}
+
+// ── Normalize Flask response into { aiAnalysis: string } shape ──────
+function normalizeResponse(data: Record<string, unknown>) {
+  const text =
+    data.aiAnalysis ||
+    data.analysis ||
+    data.result ||
+    data.response ||
+    data.text ||
+    data.content ||
+    data.message ||
+    data.output ||
+    ""
+
+  const result: Record<string, unknown> = {
+    aiAnalysis:
+      typeof text === "string" ? text : JSON.stringify(text, null, 2),
+  }
+
+  if (data.propertyData) result.propertyData = data.propertyData
+  if (data.calculationResults) result.calculationResults = data.calculationResults
+
+  return result
 }

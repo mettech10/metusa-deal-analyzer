@@ -29,7 +29,7 @@ export default function AnalysePage() {
   const [aiText, setAiText] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
 
-  // Call the OpenClaw proxy API and handle the response
+  // Call the Flask backend API and handle the response
   const callAnalysisAPI = useCallback(
     async (body: Record<string, unknown>) => {
       setAiText("")
@@ -51,7 +51,7 @@ export default function AnalysePage() {
 
         const contentType = res.headers.get("content-type") || ""
 
-        // Handle streaming text response from OpenClaw
+        // Handle streaming text response
         if (
           contentType.includes("text/event-stream") ||
           contentType.includes("text/plain")
@@ -73,7 +73,7 @@ export default function AnalysePage() {
         // Handle JSON response
         const data = await res.json()
 
-        // If OpenClaw returns structured property data, use it for charts
+        // If backend returns structured property data, use it for charts
         if (data.propertyData) {
           setFormData(data.propertyData)
           if (data.calculationResults) {
@@ -98,7 +98,7 @@ export default function AnalysePage() {
     []
   )
 
-  // Manual form submission -- runs local calculations then sends to OpenClaw
+  // Manual form submission -- runs local calculations then sends to backend
   const handleManualSubmit = useCallback(
     async (data: PropertyFormData) => {
       setError(null)
@@ -128,7 +128,7 @@ export default function AnalysePage() {
     [callAnalysisAPI]
   )
 
-  // URL-based submission -- sends URL to OpenClaw for scraping + analysis
+  // URL-based submission -- sends URL to Flask backend for scraping + analysis
   const handleUrlSubmit = useCallback(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault()
@@ -373,7 +373,7 @@ export default function AnalysePage() {
                 aiLoading={aiLoading}
               />
             ) : (
-              /* URL mode -- AI text only (no structured data from OpenClaw) */
+              /* URL mode -- AI text only (no structured data from backend) */
               <div className="rounded-xl border border-primary/20 bg-card p-6">
                 <div className="mb-4 flex items-center gap-2">
                   <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
