@@ -68,14 +68,37 @@ class PlaywrightPropertyScraper:
                 data['property_type'] = 'Semi-Detached' if ptype == 'semi' else ptype.title()
                 break
         
-        # Address from title
-        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-        if title_match:
-            title = title_match.group(1)
-            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
-            match = re.search(r'for sale\s+(?:in|at)\s+(.+?)(?:,\s*[A-Z]|$)', title, re.IGNORECASE)
-            if match:
-                data['address'] = match.group(1).strip()
+        # Address extraction - site specific
+        is_zoopla = 'zoopla' in url.lower()
+        
+        if is_zoopla:
+            # Zoopla-specific patterns
+            # Try h1 tag first (Zoopla puts address there)
+            h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL | re.IGNORECASE)
+            if h1_match:
+                h1_text = re.sub(r'<[^>]+>', '', h1_match.group(1))
+                h1_text = re.sub(r'\s+', ' ', h1_text).strip()
+                # Clean up - remove "for sale" and price
+                h1_text = re.sub(r'for sale', '', h1_text, flags=re.IGNORECASE)
+                h1_text = re.sub(r'£[\d,]+', '', h1_text)
+                if len(h1_text) > 10:
+                    data['address'] = h1_text.strip(' -,')
+            
+            # Fallback: look for address in JSON-LD or meta
+            if not data['address']:
+                addr_match = re.search(r'"streetAddress"\s*:\s*"([^"]+)"', html)
+                if addr_match:
+                    data['address'] = addr_match.group(1)
+        
+        else:
+            # Rightmove/OTM pattern - from title
+            title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+            if title_match:
+                title = title_match.group(1)
+                title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
+                match = re.search(r'for sale\s+(?:in|at)\s+(.+?)(?:,\s*[A-Z]|$)', title, re.IGNORECASE)
+                if match:
+                    data['address'] = match.group(1).strip()
         
         return data
     
@@ -120,11 +143,17 @@ class PlaywrightPropertyScraper:
                 
                 page = context.new_page()
                 
-                # Navigate with timeout
-                page.goto(url, wait_until='networkidle', timeout=20000)
+                # Navigate with timeout (increased for Zoopla)
+                page.goto(url, wait_until='domcontentloaded', timeout=30000)
                 
                 # Wait for content to load
                 page.wait_for_timeout(wait_time * 1000)
+                
+                # Additional wait for dynamic content
+                try:
+                    page.wait_for_load_state('networkidle', timeout=10000)
+                except:
+                    pass  # Continue even if networkidle doesn't complete
                 
                 # Get page content
                 html = page.content()
