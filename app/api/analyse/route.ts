@@ -17,13 +17,16 @@ export async function POST(req: Request) {
     )
   }
 
-  // Build the full endpoint URL
+  // Build the full endpoint URLs for each Flask route
   const baseUrl = flaskUrl.replace(/\/+$/, "")
-  const analyzeUrl = `${baseUrl}/api/analyze`
+  const extractUrlEndpoint = `${baseUrl}/extract-url`
+  const aiAnalyzeEndpoint = `${baseUrl}/ai-analyze`
 
-  console.log("[v0] Full endpoint URL:", analyzeUrl)
+  console.log("[v0] Flask base URL:", baseUrl)
+  console.log("[v0] Extract URL endpoint:", extractUrlEndpoint)
+  console.log("[v0] AI Analyze endpoint:", aiAnalyzeEndpoint)
 
-  // ── URL Mode: Send listing URL to Flask backend ──────────────────
+  // ── URL Mode: First scrape the URL, then run AI analysis ─────────
   if (mode === "url") {
     const { url } = body
 
@@ -34,13 +37,26 @@ export async function POST(req: Request) {
       )
     }
 
-    return await callFlaskAPI(analyzeUrl, {
-      mode: "url",
+    // Step 1: Scrape the property listing URL
+    console.log("[v0] Step 1: Scraping URL via /extract-url")
+    const scrapeResult = await callFlaskAPI(extractUrlEndpoint, { url })
+
+    if (scrapeResult.status !== 200) {
+      return scrapeResult
+    }
+
+    // Step 2: Send scraped data to AI analysis
+    const scrapedData = await scrapeResult.json()
+    console.log("[v0] Scraped data keys:", Object.keys(scrapedData))
+
+    console.log("[v0] Step 2: Sending to /ai-analyze")
+    return await callFlaskAPI(aiAnalyzeEndpoint, {
+      ...scrapedData,
       url,
     })
   }
 
-  // ── Manual Mode: Send property data + calculations ───────────────
+  // ── Manual Mode: Send property data directly to AI analysis ──────
   if (mode === "manual") {
     const { propertyData, calculationResults } = body
 
@@ -51,8 +67,7 @@ export async function POST(req: Request) {
       )
     }
 
-    return await callFlaskAPI(analyzeUrl, {
-      mode: "manual",
+    return await callFlaskAPI(aiAnalyzeEndpoint, {
       propertyData,
       calculationResults,
     })
