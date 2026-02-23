@@ -83,17 +83,14 @@ export default function AnalysePage() {
           }
         }
 
-        // Extract AI analysis text from various possible response shapes
-        const analysis =
-          data.aiAnalysis ||
-          data.analysis ||
-          data.text ||
-          data.response ||
-          data.content ||
-          data.message ||
-          (typeof data === "string" ? data : JSON.stringify(data, null, 2))
+        // Extract AI analysis text -- our API returns { aiAnalysis: "..." }
+        const analysis = data.aiAnalysis || ""
 
-        setAiText(analysis)
+        if (analysis) {
+          setAiText(analysis)
+        } else {
+          setAiText("Analysis complete but no text was returned. Please try again.")
+        }
       } finally {
         setAiLoading(false)
       }
