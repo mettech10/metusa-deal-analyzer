@@ -2,7 +2,7 @@
 cmds = ["pip install -r requirements.txt"]
 
 [phases.setup]
-nixPkgs = ["python311", "wkhtmltopdf"]
+nixPkgs = ["python311"]
 
 [start]
-cmd = "gunicorn app:app --bind 0.0.0.0:$PORT"
+cmd = "python3 -m gunicorn app:app --bind 0.0.0.0:$PORT"
