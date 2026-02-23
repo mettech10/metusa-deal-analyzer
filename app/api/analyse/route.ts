@@ -1,115 +1,21 @@
-// DealCheck UK - Flask Backend Proxy (Render deployment)
-// Endpoints: /extract-url (scrape), /ai-analyze (AI analysis)
-// Updated: 2026-02-23
+// Flask Backend Proxy - connects to Render-deployed Flask API
+// Endpoints: /extract-url (scraping) and /ai-analyze (AI analysis)
+// Last updated: force cache bust v2
 
-const FLASK_BASE =
-  process.env.FLASK_API_URL?.replace(/\/+$/, "") ||
-  "https://metusa-deal-analyzer.onrender.com"
+const RENDER_URL = "https://metusa-deal-analyzer.onrender.com"
 
-export async function POST(req: Request) {
-  const body = await req.json()
-  const { mode } = body
-
-  console.log("[v0] === NEW Flask API Route ===")
-  console.log("[v0] FLASK_BASE:", FLASK_BASE)
-  console.log("[v0] FLASK_API_URL env:", process.env.FLASK_API_URL)
-  console.log("[v0] Mode:", mode)
-
-  if (mode === "url") {
-    return handleUrlMode(body)
-  }
-
-  if (mode === "manual") {
-    return handleManualMode(body)
-  }
-
-  return Response.json(
-    { error: "Invalid mode. Use 'url' or 'manual'." },
-    { status: 400 }
-  )
-}
-
-// ── URL Mode: scrape via /extract-url then analyse via /ai-analyze ──
-async function handleUrlMode(body: { url?: string }) {
-  const { url } = body
-
-  if (!url || typeof url !== "string") {
-    return Response.json(
-      { error: "A valid property listing URL is required." },
-      { status: 400 }
-    )
-  }
-
-  // Step 1: Scrape the listing
-  const extractUrl = `${FLASK_BASE}/extract-url`
-  console.log("[v0] Step 1 - Scraping:", extractUrl)
-
-  const scrapeRes = await safeFetch(extractUrl, { url })
-  if (scrapeRes.error) {
-    return Response.json({ error: scrapeRes.error }, { status: scrapeRes.status })
-  }
-
-  console.log("[v0] Scrape response keys:", Object.keys(scrapeRes.data))
-
-  // Step 2: Send scraped data to AI analysis
-  const analyzeUrl = `${FLASK_BASE}/ai-analyze`
-  console.log("[v0] Step 2 - Analysing:", analyzeUrl)
-
-  const analyzeRes = await safeFetch(analyzeUrl, {
-    ...scrapeRes.data,
-    url,
-  })
-  if (analyzeRes.error) {
-    return Response.json({ error: analyzeRes.error }, { status: analyzeRes.status })
-  }
-
-  console.log("[v0] Analyze response keys:", Object.keys(analyzeRes.data))
-  return Response.json(normalizeResponse(analyzeRes.data))
-}
-
-// ── Manual Mode: send property data directly to /ai-analyze ─────────
-async function handleManualMode(body: {
-  propertyData?: unknown
-  calculationResults?: unknown
-}) {
-  const { propertyData, calculationResults } = body
-
-  if (!propertyData || !calculationResults) {
-    return Response.json(
-      { error: "Property data and calculation results are required." },
-      { status: 400 }
-    )
-  }
-
-  const analyzeUrl = `${FLASK_BASE}/ai-analyze`
-  console.log("[v0] Manual mode - Analysing:", analyzeUrl)
-
-  const analyzeRes = await safeFetch(analyzeUrl, {
-    propertyData,
-    calculationResults,
-  })
-  if (analyzeRes.error) {
-    return Response.json({ error: analyzeRes.error }, { status: analyzeRes.status })
-  }
-
-  console.log("[v0] Manual analyze response keys:", Object.keys(analyzeRes.data))
-  return Response.json(normalizeResponse(analyzeRes.data))
-}
-
-// ── Safe fetch wrapper with timeout + error handling ────────────────
-async function safeFetch(
-  url: string,
+async function sendToFlask(
+  endpoint: string,
   payload: Record<string, unknown>
-): Promise<
-  | { data: Record<string, unknown>; error?: never; status?: never }
-  | { error: string; status: number; data?: never }
-> {
+): Promise<Response> {
+  const url = `${RENDER_URL}${endpoint}`
+  console.log("[v0] FLASK PROXY: Sending to", url)
+  console.log("[v0] FLASK PROXY: Payload keys:", Object.keys(payload))
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 120000)
+
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 120_000)
-
-    console.log("[v0] Fetching:", url)
-
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -119,57 +25,119 @@ async function safeFetch(
 
     clearTimeout(timeout)
 
-    console.log("[v0] Response status:", res.status)
+    console.log("[v0] FLASK PROXY: Response status:", res.status)
+    console.log("[v0] FLASK PROXY: Response content-type:", res.headers.get("content-type"))
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error")
-      console.error("[v0] Error body:", errText)
-      return { error: `Backend error (${res.status}): ${errText}`, status: res.status }
+      console.error("[v0] FLASK PROXY: Error response body:", errText)
+      return Response.json(
+        { error: `Backend error (${res.status}): ${errText}` },
+        { status: res.status }
+      )
     }
 
-    const data = await res.json()
-    return { data }
+    return res
   } catch (err) {
-    console.error("[v0] Fetch failed:", err)
+    clearTimeout(timeout)
+    console.error("[v0] FLASK PROXY: Fetch exception:", err)
 
     if (err instanceof Error && err.name === "AbortError") {
-      return {
-        error:
-          "Request timed out (120s). Your Render service may be waking up from sleep. Please try again in 30 seconds.",
-        status: 504,
-      }
+      return Response.json(
+        { error: "Request timed out after 120s. Your Render service may be starting up (cold start). Please try again in 30 seconds." },
+        { status: 504 }
+      )
     }
 
-    return {
-      error:
-        err instanceof Error
-          ? `Connection failed: ${err.message}`
-          : "Failed to connect to backend.",
-      status: 502,
-    }
+    return Response.json(
+      { error: err instanceof Error ? `Connection failed: ${err.message}` : "Connection failed" },
+      { status: 502 }
+    )
   }
 }
 
-// ── Normalize Flask response into { aiAnalysis: string } shape ──────
-function normalizeResponse(data: Record<string, unknown>) {
-  const text =
-    data.aiAnalysis ||
-    data.analysis ||
-    data.result ||
-    data.response ||
-    data.text ||
-    data.content ||
-    data.message ||
-    data.output ||
-    ""
+export async function POST(req: Request) {
+  console.log("[v0] ========== FLASK PROXY ROUTE HIT ==========")
 
-  const result: Record<string, unknown> = {
-    aiAnalysis:
-      typeof text === "string" ? text : JSON.stringify(text, null, 2),
+  const body = await req.json()
+  const { mode } = body
+
+  console.log("[v0] FLASK PROXY: mode =", mode)
+  console.log("[v0] FLASK PROXY: Using Render URL:", RENDER_URL)
+
+  // ── URL Mode ─────────────────────────────────────────────────────
+  if (mode === "url") {
+    const { url } = body
+
+    if (!url || typeof url !== "string") {
+      return Response.json({ error: "A property listing URL is required." }, { status: 400 })
+    }
+
+    // Step 1: Scrape the listing URL
+    console.log("[v0] FLASK PROXY: Step 1 - Scraping URL via /extract-url")
+    const scrapeRes = await sendToFlask("/extract-url", { url })
+
+    if (!scrapeRes.ok) {
+      return scrapeRes
+    }
+
+    let scrapedData: Record<string, unknown>
+    try {
+      scrapedData = await scrapeRes.json()
+      console.log("[v0] FLASK PROXY: Scraped data keys:", Object.keys(scrapedData))
+    } catch {
+      return Response.json(
+        { error: "Failed to parse scraped data from backend." },
+        { status: 502 }
+      )
+    }
+
+    // Step 2: Send scraped data to AI analysis
+    console.log("[v0] FLASK PROXY: Step 2 - AI analysis via /ai-analyze")
+    const aiRes = await sendToFlask("/ai-analyze", { ...scrapedData, url })
+
+    if (!aiRes.ok) {
+      return aiRes
+    }
+
+    try {
+      const aiData = await aiRes.json()
+      console.log("[v0] FLASK PROXY: AI response keys:", Object.keys(aiData))
+      return Response.json({ aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData) })
+    } catch {
+      // Maybe it's plain text
+      const text = await aiRes.text()
+      return Response.json({ aiAnalysis: text })
+    }
   }
 
-  if (data.propertyData) result.propertyData = data.propertyData
-  if (data.calculationResults) result.calculationResults = data.calculationResults
+  // ── Manual Mode ──────────────────────────────────────────────────
+  if (mode === "manual") {
+    const { propertyData, calculationResults } = body
 
-  return result
+    if (!propertyData || !calculationResults) {
+      return Response.json(
+        { error: "Property data and calculation results are required." },
+        { status: 400 }
+      )
+    }
+
+    console.log("[v0] FLASK PROXY: Manual mode - sending to /ai-analyze")
+    const aiRes = await sendToFlask("/ai-analyze", { propertyData, calculationResults })
+
+    if (!aiRes.ok) {
+      return aiRes
+    }
+
+    try {
+      const aiData = await aiRes.json()
+      console.log("[v0] FLASK PROXY: AI response keys:", Object.keys(aiData))
+      return Response.json({ aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData) })
+    } catch {
+      const text = await aiRes.text()
+      return Response.json({ aiAnalysis: text })
+    }
+  }
+
+  return Response.json({ error: "Invalid mode. Use 'url' or 'manual'." }, { status: 400 })
 }
