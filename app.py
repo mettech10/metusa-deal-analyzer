@@ -12,6 +12,19 @@ import secrets
 import re
 from html import escape
 
+# Import Land Registry API
+from land_registry import land_registry
+
+# Import PropertyData API (premium data)
+from property_data import property_data, get_market_context as get_propertydata_context
+
+# Import Transport APIs
+from transport_api import transport_api, get_transport_context  # TfL (London)
+from national_rail import national_rail, get_national_rail_context  # UK-wide
+
+# Import Adaptive Web Scraper (Scrapling-style)
+from adaptive_scraper import extract_property_from_url
+
 # Security: Input validation functions
 def validate_postcode(postcode):
     """Validate UK postcode format"""
@@ -934,20 +947,30 @@ def server_error_handler(e):
 # URL EXTRACTION & AI ANALYSIS ENDPOINTS
 # ============================================================================
 
-def extract_property_from_url(url):
+# NOTE: This function is DEPRECATED - using adaptive_scraper.extract_property_from_url instead
+# Keeping for reference but imported version from adaptive_scraper.py is used
+def _extract_property_from_url_old(url):
     """
+    [DEPRECATED] Old extraction method - see adaptive_scraper.py for current implementation
     Extract property details from a URL using web scraping
     Supports: Rightmove, Zoopla, OnTheMarket
+    Uses multiple extraction methods for robustness
     """
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-GB,en;q=0.5',
+            'Referer': 'https://www.google.com/'
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         html = response.text
+        text = re.sub(r'<[^>]+>', ' ', html)  # Strip HTML tags
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+        
         data = {
             'address': None,
             'postcode': None,
@@ -957,61 +980,184 @@ def extract_property_from_url(url):
             'description': None
         }
         
-        # Rightmove extraction
-        if 'rightmove.co.uk' in url:
-            # Extract address
-            address_match = re.search(r'<h1[^>]*class="[^"]*property-header[^"]*"[^>]*>(.*?)</h1>', html, re.DOTALL)
-            if address_match:
-                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
-                # Try to extract postcode from address
-                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
-                if postcode_match:
-                    data['postcode'] = postcode_match.group(1)
-            
-            # Extract price
-            price_match = re.search(r'&pound;([0-9,]+)', html)
-            if price_match:
-                data['price'] = int(price_match.group(1).replace(',', ''))
-            
-            # Extract property type
-            type_match = re.search(r'(Semi-Detached|Detached|Terraced|Flat|Apartment|Bungalow)', html, re.IGNORECASE)
-            if type_match:
-                data['property_type'] = type_match.group(1)
+        # Universal extraction methods (work for all sites)
         
-        # Zoopla extraction
+        # 1. Extract price - look for £ patterns
+        price_patterns = [
+            r'£([0-9,]+)',
+            r'&pound;([0-9,]+)',
+            r'Guide Price[\s:]*£([0-9,]+)',
+            r'Offers in Excess of[\s:]*£([0-9,]+)',
+            r'Asking Price[\s:]*£([0-9,]+)'
+        ]
+        for pattern in price_patterns:
+            price_match = re.search(pattern, html, re.IGNORECASE)
+            if price_match:
+                price_str = price_match.group(1).replace(',', '')
+                try:
+                    data['price'] = int(price_str)
+                    break
+                except ValueError:
+                    continue
+        
+        # 2. Extract postcode - UK postcode regex
+        # Rightmove includes fake postcodes, so we need to be smart about this
+        all_postcodes = re.findall(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', html)
+        
+        if all_postcodes:
+            # Filter for likely real postcodes (not random strings)
+            # UK postcodes don't have certain patterns like I, Q, V, X, Z in certain positions
+            valid_postcodes = []
+            for pc in set(all_postcodes):
+                # Basic validation - UK postcodes follow specific patterns
+                # Remove spaces for validation
+                pc_clean = pc.replace(' ', '')
+                if len(pc_clean) >= 5 and len(pc_clean) <= 7:
+                    # Check first letter is valid (not Q, V, X, Z)
+                    if pc_clean[0] not in 'QVXZ':
+                        valid_postcodes.append(pc)
+            
+            # If we have the address area (e.g., "Whitefield, M45"), try to match
+            if data.get('address'):
+                area_match = re.search(r'([A-Z]{1,2}[0-9]{1,2})', data['address'])
+                if area_match:
+                    area_code = area_match.group(1)
+                    # Find postcode that starts with this area
+                    for pc in valid_postcodes:
+                        if pc.replace(' ', '').startswith(area_code):
+                            data['postcode'] = pc
+                            break
+            
+            # If still no postcode, use the first valid one
+            if not data['postcode'] and valid_postcodes:
+                data['postcode'] = valid_postcodes[0]
+        
+        # 3. Extract bedrooms - look for bedroom patterns
+        bedroom_patterns = [
+            r'(\d+)\s*bedroom',
+            r'(\d+)\s*bed',
+            r'(\d+)\s*br',
+            r'(\d+)\s*beds'
+        ]
+        for pattern in bedroom_patterns:
+            bed_match = re.search(pattern, text, re.IGNORECASE)
+            if bed_match:
+                try:
+                    data['bedrooms'] = int(bed_match.group(1))
+                    break
+                except ValueError:
+                    continue
+        
+        # 4. Extract property type
+        property_types = [
+            'detached', 'semi-detached', 'semi', 'terraced', 'end terrace',
+            'flat', 'apartment', 'studio', 'bungalow', 'maisonette',
+            'townhouse', 'cottage', 'link-detached'
+        ]
+        for ptype in property_types:
+            if re.search(r'\b' + ptype + r'\b', text, re.IGNORECASE):
+                # Normalize 'semi' to 'semi-detached'
+                if ptype == 'semi':
+                    data['property_type'] = 'Semi-Detached'
+                else:
+                    data['property_type'] = ptype.title()
+                break
+        
+        # Site-specific extraction (for better accuracy)
+        
+        # OnTheMarket: Extract address from meta description
+        if 'onthemarket.com' in url:
+            meta_desc = re.search(r'<meta[^>]*name="description"[^>]*content="([^"]*)"', html, re.IGNORECASE)
+            if meta_desc:
+                desc = meta_desc.group(1)
+                # Look for "for sale in [ADDRESS]"
+                addr_match = re.search(r'for sale in ([^,]+(?:Road|Street|Lane|Avenue|Drive|Close)[^,]*(?:,\s*[^,]+)?)', desc, re.IGNORECASE)
+                if addr_match:
+                    data['address'] = addr_match.group(1).strip()
+                    # Try to extract postcode from this address
+                    pc_in_addr = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
+                    if pc_in_addr:
+                        data['postcode'] = pc_in_addr.group(1)
+        
+        elif 'rightmove.co.uk' in url:
+            # Rightmove specific - look for address patterns
+            # Try to find street address
+            address_patterns = [
+                r'for sale in ([^,]+(?:Road|Street|Lane|Avenue|Drive|Close|Way|Place|Court|Gardens|Terrace)[^,]*)',
+                r'property for sale[\s:]+([^£<]+)',
+                r'<title>(.*?)(?:for sale|Rightmove)',
+            ]
+            for pattern in address_patterns:
+                addr_match = re.search(pattern, html, re.IGNORECASE)
+                if addr_match:
+                    potential_addr = addr_match.group(1).strip()
+                    # Clean up
+                    potential_addr = re.sub(r'\s+', ' ', potential_addr)
+                    potential_addr = potential_addr.replace(' - Rightmove', '').replace(' | Rightmove', '')
+                    if len(potential_addr) > 10:
+                        data['address'] = potential_addr
+                        break
+            
+            # If no address found, build from components
+            if not data['address'] and data['postcode']:
+                # Try to extract street from text
+                street_match = re.search(r'([0-9]+[^,]{5,50}(?:Road|Street|Lane|Avenue|Drive|Close|Way))', text)
+                if street_match:
+                    data['address'] = street_match.group(1).strip()
+        
         elif 'zoopla.co.uk' in url:
-            # Extract address from JSON-LD or meta tags
-            address_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
-            if address_match:
-                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
-                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
-                if postcode_match:
-                    data['postcode'] = postcode_match.group(1)
-            
-            # Extract price
-            price_match = re.search(r'&pound;([0-9,]+)', html)
-            if not price_match:
-                price_match = re.search(r'£([0-9,]+)', html)
-            if price_match:
-                data['price'] = int(price_match.group(1).replace(',', ''))
+            # Zoopla specific
+            zoopla_address = re.search(r'<title>(.*?)\s*-\s*Zoopla', html, re.IGNORECASE)
+            if zoopla_address:
+                data['address'] = zoopla_address.group(1).strip()
         
-        # OnTheMarket extraction
         elif 'onthemarket.com' in url:
-            address_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
-            if address_match:
-                data['address'] = re.sub(r'<[^>]+>', '', address_match.group(1)).strip()
-                postcode_match = re.search(r'([A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2})', data['address'])
-                if postcode_match:
-                    data['postcode'] = postcode_match.group(1)
+            # OnTheMarket specific - try meta description first (has full address)
+            meta_match = re.search(r'<meta[^>]*name="description"[^>]*content="[^"]*for sale in ([^"]+)"', html, re.IGNORECASE)
+            if meta_match:
+                addr = meta_match.group(1)
+                # Clean up - remove estate agent name and stop at reasonable length
+                addr = re.sub(r'^.*?present this \d+ bedroom ', '', addr)
+                addr = re.sub(r'\s+\d+ bedroom.*$', '', addr)
+                addr = re.sub(r'\s+for sale.*$', '', addr)
+                addr = addr.strip()
+                if len(addr) > 10:
+                    data['address'] = addr
+                    # Try to extract full postcode from address
+                    # OnTheMarket sometimes has partial postcode (e.g., "M23" instead of "M23 0GP")
+                    full_postcode = re.search(r'([A-Z]{1,2}\d{1,2}[A-Z]?\s+\d[A-Z]{2})', addr)
+                    if full_postcode and not data.get('postcode'):
+                        data['postcode'] = full_postcode.group(1)
             
-            price_match = re.search(r'£([0-9,]+)', html)
-            if price_match:
-                data['price'] = int(price_match.group(1).replace(',', ''))
+            # Fallback to title
+            if not data['address']:
+                otm_title = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+                if otm_title:
+                    title = otm_title.group(1)
+                    sale_match = re.search(r'for sale in (.+)', title, re.IGNORECASE)
+                    if sale_match:
+                        addr = sale_match.group(1)
+                        addr = re.sub(r',\s*[A-Z]{1,2}[0-9].*$', '', addr)
+                        data['address'] = addr.strip()
+        
+        # Fallback: if we have postcode but no address, try to build address
+        if not data['address'] and data['postcode']:
+            # Look for any text that might be an address near the postcode
+            # This is a last resort
+            pass
         
         return data
         
     except Exception as e:
         app.logger.error(f'URL extraction error: {str(e)}')
+        return {
+            'address': None,
+            'postcode': None,
+            'price': None,
+            'property_type': None,
+            'bedrooms': None,
+            'description': None
+        }
         return None
 
 @app.route('/extract-url', methods=['POST'])
@@ -1054,12 +1200,75 @@ def extract_url():
             'message': 'Error extracting data from URL'
         }), 500
 
-def get_ai_property_analysis(property_data, calculated_metrics):
+def get_ai_property_analysis(property_data, calculated_metrics, market_data=None):
     """
     Get AI-powered analysis from OpenClaw
     This sends the data to the AI for enhanced insights
     """
     try:
+        # Build market data context (PropertyData or Land Registry)
+        market_context = ""
+        if market_data and isinstance(market_data, dict):
+            source = market_data.get('source', 'Unknown')
+            
+            if source == 'PropertyData API':
+                # PropertyData format
+                estimated_rent = market_data.get('estimated_rent')
+                rental_confidence = market_data.get('rental_confidence')
+                price_growth = market_data.get('price_growth_12m')
+                avg_sold = market_data.get('avg_sold_price')
+                area_score = market_data.get('area_score')
+                transport_score = market_data.get('transport_score')
+                
+                if estimated_rent:
+                    market_context += f"""
+MARKET DATA (PropertyData API - Professional Grade):
+- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"""
+                
+                if price_growth is not None:
+                    market_context += f"""
+- 12-Month Price Growth: {price_growth:.1f}%"""
+                
+                if avg_sold:
+                    market_context += f"""
+- Average Sold Price: £{avg_sold:,.0f}"""
+                
+                if area_score:
+                    market_context += f"""
+- Area Quality Score: {area_score}/10"""
+                
+                if transport_score:
+                    market_context += f"""
+- Transport Links Score: {transport_score}/10"""
+            
+            elif source == 'Land Registry':
+                # Land Registry format
+                avg_price = market_data.get('average_price')
+                trend = market_data.get('price_trend', {})
+                recent_sales = market_data.get('recent_sales', [])
+                
+                if avg_price:
+                    market_context += f"""
+MARKET DATA (Land Registry - Free Government Data):
+- Average Sold Price (12 months): £{avg_price:,.0f}"""
+                
+                if trend:
+                    market_context += f"""
+- Price Trend: {trend.get('trend', 'stable')} ({trend.get('change_percent', 0):.1f}% change)"""
+                
+                if recent_sales:
+                    market_context += f"""
+- Recent Comparable Sales:"""
+                    for i, sale in enumerate(recent_sales[:3], 1):
+                        market_context += f"""
+  {i}. £{sale['price']:,} on {sale['date'][:10]} - {sale.get('street', 'N/A')}"""
+            
+            else:
+                market_context = "MARKET DATA: Limited data available for this postcode"
+        
+        if not market_context:
+            market_context = "MARKET DATA: No external market data available"
+        
         # Build comprehensive prompt for AI
         prompt = f"""Analyze this UK property investment deal and provide detailed insights:
 
@@ -1078,6 +1287,8 @@ FINANCIAL METRICS:
 - Annual Net Income: £{calculated_metrics.get('net_annual_income', 0)}
 - Deal Score: {calculated_metrics.get('deal_score', 0)}/100
 - Investment Verdict: {calculated_metrics.get('verdict', 'REVIEW')}
+
+{market_context}
 
 Please provide:
 
@@ -1168,8 +1379,42 @@ def ai_analyze():
         # Step 1: Calculate financial metrics
         calculated_metrics = analyze_deal(data)
         
-        # Step 2: Get AI insights
-        ai_insights = get_ai_property_analysis(data, calculated_metrics)
+        # Step 2: Get market data (PropertyData primary, Land Registry fallback)
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 3) or 3)
+        market_data = {}
+        
+        if postcode and validate_postcode(postcode):
+            # Try PropertyData API first (premium data)
+            if property_data.is_configured():
+                try:
+                    market_data = get_propertydata_context(postcode, bedrooms)
+                    market_data['source'] = 'PropertyData API'
+                    app.logger.info(f"Using PropertyData for {postcode}")
+                except Exception as e:
+                    app.logger.warning(f'PropertyData API failed: {e}')
+                    market_data = {}
+            
+            # Fallback to Land Registry if PropertyData unavailable
+            if not market_data or 'error' in market_data:
+                try:
+                    sold_prices = land_registry.get_sold_prices(postcode, limit=5)
+                    price_trend = land_registry.get_price_trend(postcode)
+                    avg_price = land_registry.get_average_price(postcode, months=12)
+                    
+                    market_data = {
+                        'source': 'Land Registry',
+                        'recent_sales': sold_prices,
+                        'price_trend': price_trend,
+                        'average_price': avg_price
+                    }
+                    app.logger.info(f"Using Land Registry for {postcode}")
+                except Exception as e:
+                    app.logger.warning(f'Could not fetch Land Registry data: {e}')
+                    market_data = {'source': 'None', 'error': 'Market data unavailable'}
+        
+        # Step 3: Get AI insights (with market data)
+        ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
         
         # Combine results
         results = {
@@ -1197,6 +1442,372 @@ def ai_analyze():
         return jsonify({
             'success': False,
             'message': 'An error occurred during AI analysis. Please try again.'
+        }), 500
+
+@app.route('/api/sold-prices', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_sold_prices():
+    """Get recent sold prices for a postcode from Land Registry"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Get sold prices from Land Registry
+        sales = land_registry.get_sold_prices(postcode, limit=10)
+        
+        if not sales:
+            return jsonify({
+                'success': True,
+                'sales': [],
+                'message': 'No recent sales found for this postcode'
+            })
+        
+        # Calculate average
+        prices = [sale['price'] for sale in sales]
+        avg_price = sum(prices) / len(prices)
+        
+        return jsonify({
+            'success': True,
+            'sales': sales,
+            'average': round(avg_price, 0),
+            'count': len(sales)
+        })
+        
+    except Exception as e:
+        app.logger.error(f'Land Registry API error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching sold prices. Please try again.'
+        }), 500
+
+@app.route('/api/price-trend', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_price_trend():
+    """Get price trend for a postcode"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Get price trend
+        trend = land_registry.get_price_trend(postcode)
+        
+        return jsonify({
+            'success': True,
+            'trend': trend
+        })
+        
+    except Exception as e:
+        app.logger.error(f'Price trend error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error calculating price trend. Please try again.'
+        }), 500
+
+@app.route('/api/propertydata/rental-valuation', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_propertydata_rental():
+    """Get rental valuation from PropertyData API (premium)"""
+    try:
+        if not property_data.is_configured():
+            return jsonify({
+                'success': False,
+                'message': 'PropertyData API not configured. Set PROPERTY_DATA_API_KEY environment variable.',
+                'upgrade_url': 'https://propertydata.co.uk/api'
+            }), 503
+        
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 3))
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Get rental valuation from PropertyData
+        result = property_data.get_rental_valuation(postcode, bedrooms)
+        
+        if 'error' in result:
+            return jsonify({
+                'success': False,
+                'message': result['error']
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'source': 'PropertyData API'
+        })
+        
+    except Exception as e:
+        app.logger.error(f'PropertyData rental valuation error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching rental valuation. Please try again.'
+        }), 500
+
+@app.route('/api/propertydata/market-context', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_propertydata_context_endpoint():
+    """Get comprehensive market context from PropertyData API"""
+    try:
+        if not property_data.is_configured():
+            return jsonify({
+                'success': False,
+                'message': 'PropertyData API not configured. Set PROPERTY_DATA_API_KEY environment variable.',
+                'upgrade_url': 'https://propertydata.co.uk/api'
+            }), 503
+        
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 3))
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Get comprehensive market context
+        context = get_propertydata_context(postcode, bedrooms)
+        
+        if 'error' in context:
+            return jsonify({
+                'success': False,
+                'message': context['error']
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'data': context,
+            'source': 'PropertyData API'
+        })
+        
+    except Exception as e:
+        app.logger.error(f'PropertyData context error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching market context. Please try again.'
+        }), 500
+
+@app.route('/api/transport/stations', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_transport_stations():
+    """Get nearest transport stations for coordinates"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        lat = data.get('lat')
+        lon = data.get('lon')
+        postcode = data.get('postcode', '').strip().upper()
+        
+        # Need either coordinates or postcode
+        if not lat or not lon:
+            return jsonify({
+                'success': False,
+                'message': 'Latitude and longitude required'
+            }), 400
+        
+        # Get nearest stations
+        stations = transport_api.get_nearest_stations(float(lat), float(lon), radius=2000)
+        
+        if not stations:
+            return jsonify({
+                'success': True,
+                'stations': [],
+                'message': 'No stations found within 2km'
+            })
+        
+        # Calculate transport score
+        score_data = transport_api.calculate_transport_score(stations)
+        
+        # Format top stations
+        top_stations = []
+        for station in stations[:5]:
+            top_stations.append({
+                'name': station.name,
+                'distance': round(station.distance),
+                'modes': station.modes,
+                'lines': station.lines[:3]
+            })
+        
+        return jsonify({
+            'success': True,
+            'stations': top_stations,
+            'connectivity_score': score_data,
+            'source': 'Transport for London API'
+        })
+        
+    except Exception as e:
+        app.logger.error(f'Transport stations error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching transport data. Please try again.'
+        }), 500
+
+@app.route('/api/transport/journey', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_journey_time():
+    """Get journey time between two locations"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        from_loc = data.get('from')
+        to_loc = data.get('to')
+        
+        if not from_loc or not to_loc:
+            return jsonify({
+                'success': False,
+                'message': 'Both from and to locations required'
+            }), 400
+        
+        # Get journey
+        journey = transport_api.get_journey_time(from_loc, to_loc)
+        
+        if not journey:
+            return jsonify({
+                'success': False,
+                'message': 'Journey not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'journey': journey,
+            'source': 'Transport for London API'
+        })
+        
+    except Exception as e:
+        app.logger.error(f'Journey time error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error calculating journey time. Please try again.'
+        }), 500
+
+@app.route('/api/transport/national-rail', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_national_rail_endpoint():
+    """Get UK-wide rail transport data (National Rail)"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Get National Rail transport data
+        result = get_national_rail_context(postcode)
+        
+        if 'error' in result and 'score' not in result:
+            return jsonify({
+                'success': False,
+                'message': result['error']
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'source': 'National Rail / UK-Wide'
+        })
+        
+    except Exception as e:
+        app.logger.error(f'National Rail API error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching rail data. Please try again.'
+        }), 500
+
+@app.route('/api/transport/uk-summary', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_uk_transport_summary():
+    """
+    Get comprehensive UK transport summary
+    Uses TfL for London, National Rail for rest of UK
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        lat = data.get('lat')
+        lon = data.get('lon')
+        
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+        
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+        
+        # Determine which API to use based on postcode area
+        # London postcodes: E, EC, N, NW, SE, SW, W, WC
+        london_areas = ['E', 'EC', 'N', 'NW', 'SE', 'SW', 'W', 'WC']
+        postcode_area = postcode.split()[0][:2] if ' ' in postcode else postcode[:2]
+        
+        if any(postcode_area.startswith(area) for area in london_areas):
+            # Use TfL for London
+            if lat and lon:
+                stations = transport_api.get_nearest_stations(float(lat), float(lon))
+                score_data = transport_api.calculate_transport_score(stations)
+                source = 'Transport for London (TfL)'
+            else:
+                # Fallback to National Rail if no coordinates
+                result = get_national_rail_context(postcode)
+                score_data = result.get('connectivity_score', {})
+                source = 'National Rail (London fallback)'
+        else:
+            # Use National Rail for rest of UK
+            result = get_national_rail_context(postcode)
+            score_data = result.get('connectivity_score', {})
+            source = 'National Rail (UK-wide)'
+        
+        return jsonify({
+            'success': True,
+            'transport_score': score_data,
+            'postcode': postcode,
+            'source': source,
+            'is_london': postcode_area in london_areas
+        })
+        
+    except Exception as e:
+        app.logger.error(f'UK transport summary error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching transport data. Please try again.'
         }), 500
 
 if __name__ == '__main__':

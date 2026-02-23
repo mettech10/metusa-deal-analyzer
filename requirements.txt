@@ -6,3 +6,20 @@ pdfkit==1.0.0
 requests==2.31.0
 redis==5.0.1
 
+# Note: Set these environment variables for API access:
+# PROPERTY_DATA_API_KEY - Get from https://propertydata.co.uk/api (£49-149/mo)
+# LAND_REGISTRY_API_KEY - Free UK government data (already configured): 9f426bbe-b54e-487f-bc20-42f38f143686
+# TFL_APP_ID - Transport for London API (free): afcaf66b
+# TFL_APP_KEY - Transport for London API (free): 01143ec72ae2c8e4c3aa631e5f27b845
+# GROQ_API_KEY - For fast AI inference (optional)
+#
+# APIs Summary:
+# ✅ Land Registry - FREE - Sold prices (UK-wide)
+# ✅ National Rail - FREE - Train stations (UK-wide)
+# ✅ TfL - FREE - London transport only
+# ⏸️ PropertyData - £49-149/mo - Professional data (optional upgrade)
+#
+# Web Scraping:
+# ✅ Adaptive Scraper - Built-in (Scrapling-style)
+# ⏸️ Scrapling - pip install scrapling (optional upgrade for better anti-bot)
+
