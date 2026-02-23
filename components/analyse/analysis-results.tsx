@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { DealScore } from "./deal-score"
+import { PropertyComparables } from "./property-comparables"
 import {
   BarChart,
   Bar,
@@ -207,10 +208,11 @@ export function AnalysisResults({
 
       {/* Charts */}
       <Tabs defaultValue="cashflow" className="w-full">
-        <TabsList className="w-full grid grid-cols-3">
+        <TabsList className="w-full grid grid-cols-4">
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="costs">Cost Breakdown</TabsTrigger>
           <TabsTrigger value="projection">5-Year Projection</TabsTrigger>
+          <TabsTrigger value="comparables">Comparables</TabsTrigger>
         </TabsList>
 
         <TabsContent value="cashflow" className="mt-4">
@@ -374,6 +376,14 @@ export function AnalysisResults({
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="comparables" className="mt-4">
+          <PropertyComparables 
+            postcode={data.postcode}
+            bedrooms={data.bedrooms}
+            currentPrice={data.purchasePrice}
+          />
         </TabsContent>
       </Tabs>
 

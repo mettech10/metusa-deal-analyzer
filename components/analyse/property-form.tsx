@@ -19,6 +19,7 @@ import type { PropertyFormData } from "@/lib/types"
 
 const schema = z.object({
   address: z.string().min(1, "Address is required"),
+  postcode: z.string().min(1, "Postcode is required"),
   purchasePrice: z.coerce.number().min(1, "Enter a purchase price"),
   propertyType: z.enum(["house", "flat", "hmo", "commercial"]),
   bedrooms: z.coerce.number().min(0).max(20),
@@ -81,6 +82,7 @@ export function PropertyForm({ onSubmit, isLoading }: PropertyFormProps) {
     resolver: zodResolver(schema),
     defaultValues: {
       address: "",
+      postcode: "",
       purchasePrice: 0,
       propertyType: "house",
       bedrooms: 3,
@@ -123,6 +125,12 @@ export function PropertyForm({ onSubmit, isLoading }: PropertyFormProps) {
               />
             </FormField>
           </div>
+          <FormField label="Postcode" error={errors.postcode?.message}>
+            <Input
+              placeholder="e.g. SW1A 2AA"
+              {...register("postcode")}
+            />
+          </FormField>
           <FormField
             label="Purchase Price"
             error={errors.purchasePrice?.message}

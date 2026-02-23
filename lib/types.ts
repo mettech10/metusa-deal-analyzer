@@ -6,6 +6,7 @@ export type MortgageType = "repayment" | "interest-only"
 export interface PropertyFormData {
   // Property Details
   address: string
+  postcode: string
   purchasePrice: number
   propertyType: PropertyType
   bedrooms: number
