@@ -22,8 +22,9 @@ from property_data import property_data, get_market_context as get_propertydata_
 from transport_api import transport_api, get_transport_context  # TfL (London)
 from national_rail import national_rail, get_national_rail_context  # UK-wide
 
-# Import Scrapling Web Scraper (v0.4)
-from scrapling_extractor import extract_property_from_url
+# Import Web Scrapers
+from scrapling_extractor import extract_property_from_url  # For most sites
+from playwright_scraper import extract_property_advanced  # For protected sites (Zoopla)
 
 # Security: Input validation functions
 def validate_postcode(postcode):

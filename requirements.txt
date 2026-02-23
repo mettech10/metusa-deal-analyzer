@@ -20,6 +20,7 @@ redis==5.0.1
 # ⏸️ PropertyData - £49-149/mo - Professional data (optional upgrade)
 #
 # Web Scraping:
-# ✅ Adaptive Scraper - Built-in (Scrapling-style)
-# ⏸️ Scrapling - pip install scrapling (optional upgrade for better anti-bot)
+# ✅ Adaptive Scraper - Built-in (requests-based, works with Rightmove/OTM)
+# ✅ Playwright - For protected sites (Zoopla) - pip install playwright && playwright install chromium
+# ⏸️ Scrapling - Alternative - pip install scrapling
 
