@@ -110,96 +110,115 @@ def calculate_deal_score(deal_type, gross_yield, net_yield, monthly_cashflow, ca
     """
     Calculate AI-powered deal score (0-100)
     Based on multiple factors weighted by deal type
-    """
-    score = 50  # Start at neutral
     
-    # Yield scoring (25 points max)
+    Scoring rubric:
+    90-100: Excellent deal (exceeds all benchmarks)
+    75-89:  Good deal (meets most benchmarks)
+    60-74:  Decent deal (acceptable but not great)
+    40-59:  Mediocre deal (borderline)
+    20-39:  Poor deal (below benchmarks)
+    0-19:   Bad deal (avoid)
+    """
+    score = 0
+    
+    # Yield scoring (30 points max) - Most important metric
     if deal_type == 'HMO':
         if gross_yield >= 12:
-            score += 25
+            score += 30
         elif gross_yield >= 10:
-            score += 20
+            score += 24
         elif gross_yield >= 8:
-            score += 15
+            score += 18
         elif gross_yield >= 6:
             score += 10
+        elif gross_yield >= 4:
+            score += 5
         else:
             score -= 10
     else:
+        # BTL scoring - higher threshold
         if gross_yield >= 8:
-            score += 25
+            score += 30
+        elif gross_yield >= 7:
+            score += 24
         elif gross_yield >= 6:
-            score += 20
+            score += 18
         elif gross_yield >= 5:
-            score += 15
-        elif gross_yield >= 4:
             score += 10
+        elif gross_yield >= 4:
+            score += 5
         else:
             score -= 10
     
     # Cashflow scoring (25 points max)
-    if monthly_cashflow >= 300:
+    if monthly_cashflow >= 400:
         score += 25
-    elif monthly_cashflow >= 200:
+    elif monthly_cashflow >= 300:
         score += 20
-    elif monthly_cashflow >= 100:
+    elif monthly_cashflow >= 200:
         score += 15
-    elif monthly_cashflow >= 50:
-        score += 10
+    elif monthly_cashflow >= 100:
+        score += 8
     elif monthly_cashflow >= 0:
-        score += 5
+        score += 2
     else:
         score -= 15
     
     # Cash-on-cash scoring (25 points max)
     if cash_on_cash >= 12:
         score += 25
-    elif cash_on_cash >= 8:
+    elif cash_on_cash >= 10:
         score += 20
-    elif cash_on_cash >= 6:
+    elif cash_on_cash >= 8:
         score += 15
-    elif cash_on_cash >= 4:
+    elif cash_on_cash >= 6:
         score += 10
+    elif cash_on_cash >= 4:
+        score += 5
     else:
         score -= 10
     
-    # Strategy-specific scoring (15 points max)
+    # Strategy-specific scoring (15 points max) - Net yield/ROI
     if deal_type == 'BRR' and brr_metrics:
-        if brr_metrics.get('brr_roi', 0) >= 25:
+        brr_roi = brr_metrics.get('brr_roi', 0)
+        if brr_roi >= 30:
             score += 15
-        elif brr_metrics.get('brr_roi', 0) >= 20:
+        elif brr_roi >= 25:
             score += 12
-        elif brr_metrics.get('brr_roi', 0) >= 15:
+        elif brr_roi >= 20:
             score += 8
-        elif brr_metrics.get('brr_roi', 0) >= 10:
+        elif brr_roi >= 15:
             score += 4
     elif deal_type == 'FLIP' and flip_metrics:
-        if flip_metrics.get('flip_roi', 0) >= 25:
+        flip_roi = flip_metrics.get('flip_roi', 0)
+        if flip_roi >= 25:
             score += 15
-        elif flip_metrics.get('flip_roi', 0) >= 20:
+        elif flip_roi >= 20:
             score += 12
-        elif flip_metrics.get('flip_roi', 0) >= 15:
+        elif flip_roi >= 15:
             score += 8
-        elif flip_metrics.get('flip_roi', 0) >= 10:
+        elif flip_roi >= 10:
             score += 4
     else:
-        # BTL/HMO - Net yield matters
+        # BTL/HMO - Net yield (after all expenses)
         if net_yield >= 5:
             score += 15
         elif net_yield >= 4:
-            score += 12
+            score += 10
         elif net_yield >= 3:
-            score += 8
+            score += 5
         elif net_yield >= 2:
-            score += 4
+            score += 2
+        else:
+            score -= 5
     
-    # Risk adjustment (10 points max)
+    # Risk adjustment (5 points max)
     if risk_level == 'LOW':
-        score += 10
-    elif risk_level == 'MEDIUM':
         score += 5
+    elif risk_level == 'MEDIUM':
+        score += 0
     else:
-        score -= 5
+        score -= 10
     
     # Ensure score is within 0-100
     return max(0, min(100, score))
@@ -246,17 +265,19 @@ def generate_5_year_projection(annual_rent, net_annual_income, purchase_price, c
     return projections
 
 def get_score_label(score):
-    """Get label for deal score"""
-    if score >= 80:
+    """Get label for deal score based on new rubric"""
+    if score >= 90:
         return "Excellent"
-    elif score >= 65:
+    elif score >= 75:
         return "Good"
-    elif score >= 50:
-        return "Fair"
-    elif score >= 35:
-        return "Weak"
-    else:
+    elif score >= 60:
+        return "Decent"
+    elif score >= 40:
+        return "Mediocre"
+    elif score >= 20:
         return "Poor"
+    else:
+        return "Bad Deal"
 
 def analyze_deal(data):
     """Perform comprehensive deal analysis with input validation"""
