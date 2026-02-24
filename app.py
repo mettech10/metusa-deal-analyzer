@@ -1809,6 +1809,20 @@ def ai_analyze():
         # Step 3: Get AI insights (with market data)
         ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
         
+        # Get sales valuation
+        sales_valuation = None
+        if property_data.is_configured() and postcode:
+            try:
+                valuation = property_data.get_sales_valuation(postcode, bedrooms)
+                if 'estimate' in valuation:
+                    sales_valuation = {
+                        'estimate': valuation['estimate'].get('sale_price'),
+                        'confidence': valuation.get('confidence'),
+                        'range': valuation.get('range', {})
+                    }
+            except Exception as e:
+                app.logger.warning(f'Could not get sales valuation: {e}')
+        
         # Combine results
         results = {
             **calculated_metrics,
@@ -1816,7 +1830,14 @@ def ai_analyze():
             'ai_strengths': ai_insights['strengths'],
             'ai_risks': ai_insights['risks'],
             'ai_area': ai_insights['area'],
-            'ai_next_steps': ai_insights['next_steps']
+            'ai_next_steps': ai_insights['next_steps'],
+            # Add comparable data from market_data
+            'comparable_sales': market_data.get('comparable_sales', []),
+            'comparable_listings': market_data.get('comparable_listings', []),
+            'avg_sold_price': market_data.get('avg_sold_price'),
+            'avg_asking_price': market_data.get('avg_asking_price'),
+            'sales_valuation': sales_valuation,
+            'market_source': market_data.get('source', 'None')
         }
         
         return jsonify({

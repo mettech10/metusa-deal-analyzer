@@ -104,6 +104,36 @@ class PropertyDataAPI:
             'postcode': postcode
         })
     
+    def get_prices(self, postcode: str) -> Dict:
+        """
+        Get current market prices (active listings)
+        
+        Args:
+            postcode: UK postcode
+            
+        Returns:
+            Dict with current listing prices
+        """
+        return self._make_request('prices', {
+            'postcode': postcode
+        })
+    
+    def get_sales_valuation(self, postcode: str, bedrooms: int) -> Dict:
+        """
+        Get sales valuation estimate for a property
+        
+        Args:
+            postcode: UK postcode
+            bedrooms: Number of bedrooms
+            
+        Returns:
+            Dict with sale estimate
+        """
+        return self._make_request('valuation-sale', {
+            'postcode': postcode,
+            'bedrooms': bedrooms
+        })
+    
     def get_market_trends(self, postcode: str) -> Dict:
         """
         Get comprehensive market trends
@@ -216,7 +246,7 @@ def get_market_context(postcode: str, bedrooms: int) -> Dict:
         bedrooms: Number of bedrooms
         
     Returns:
-        Dict with rental estimate, sold prices, trends
+        Dict with rental estimate, sold prices, trends, comparables
     """
     if not property_data.is_configured():
         return {'error': 'PropertyData API not configured'}
@@ -225,6 +255,7 @@ def get_market_context(postcode: str, bedrooms: int) -> Dict:
     rental = property_data.get_rental_valuation(postcode, bedrooms)
     trends = property_data.get_market_trends(postcode)
     sold = property_data.get_sold_prices(postcode)
+    prices = property_data.get_prices(postcode)  # Current listings
     area = property_data.get_area_data(postcode)
     
     context = {
@@ -246,12 +277,44 @@ def get_market_context(postcode: str, bedrooms: int) -> Dict:
         context['avg_days_on_market'] = trends['data'].get('avg_days_on_market')
         context['sales_volume'] = trends['data'].get('sales_volume_12m')
     
-    # Extract sold prices
+    # Extract sold prices (for comparables)
     if 'data' in sold:
-        prices = [p.get('price', 0) for p in sold['data'] if p.get('price')]
-        if prices:
-            context['avg_sold_price'] = sum(prices) / len(prices)
-            context['sold_price_count'] = len(prices)
+        raw_sales = sold['data']
+        prices_list = [p.get('price', 0) for p in raw_sales if p.get('price')]
+        if prices_list:
+            context['avg_sold_price'] = sum(prices_list) / len(prices_list)
+            context['sold_price_count'] = len(prices_list)
+            # Format comparable sales for display
+            context['comparable_sales'] = [
+                {
+                    'address': f"{s.get('street', 'Unknown')}, {postcode}",
+                    'price': s.get('price', 0),
+                    'type': s.get('type', 'N/A').replace('_', ' ').title(),
+                    'date': s.get('date', 'N/A'),
+                    'bedrooms': s.get('bedrooms', bedrooms)
+                }
+                for s in raw_sales[:10]  # Top 10 sales
+                if s.get('price')
+            ]
+    
+    # Extract current market prices (comparable listings)
+    if 'data' in prices:
+        raw_prices = prices['data']
+        context['comparable_listings'] = [
+            {
+                'address': f"{p.get('address', 'Unknown')}, {postcode}",
+                'price': p.get('price', 0),
+                'type': p.get('type', 'N/A').replace('_', ' ').title(),
+                'bedrooms': p.get('bedrooms', bedrooms),
+                'agent': p.get('agent', 'N/A')
+            }
+            for p in raw_prices[:10]  # Top 10 listings
+            if p.get('price')
+        ]
+        # Calculate average asking price
+        asking_prices = [p.get('price', 0) for p in raw_prices if p.get('price')]
+        if asking_prices:
+            context['avg_asking_price'] = sum(asking_prices) / len(asking_prices)
     
     # Extract area data
     if 'data' in area:
