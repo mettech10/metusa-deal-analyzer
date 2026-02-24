@@ -65,7 +65,64 @@ export async function POST(req: Request) {
   console.log("[v0] FLASK PROXY: mode =", mode)
   console.log("[v0] FLASK PROXY: Using Render URL:", RENDER_URL)
 
-  // ── URL Mode ─────────────────────────────────────────────────────
+  // ── Scrape-Only Mode ──────────────────────────────────────────────
+  // Returns scraped property data mapped to PropertyFormData field names.
+  // Used by the two-step URL flow: scrape first, then user fills remaining fields.
+  if (mode === "scrape-only") {
+    const { url } = body
+
+    if (!url || typeof url !== "string") {
+      return Response.json({ error: "A property listing URL is required." }, { status: 400 })
+    }
+
+    console.log("[v0] FLASK PROXY: Scrape-only mode - calling /extract-url")
+    const scrapeRes = await sendToFlask("/extract-url", { url })
+
+    if (!scrapeRes.ok) {
+      return scrapeRes
+    }
+
+    let scrapedData: Record<string, unknown>
+    try {
+      scrapedData = await scrapeRes.json()
+      console.log("[v0] FLASK PROXY: Scraped data keys:", Object.keys(scrapedData))
+    } catch {
+      return Response.json(
+        { error: "Failed to parse scraped data from backend." },
+        { status: 502 }
+      )
+    }
+
+    // The /extract-url response has { data: {...}, success: true }
+    const raw = (scrapedData.data || scrapedData) as Record<string, unknown>
+    console.log("[v0] FLASK PROXY: Raw scraped fields:", raw)
+
+    // Map property_type from scraper (e.g. "Terraced", "Detached", "Flat") to our enum
+    const rawType = String(raw.property_type || "").toLowerCase()
+    let propertyType: string = "house"
+    if (rawType.includes("flat") || rawType.includes("apartment") || rawType.includes("maisonette")) {
+      propertyType = "flat"
+    } else if (rawType.includes("hmo")) {
+      propertyType = "hmo"
+    } else if (rawType.includes("commercial")) {
+      propertyType = "commercial"
+    }
+
+    // Map scraped fields to our PropertyFormData field names
+    const mappedData = {
+      address: raw.address || "",
+      postcode: raw.postcode || "",
+      purchasePrice: Number(raw.price) || Number(raw.purchasePrice) || 0,
+      propertyType,
+      bedrooms: Number(raw.bedrooms) || 3,
+      description: raw.description || "",
+    }
+
+    console.log("[v0] FLASK PROXY: Mapped scrape data:", mappedData)
+    return Response.json({ success: true, propertyData: mappedData })
+  }
+
+  // ── URL Mode (legacy - kept for backwards compatibility) ─────────
   if (mode === "url") {
     const { url } = body
 
@@ -93,24 +150,20 @@ export async function POST(req: Request) {
     }
 
     // Step 2: Send scraped data to AI analysis
-    // Note: scrapedData has {data: {...}, success: true} structure from /extract-url
-    const propertyPayload = scrapedData.data || scrapedData
+    const propertyPayload = (scrapedData.data || scrapedData) as Record<string, unknown>
     console.log("[v0] FLASK PROXY: Step 2 - AI analysis via /ai-analyze")
-    console.log("[v0] FLASK PROXY: Sending property data:", propertyPayload)
-    // Map scraped fields to AI endpoint format
     const aiPayload = { 
       address: propertyPayload.address || 'Unknown Address',
       postcode: propertyPayload.postcode || 'N/A',
-      purchasePrice: propertyPayload.price || propertyPayload.purchasePrice || 0,  // Scraper returns 'price'
+      purchasePrice: propertyPayload.price || propertyPayload.purchasePrice || 0,
       bedrooms: propertyPayload.bedrooms || 3,
       property_type: propertyPayload.property_type || 'Terrace',
       description: propertyPayload.description || '',
       url,
-      dealType: 'BTL',  // Default to BTL for scraped URLs
+      dealType: 'BTL',
       deposit: 25,
       interestRate: 3.75
     }
-    console.log("[v0] FLASK PROXY: Mapped payload:", aiPayload)
     const aiRes = await sendToFlask("/ai-analyze", aiPayload)
 
     if (!aiRes.ok) {
@@ -119,10 +172,8 @@ export async function POST(req: Request) {
 
     try {
       const aiData = await aiRes.json()
-      console.log("[v0] FLASK PROXY: AI response keys:", Object.keys(aiData))
       return Response.json({ aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData) })
     } catch {
-      // Maybe it's plain text
       const text = await aiRes.text()
       return Response.json({ aiAnalysis: text })
     }
@@ -172,5 +223,5 @@ export async function POST(req: Request) {
     }
   }
 
-  return Response.json({ error: "Invalid mode. Use 'url' or 'manual'." }, { status: 400 })
+  return Response.json({ error: "Invalid mode. Use 'scrape-only', 'url', or 'manual'." }, { status: 400 })
 }

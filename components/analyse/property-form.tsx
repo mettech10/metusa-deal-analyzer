@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2 } from "lucide-react"
+import { Loader2, Link2, Info } from "lucide-react"
 import type { PropertyFormData } from "@/lib/types"
 
 const schema = z.object({
@@ -46,6 +46,8 @@ const schema = z.object({
 interface PropertyFormProps {
   onSubmit: (data: PropertyFormData) => void
   isLoading: boolean
+  defaultValues?: Partial<PropertyFormData>
+  prefilled?: boolean
 }
 
 function FormField({
@@ -71,7 +73,33 @@ function FormField({
   )
 }
 
-export function PropertyForm({ onSubmit, isLoading }: PropertyFormProps) {
+export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: PropertyFormProps) {
+  const baseDefaults: PropertyFormData = {
+    address: "",
+    postcode: "",
+    purchasePrice: 0,
+    propertyType: "house",
+    bedrooms: 3,
+    condition: "good",
+    isAdditionalProperty: true,
+    refurbishmentBudget: 0,
+    legalFees: 1500,
+    surveyCosts: 500,
+    purchaseMethod: "mortgage",
+    depositPercentage: 25,
+    interestRate: 5.5,
+    mortgageTerm: 25,
+    mortgageType: "interest-only",
+    monthlyRent: 0,
+    annualRentIncrease: 2,
+    voidWeeks: 2,
+    managementFeePercent: 10,
+    insurance: 300,
+    maintenance: 500,
+    groundRent: 0,
+    serviceCharge: 0,
+  }
+
   const {
     register,
     handleSubmit,
@@ -80,37 +108,28 @@ export function PropertyForm({ onSubmit, isLoading }: PropertyFormProps) {
     formState: { errors },
   } = useForm<PropertyFormData>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      address: "",
-      postcode: "",
-      purchasePrice: 0,
-      propertyType: "house",
-      bedrooms: 3,
-      condition: "good",
-      isAdditionalProperty: true,
-      refurbishmentBudget: 0,
-      legalFees: 1500,
-      surveyCosts: 500,
-      purchaseMethod: "mortgage",
-      depositPercentage: 25,
-      interestRate: 5.5,
-      mortgageTerm: 25,
-      mortgageType: "interest-only",
-      monthlyRent: 0,
-      annualRentIncrease: 2,
-      voidWeeks: 2,
-      managementFeePercent: 10,
-      insurance: 300,
-      maintenance: 500,
-      groundRent: 0,
-      serviceCharge: 0,
-    },
+    defaultValues: { ...baseDefaults, ...defaultValues },
   })
 
   const purchaseMethod = watch("purchaseMethod")
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-8">
+      {/* URL Pre-fill Banner */}
+      {prefilled && (
+        <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <Link2 className="mt-0.5 size-4 shrink-0 text-primary" />
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-medium text-foreground">
+              Property details imported from listing
+            </p>
+            <p className="text-xs text-muted-foreground">
+              We pre-filled what we could from the URL. Please review the details above and fill in the remaining fields below (rent, financing, running costs) to get a full analysis.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Property Details */}
       <div className="flex flex-col gap-4">
         <h3 className="text-base font-semibold text-foreground">
@@ -328,9 +347,17 @@ export function PropertyForm({ onSubmit, isLoading }: PropertyFormProps) {
 
       {/* Rental Income */}
       <div className="flex flex-col gap-4">
-        <h3 className="text-base font-semibold text-foreground">
-          Rental Income
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold text-foreground">
+            Rental Income
+          </h3>
+          {prefilled && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600">
+              <Info className="size-3" />
+              Required
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField
             label="Expected Monthly Rent"

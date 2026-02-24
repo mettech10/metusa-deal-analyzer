@@ -196,6 +196,8 @@ export default function AnalysePage() {
   const [error, setError] = useState<string | null>(null)
   const [aiText, setAiText] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
+  const [prefillData, setPrefillData] = useState<Partial<PropertyFormData> | null>(null)
+  const [scrapedFromUrl, setScrapedFromUrl] = useState(false)
 
   // Call the Flask backend API and handle the response
   const callAnalysisAPI = useCallback(
@@ -346,7 +348,7 @@ export default function AnalysePage() {
     [callAnalysisAPI]
   )
 
-  // URL-based submission -- sends URL to Flask backend for scraping + analysis
+  // URL-based submission -- scrapes data then transitions to manual form with pre-filled fields
   const handleUrlSubmit = useCallback(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault()
@@ -369,7 +371,39 @@ export default function AnalysePage() {
       setIsLoading(true)
 
       try {
-        await callAnalysisAPI({ mode: "url", url: listingUrl })
+        const res = await fetch("/api/analyse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "scrape-only", url: listingUrl }),
+        })
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null)
+          throw new Error(
+            errData?.error || "Failed to scrape the listing. Please try again."
+          )
+        }
+
+        const data = await res.json()
+
+        if (!data.success || !data.propertyData) {
+          throw new Error("No property data was returned from the listing.")
+        }
+
+        // Map scraped data to form fields for pre-filling
+        const scraped = data.propertyData
+        const mapped: Partial<PropertyFormData> = {
+          address: scraped.address || "",
+          postcode: scraped.postcode || "",
+          purchasePrice: Number(scraped.purchasePrice) || 0,
+          propertyType: scraped.propertyType || "house",
+          bedrooms: Number(scraped.bedrooms) || 3,
+        }
+
+        // Transition to manual form with pre-filled data
+        setPrefillData(mapped)
+        setScrapedFromUrl(true)
+        setInputMode("manual")
       } catch (err) {
         setError(
           err instanceof Error
@@ -380,7 +414,7 @@ export default function AnalysePage() {
         setIsLoading(false)
       }
     },
-    [listingUrl, callAnalysisAPI]
+    [listingUrl]
   )
 
   const hasResults = (results && formData) || aiText
@@ -392,6 +426,8 @@ export default function AnalysePage() {
     setListingUrl("")
     setError(null)
     setAiText("")
+    setPrefillData(null)
+    setScrapedFromUrl(false)
   }
 
   return (
@@ -528,8 +564,11 @@ export default function AnalysePage() {
             {/* Form Panel */}
             <div className="rounded-xl border border-border/50 bg-card p-6">
               <PropertyForm
+                key={scrapedFromUrl ? "prefilled" : "manual"}
                 onSubmit={handleManualSubmit}
                 isLoading={isProcessing}
+                defaultValues={prefillData || undefined}
+                prefilled={scrapedFromUrl}
               />
             </div>
 
@@ -539,27 +578,27 @@ export default function AnalysePage() {
                 <BarChart3 className="size-7 text-primary" />
               </div>
               <h3 className="text-lg font-semibold text-foreground">
-                No Analysis Yet
+                {scrapedFromUrl ? "Almost There" : "No Analysis Yet"}
               </h3>
               <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                Fill in the property details on the left and hit
-                &quot;Analyse This Deal&quot; to see a full financial breakdown
-                and AI-powered insights.
+                {scrapedFromUrl
+                  ? "We've imported property details from the listing. Fill in the remaining fields (rent, financing, running costs) and hit \"Analyse This Deal\" for a full breakdown."
+                  : "Fill in the property details on the left and hit \"Analyse This Deal\" to see a full financial breakdown and AI-powered insights."}
               </p>
             </div>
           </div>
         )}
 
-        {/* Loading state (URL mode) */}
+        {/* Loading state (URL scraping) */}
         {isProcessing && inputMode === "url" && !hasResults && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Loader2 className="mb-4 size-10 animate-spin text-primary" />
             <h3 className="text-lg font-semibold text-foreground">
-              Analysing Property...
+              Scraping Listing Details...
             </h3>
             <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-              Your AI agent is scraping the listing and running a full
-              investment analysis. This may take a moment.
+              Extracting property details from the listing page. This may take a
+              moment if the backend is warming up.
             </p>
           </div>
         )}
