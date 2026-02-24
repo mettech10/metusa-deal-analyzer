@@ -131,8 +131,24 @@ export async function POST(req: Request) {
       )
     }
 
-    console.log("[v0] FLASK PROXY: Manual mode - sending to /ai-analyze")
-    const aiRes = await sendToFlask("/ai-analyze", { propertyData, calculationResults })
+    console.log("[v0] FLASK PROXY: Manual mode - flattening data for /ai-analyze")
+    // Flatten the nested structure - backend expects flat fields
+    const aiPayload = {
+      address: propertyData.address || 'Unknown Address',
+      postcode: propertyData.postcode || 'N/A',
+      dealType: calculationResults.dealType || propertyData.dealType || 'BTL',
+      purchasePrice: Number(propertyData.purchasePrice) || Number(calculationResults.purchasePrice) || 0,
+      bedrooms: Number(propertyData.bedrooms) || 3,
+      monthlyRent: Number(propertyData.monthlyRent) || Number(calculationResults.monthlyRent) || 0,
+      deposit: Number(propertyData.deposit) || Number(calculationResults.deposit) || 25,
+      interestRate: Number(propertyData.interestRate) || Number(calculationResults.interestRate) || 3.75,
+      propertyType: propertyData.propertyType || 'Terrace',
+      description: propertyData.description || '',
+      refurbCost: Number(propertyData.refurbCost) || 0,
+      arv: Number(propertyData.arv) || 0
+    }
+    console.log("[v0] FLASK PROXY: Sending flattened payload:", aiPayload)
+    const aiRes = await sendToFlask("/ai-analyze", aiPayload)
 
     if (!aiRes.ok) {
       return aiRes
