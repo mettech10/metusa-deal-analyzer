@@ -11,7 +11,7 @@ import json
 
 # Configuration
 PROPERTY_DATA_API_KEY = os.getenv('PROPERTY_DATA_API_KEY', '')
-BASE_URL = "https://api.propertydata.co.uk/v1"
+BASE_URL = "https://api.propertydata.co.uk"
 
 class PropertyDataAPI:
     """
