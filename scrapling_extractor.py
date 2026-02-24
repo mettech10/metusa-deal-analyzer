@@ -37,6 +37,53 @@ class PropertyExtractor:
             print(f"[Scraper] Fetch failed: {e}")
             return None
     
+    def _extract_postcode(self, html: str, text: str, url: str) -> Optional[str]:
+        """Extract postcode using multiple strategies"""
+        # Strategy 1: Look for standard UK postcode patterns
+        patterns = [
+            r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})',  # Standard format
+            r'([A-Z]{1,2}\d{1,2}\s?\d?[A-Z]{2})',   # Relaxed format
+            r'"postcode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',  # JSON
+            r'"postalCode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',  # Schema.org
+        ]
+        
+        all_postcodes = []
+        for pattern in patterns:
+            found = re.findall(pattern, html, re.IGNORECASE)
+            all_postcodes.extend(found)
+        
+        # Validate and dedupe
+        valid = []
+        for pc in set(all_postcodes):
+            pc_clean = re.sub(r'\s+', '', pc).upper()
+            # Basic UK postcode validation
+            if len(pc_clean) >= 5 and len(pc_clean) <= 7:
+                if pc_clean[0].isalpha() and pc_clean[0] not in 'QVXZ':
+                    valid.append(pc.strip().upper())
+        
+        if not valid:
+            return None
+        
+        # Strategy 2: Try to match with address/title area
+        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+        if title_match:
+            title = title_match.group(1)
+            area_match = re.search(r'([A-Z]{1,2}\d{1,2})', title)
+            if area_match:
+                area_code = area_match.group(1)
+                for pc in valid:
+                    if pc.replace(' ', '').startswith(area_code):
+                        return pc
+        
+        # Strategy 3: Look for patterns near "postcode" or address words
+        for keyword in ['postcode', 'address', 'location']:
+            nearby = re.findall(rf'{keyword}.*?([A-Z]{{1,2}}\d[A-Z\d]?\s?\d[A-Z]{{2}})', html, re.IGNORECASE)
+            if nearby:
+                return nearby[0].strip().upper()
+        
+        # Return first valid as fallback
+        return valid[0] if valid else None
+    
     def extract_property(self, url: str) -> Dict:
         """Extract all property data from URL"""
         html = self.fetch(url)
@@ -72,29 +119,17 @@ class PropertyExtractor:
             except:
                 pass
         
-        # 2. Extract postcode with validation
-        all_postcodes = re.findall(r'([A-Z]{1,2}[\d][A-Z\d]?\s?[\d][A-Z]{2})', html)
-        valid = []
-        for pc in set(all_postcodes):
-            pc_clean = pc.replace(' ', '')
-            if len(pc_clean) >= 5 and len(pc_clean) <= 7 and pc_clean[0] not in 'QVXZ':
-                valid.append(pc)
+        # 2. Extract postcode with multiple strategies
+        data['postcode'] = self._extract_postcode(html, text, url)
         
-        if valid:
-            # Try to match with address area
-            title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-            if title_match:
-                title = title_match.group(1)
-                area_match = re.search(r'([A-Z]{1,2}\d{1,2})', title)
-                if area_match:
-                    area_code = area_match.group(1)
-                    for pc in valid:
-                        if pc.replace(' ', '').startswith(area_code):
-                            data['postcode'] = pc
-                            break
-            
-            if not data['postcode']:
-                data['postcode'] = valid[0]
+        # If no postcode found, try to get area code from URL
+        if not data['postcode']:
+            url_match = re.search(r'properties/(\d+)', url)
+            if url_match:
+                # Try to find any postcode-like pattern in the page more aggressively
+                fallback = re.findall(r'([A-Z]{1,2}\d{1,2}\s?\d?[A-Z]{2})', html)
+                if fallback:
+                    data['postcode'] = fallback[0]
         
         # 3. Extract bedrooms
         match = re.search(r'(\d+)\s*bed', text, re.IGNORECASE)

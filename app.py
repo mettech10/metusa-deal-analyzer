@@ -1377,15 +1377,26 @@ def ai_analyze():
         if not data:
             return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
         
-        # Validate required fields (address is optional - will default to empty)
-        required = ['postcode', 'dealType', 'purchasePrice']
+        # Validate required fields (address and postcode are optional - will default)
+        required = ['dealType', 'purchasePrice']
         for field in required:
             if field not in data or data[field] is None or data[field] == '':
                 return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
         
-        # Set default address if missing
+        # Set defaults for optional fields
         if not data.get('address') or data['address'] is None:
             data['address'] = 'Unknown Address'
+        
+        if not data.get('postcode') or data['postcode'] is None:
+            # Try to extract postcode from address
+            addr = data['address']
+            postcode_match = re.search(r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})', addr, re.IGNORECASE)
+            if postcode_match:
+                data['postcode'] = postcode_match.group(1).upper()
+                app.logger.info(f"Extracted postcode from address: {data['postcode']}")
+            else:
+                data['postcode'] = 'N/A'
+                app.logger.warning("No postcode provided - proceeding without market data")
         
         # Estimate monthly rent if not provided
         if not data.get('monthlyRent') or data['monthlyRent'] == 0:
