@@ -1377,11 +1377,15 @@ def ai_analyze():
         if not data:
             return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
         
-        # Validate required fields
-        required = ['address', 'postcode', 'dealType', 'purchasePrice']
+        # Validate required fields (address is optional - will default to empty)
+        required = ['postcode', 'dealType', 'purchasePrice']
         for field in required:
-            if field not in data:
+            if field not in data or data[field] is None or data[field] == '':
                 return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        
+        # Set default address if missing
+        if not data.get('address') or data['address'] is None:
+            data['address'] = 'Unknown Address'
         
         # Estimate monthly rent if not provided
         if not data.get('monthlyRent') or data['monthlyRent'] == 0:
