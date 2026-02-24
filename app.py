@@ -279,6 +279,204 @@ def get_score_label(score):
     else:
         return "Bad Deal"
 
+
+def get_strategy_recommendations(deal_type, gross_yield, cash_on_cash, monthly_cashflow, postcode, article_4_area=False):
+    """
+    Get strategy recommendations based on deal metrics and area
+    
+    Returns dict with suitability scores and recommendations
+    """
+    recommendations = {
+        'BTL': {'suitable': True, 'score': 0, 'note': ''},
+        'HMO': {'suitable': False, 'score': 0, 'note': ''},
+        'BRR': {'suitable': False, 'score': 0, 'note': ''},
+        'FLIP': {'suitable': False, 'score': 0, 'note': ''},
+        'SOCIAL_HOUSING': {'suitable': False, 'score': 0, 'note': ''}
+    }
+    
+    # Base BTL score
+    if gross_yield >= 6 and monthly_cashflow >= 200:
+        recommendations['BTL']['score'] = 80
+        recommendations['BTL']['note'] = 'Strong buy-to-let candidate'
+    elif gross_yield >= 5 and monthly_cashflow >= 100:
+        recommendations['BTL']['score'] = 60
+        recommendations['BTL']['note'] = 'Acceptable BTL with decent cashflow'
+    else:
+        recommendations['BTL']['score'] = 40
+        recommendations['BTL']['note'] = 'Marginal BTL - consider better areas'
+    
+    # HMO suitability
+    if not article_4_area:
+        if gross_yield >= 10 and monthly_cashflow >= 300:
+            recommendations['HMO']['suitable'] = True
+            recommendations['HMO']['score'] = 85
+            recommendations['HMO']['note'] = 'Excellent HMO potential - high yield area'
+        elif gross_yield >= 8:
+            recommendations['HMO']['suitable'] = True
+            recommendations['HMO']['score'] = 70
+            recommendations['HMO']['note'] = 'Good for HMO - consider room layout'
+        elif gross_yield >= 6:
+            recommendations['HMO']['suitable'] = True
+            recommendations['HMO']['score'] = 55
+            recommendations['HMO']['note'] = 'Possible HMO - check local demand'
+        else:
+            recommendations['HMO']['note'] = 'Not suitable for HMO - yields too low'
+    else:
+        recommendations['HMO']['note'] = '⚠️ ARTICLE 4: HMO requires planning permission'
+    
+    # BRR suitability
+    if cash_on_cash >= 8 and gross_yield >= 5:
+        recommendations['BRR']['suitable'] = True
+        recommendations['BRR']['score'] = 75
+        recommendations['BRR']['note'] = 'Good BRR candidate - recycle capital potential'
+    elif cash_on_cash >= 5:
+        recommendations['BRR']['suitable'] = True
+        recommendations['BRR']['score'] = 60
+        recommendations['BRR']['note'] = 'Possible BRR with value-add opportunity'
+    else:
+        recommendations['BRR']['note'] = 'Poor BRR - low cash-on-cash return'
+    
+    # Flip suitability
+    if cash_on_cash >= 15 and gross_yield < 6:
+        recommendations['FLIP']['suitable'] = True
+        recommendations['FLIP']['score'] = 70
+        recommendations['FLIP']['note'] = 'Consider flip if below market value'
+    else:
+        recommendations['FLIP']['note'] = 'Not ideal for flipping - rental is better'
+    
+    # Social Housing (C3-C3b conversion)
+    if article_4_area:
+        recommendations['SOCIAL_HOUSING']['suitable'] = True
+        recommendations['SOCIAL_HOUSING']['score'] = 65
+        recommendations['SOCIAL_HOUSING']['note'] = 'Article 4 area - consider C3 to C3b (social housing) conversion'
+    
+    return recommendations
+
+
+def check_article_4(postcode):
+    """
+    Check if area is under Article 4 direction
+    
+    Returns dict with article 4 status and details
+    """
+    # Article 4 areas database - key Manchester areas with Article 4
+    article_4_areas = {
+        # Manchester City Centre and surrounding
+        'M1': {'active': True, 'council': 'Manchester City Council', 'note': 'City centre HMO restrictions'},
+        'M2': {'active': True, 'council': 'Manchester City Council', 'note': 'City centre HMO restrictions'},
+        'M3': {'active': True, 'council': 'Manchester City Council', 'note': 'City centre HMO restrictions'},
+        'M4': {'active': True, 'council': 'Manchester City Council', 'note': 'Northern Quarter HMO restrictions'},
+        'M13': {'active': True, 'council': 'Manchester City Council', 'note': 'Chorlton-on-Medlock / Victoria Park'},
+        'M14': {'active': True, 'council': 'Manchester City Council', 'note': 'Fallowfield / Moss Side / Rusholme'},
+        'M15': {'active': True, 'council': 'Manchester City Council', 'note': 'Hulme / Moss Side'},
+        'M16': {'active': False, 'council': 'Manchester City Council', 'note': 'No Article 4 currently'},
+        'M19': {'active': True, 'council': 'Manchester City Council', 'note': 'Levenshulme / Burnage'},
+        'M20': {'active': True, 'council': 'Manchester City Council', 'note': 'Didsbury / Withington'},
+        'M21': {'active': True, 'council': 'Manchester City Council', 'note': 'Chorlton-cum-Hardy'},
+        
+        # Salford
+        'M5': {'active': True, 'council': 'Salford City Council', 'note': 'Ordsall / Salford areas'},
+        'M6': {'active': True, 'council': 'Salford City Council', 'note': 'Salford central areas'},
+        'M7': {'active': False, 'council': 'Salford City Council', 'note': 'No Article 4 currently'},
+        
+        # Trafford
+        'M16': {'active': False, 'council': 'Trafford Council', 'note': 'Whalley Range / Firswood - No Article 4'},
+        'M32': {'active': False, 'council': 'Trafford Council', 'note': 'No Article 4 currently'},
+        'M33': {'active': False, 'council': 'Trafford Council', 'note': 'Sale - No Article 4'},
+        
+        # Bury
+        'M25': {'active': False, 'council': 'Bury Council', 'note': 'Prestwich - No Article 4'},
+        'M26': {'active': False, 'council': 'Bury Council', 'note': 'No Article 4 currently'},
+        'M45': {'active': False, 'council': 'Bury Council', 'note': 'Whitefield - No Article 4'},
+        
+        # Rochdale
+        'M24': {'active': False, 'council': 'Rochdale Council', 'note': 'Middleton - No Article 4'},
+        
+        # Oldham
+        'M35': {'active': False, 'council': 'Oldham Council', 'note': 'No Article 4 currently'},
+        
+        # Tameside
+        'M43': {'active': False, 'council': 'Tameside Council', 'note': 'No Article 4 currently'},
+        
+        # Stockport
+        'SK1': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK2': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK3': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK4': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK5': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK6': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK7': {'active': False, 'council': 'Stockport Council', 'note': 'No Article 4 currently'},
+        'SK8': {'active': True, 'council': 'Stockport Council', 'note': 'Cheadle / Gatley - Selective licensing areas'},
+    }
+    
+    # Extract area code from postcode (e.g., M45 from M45 7EH)
+    area_code = postcode.split()[0] if ' ' in postcode else postcode[:3]
+    area_code = area_code.upper()
+    
+    if area_code in article_4_areas:
+        info = article_4_areas[area_code]
+        return {
+            'is_article_4': info['active'],
+            'council': info['council'],
+            'note': info['note'],
+            'area_code': area_code,
+            'advice': 'Planning permission required for HMO conversion' if info['active'] else 'No Article 4 restrictions - permitted development applies'
+        }
+    else:
+        # Unknown area - assume no Article 4
+        return {
+            'is_article_4': False,
+            'council': 'Unknown Council',
+            'note': 'Area not in database - verify with local council',
+            'area_code': area_code,
+            'advice': 'Check with local planning authority for HMO restrictions'
+        }
+
+
+def get_refurb_estimate(postcode, property_type, bedrooms, internal_area=1000):
+    """
+    Get refurbishment cost estimate per square meter
+    
+    Based on typical UK refurbishment costs
+    """
+    # Base costs per sq ft (converted from sq m)
+    base_costs = {
+        'light': 50,      # £50 per sq m - cosmetic only
+        'medium': 100,    # £100 per sq m - new kitchen, bathroom
+        'heavy': 180,     # £180 per sq m - full refurb including electrics
+        'structural': 250 # £250 per sq m - including structural work
+    }
+    
+    # Property type multipliers
+    type_multipliers = {
+        'detached': 1.0,
+        'semi': 0.9,
+        'terraced': 0.85,
+        'flat': 0.8,
+        'bungalow': 1.1
+    }
+    
+    # Area adjustment (London premium)
+    area_adjustment = 1.0
+    if postcode.startswith('SW') or postcode.startswith('W') or postcode.startswith('NW'):
+        area_adjustment = 1.3  # 30% premium for London
+    
+    # Default internal area if not provided
+    sqm = internal_area
+    
+    estimates = {}
+    for level, base in base_costs.items():
+        multiplier = type_multipliers.get(property_type.lower().replace('-detached', '').replace('semi-', 'semi'), 1.0)
+        cost_per_sqm = base * multiplier * area_adjustment
+        total = cost_per_sqm * sqm
+        estimates[level] = {
+            'per_sqm': round(cost_per_sqm, 2),
+            'total': round(total, 0),
+            'label': level.capitalize()
+        }
+    
+    return estimates
+
 def analyze_deal(data):
     """Perform comprehensive deal analysis with input validation"""
     
@@ -466,11 +664,40 @@ def analyze_deal(data):
         cash_invested, interest_rate
     )
     
+    # Get Article 4 info
+    article_4_info = check_article_4(postcode)
+    
+    # Get strategy recommendations
+    strategy_recommendations = get_strategy_recommendations(
+        deal_type, gross_yield, cash_on_cash, monthly_cashflow, postcode, 
+        article_4_area=article_4_info['is_article_4']
+    )
+    
+    # Get refurb estimates
+    property_type_for_refurb = data.get('property_type', 'terraced').lower()
+    internal_area = data.get('internal_area', 1000)  # Default 1000 sq ft
+    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, internal_area)
+    
+    # Score visualization data
+    score_breakdown = {
+        'total': deal_score,
+        'yield_score': min(30, max(0, (gross_yield / 8) * 30)) if gross_yield >= 6 else max(0, (gross_yield / 6) * 10),
+        'cashflow_score': 25 if monthly_cashflow >= 300 else (20 if monthly_cashflow >= 200 else (15 if monthly_cashflow >= 100 else 5)),
+        'coc_score': 25 if cash_on_cash >= 12 else (20 if cash_on_cash >= 10 else (15 if cash_on_cash >= 8 else (5 if cash_on_cash >= 4 else 0))),
+        'net_yield_score': 15 if net_yield >= 5 else (10 if net_yield >= 4 else (5 if net_yield >= 2 else 0)),
+        'risk_score': 5 if risk_level == 'LOW' else 0
+    }
+    
     # Compile results
     results = {
         'deal_type': deal_type,
         'address': address,
         'postcode': postcode,
+        'location': {
+            'country': 'England',
+            'region': get_region_from_postcode(postcode),
+            'council': article_4_info['council']
+        },
         'purchase_price': f"{purchase_price:,.0f}",
         'stamp_duty': f"{stamp_duty:,.0f}",
         'total_purchase_costs': f"{total_purchase_costs:,.0f}",
@@ -495,7 +722,11 @@ def analyze_deal(data):
         'flip_metrics': flip_metrics,
         'deal_score': deal_score,
         'deal_score_label': get_score_label(deal_score),
+        'score_breakdown': score_breakdown,
         'five_year_projection': five_year_projection,
+        'article_4': article_4_info,
+        'strategy_recommendations': strategy_recommendations,
+        'refurb_estimates': refurb_estimates,
         'analysis_date': datetime.now().strftime('%Y-%m-%d'),
         'next_steps': [
             "Verify rental comparables in the area",
@@ -513,6 +744,117 @@ def analyze_deal(data):
     }
     
     return results
+
+
+def get_region_from_postcode(postcode):
+    """Get region name from postcode area"""
+    area = postcode.split()[0] if ' ' in postcode else postcode[:3]
+    area = area.upper()
+    
+    regions = {
+        'M': 'Greater Manchester',
+        'S': 'South Yorkshire',
+        'L': 'Liverpool/Merseyside',
+        'WA': 'Warrington/Cheshire',
+        'WN': 'Wigan',
+        'BL': 'Bolton',
+        'OL': 'Oldham',
+        'SK': 'Stockport',
+        'BB': 'Blackburn',
+        'PR': 'Preston',
+        'CH': 'Chester',
+        'CW': 'Crewe',
+        'DE': 'Derbyshire',
+        'ST': 'Stoke-on-Trent',
+        'TF': 'Telford',
+        'WR': 'Worcester',
+        'B': 'Birmingham',
+        'CV': 'Coventry',
+        'LE': 'Leicester',
+        'NG': 'Nottingham',
+        'NG': 'Nottingham',
+        'LS': 'Leeds',
+        'BD': 'Bradford',
+        'HD': 'Huddersfield',
+        'HX': 'Halifax',
+        'WF': 'Wakefield',
+        'YO': 'York',
+        'HG': 'Harrogate',
+        'DL': 'Darlington',
+        'TS': 'Teesside',
+        'NE': 'Newcastle',
+        'DH': 'Durham',
+        'SR': 'Sunderland',
+        'CA': 'Carlisle',
+        'LA': 'Lancaster',
+        'FY': 'Blackpool',
+        'PR': 'Preston',
+        'WN': 'Wigan',
+        'CW': 'Crewe',
+        'ST': 'Stoke',
+        'DE': 'Derby',
+        'LE': 'Leicester',
+        'NG': 'Nottingham',
+        'LN': 'Lincoln',
+        'PE': 'Peterborough',
+        'CB': 'Cambridge',
+        'IP': 'Ipswich',
+        'NR': 'Norwich',
+        'CO': 'Colchester',
+        'CM': 'Chelmsford',
+        'SS': 'Southend',
+        'RM': 'Romford',
+        'IG': 'Ilford',
+        'E': 'East London',
+        'EC': 'City of London',
+        'N': 'North London',
+        'NW': 'North West London',
+        'SE': 'South East London',
+        'SW': 'South West London',
+        'W': 'West London',
+        'WC': 'Central London',
+        'BR': 'Bromley',
+        'CR': 'Croydon',
+        'DA': 'Dartford',
+        'EN': 'Enfield',
+        'HA': 'Harrow',
+        'HP': 'Hemel Hempstead',
+        'KT': 'Kingston',
+        'LU': 'Luton',
+        'MK': 'Milton Keynes',
+        'OX': 'Oxford',
+        'RG': 'Reading',
+        'RH': 'Redhill',
+        'SL': 'Slough',
+        'SM': 'Sutton',
+        'TN': 'Tunbridge Wells',
+        'TW': 'Twickenham',
+        'UB': 'Uxbridge',
+        'WD': 'Watford',
+        'PO': 'Portsmouth',
+        'SO': 'Southampton',
+        'GU': 'Guildford',
+        'BN': 'Brighton',
+        'CT': 'Canterbury',
+        'ME': 'Medway',
+        'TN': 'Tunbridge Wells',
+        'TR': 'Truro',
+        'PL': 'Plymouth',
+        'EX': 'Exeter',
+        'TQ': 'Torquay',
+        'TA': 'Taunton',
+        'BA': 'Bath',
+        'BS': 'Bristol',
+        'CF': 'Cardiff',
+        'NP': 'Newport',
+        'GL': 'Gloucester',
+        'SN': 'Swindon',
+        'SP': 'Salisbury',
+        'DT': 'Dorchester',
+        'BH': 'Bournemouth',
+    }
+    
+    return regions.get(area, 'England')
 
 def generate_pdf_report(results):
     """Generate professional PDF report"""
