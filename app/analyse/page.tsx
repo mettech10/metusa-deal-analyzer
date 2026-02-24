@@ -12,50 +12,158 @@ function formatAnalysisResults(r: Record<string, any>): string {
   if (verdict === 'PROCEED') emoji = '🟢'
   if (verdict === 'AVOID') emoji = '🔴'
   
-  let formatted = `${emoji} VERDICT: ${verdict}\n`
-  formatted += `⭐ DEAL SCORE: ${score}/100 (${label})\n`
-  formatted += `📍 ${r.address || 'N/A'} - ${r.postcode || 'N/A'}\n`
-  formatted += `💷 Purchase Price: £${r.purchase_price || 'N/A'}\n\n`
+  let formatted = ''
   
+  // HEADER WITH SCORE CIRCLE
+  formatted += `╔═══════════════════════════════════════════════════════╗\n`
+  formatted += `║  ${emoji} VERDICT: ${verdict.padEnd(43)}║\n`
+  formatted += `║  ⭐ SCORE: ${score.toString().padStart(3)}/100 ${label.padEnd(29)}║\n`
+  
+  // Location info
+  const country = r.location?.country || 'England'
+  const region = r.location?.region || 'Unknown Region'
+  formatted += `║  🏴󠁧󠁢󠁥󠁮󠁧󠁿 ${country} - ${region.padEnd(38)}║\n`
+  formatted += `╚═══════════════════════════════════════════════════════╝\n\n`
+  
+  // Property details
+  formatted += `📍 PROPERTY\n`
+  formatted += `─`.repeat(55) + `\n`
+  formatted += `  Address: ${r.address || 'N/A'}\n`
+  formatted += `  Postcode: ${r.postcode || 'N/A'}\n`
+  formatted += `  Council: ${r.location?.council || 'Unknown'}\n`
+  formatted += `  Purchase Price: £${r.purchase_price || 'N/A'}\n\n`
+  
+  // KEY METRICS
   formatted += `📊 KEY METRICS\n`
-  formatted += `─`.repeat(40) + `\n`
-  formatted += `• Gross Yield: ${r.gross_yield || 'N/A'}%\n`
-  formatted += `• Net Yield: ${r.net_yield || 'N/A'}%\n`
-  formatted += `• Monthly Cashflow: £${r.monthly_cashflow || 'N/A'}\n`
-  formatted += `• Cash-on-Cash: ${r.cash_on_cash || 'N/A'}%\n\n`
+  formatted += `─`.repeat(55) + `\n`
+  formatted += `  • Gross Yield: ${r.gross_yield || 'N/A'}%\n`
+  formatted += `  • Net Yield: ${r.net_yield || 'N/A'}%\n`
+  formatted += `  • Monthly Cashflow: £${r.monthly_cashflow || 'N/A'}\n`
+  formatted += `  • Cash-on-Cash: ${r.cash_on_cash || 'N/A'}%\n\n`
   
+  // PURCHASE COSTS
   formatted += `💰 PURCHASE COSTS\n`
-  formatted += `─`.repeat(40) + `\n`
-  formatted += `• Stamp Duty: £${r.stamp_duty || 'N/A'}\n`
-  formatted += `• Deposit (25%): £${r.deposit_amount || 'N/A'}\n`
-  formatted += `• Loan Amount: £${r.loan_amount || 'N/A'}\n`
-  formatted += `• Monthly Mortgage: £${r.monthly_mortgage || 'N/A'} @ ${r.interest_rate || 'N/A'}%\n\n`
+  formatted += `─`.repeat(55) + `\n`
+  formatted += `  • Stamp Duty: £${r.stamp_duty || 'N/A'}\n`
+  formatted += `  • Deposit (25%): £${r.deposit_amount || 'N/A'}\n`
+  formatted += `  • Loan Amount: £${r.loan_amount || 'N/A'}\n`
+  formatted += `  • Monthly Mortgage: £${r.monthly_mortgage || 'N/A'} @ ${r.interest_rate || 'N/A'}%\n\n`
   
+  // ARTICLE 4 SECTION
+  if (r.article_4) {
+    formatted += `⚖️  ARTICLE 4\n`
+    formatted += `─`.repeat(55) + `\n`
+    if (r.article_4.is_article_4) {
+      formatted += `  🔴 THIS AREA IS UNDER ARTICLE 4\n`
+      formatted += `  ${r.article_4.note || ''}\n`
+      formatted += `  ${r.article_4.advice || ''}\n`
+    } else {
+      formatted += `  🟢 THIS AREA IS NOT UNDER ARTICLE 4\n`
+      formatted += `  ${r.article_4.advice || 'No restrictions - permitted development applies'}\n`
+    }
+    formatted += `\n`
+  }
+  
+  // STRATEGY RECOMMENDATIONS
+  if (r.strategy_recommendations) {
+    formatted += `🎯 STRATEGY SUITABILITY\n`
+    formatted += `─`.repeat(55) + `\n`
+    const strategies = r.strategy_recommendations
+    
+    if (strategies.BTL) {
+      const status = strategies.BTL.suitable ? '✅' : '⚠️'
+      formatted += `  ${status} BTL: ${strategies.BTL.note || 'N/A'}\n`
+    }
+    if (strategies.HMO) {
+      const status = strategies.HMO.suitable ? '✅' : '⚠️'
+      formatted += `  ${status} HMO: ${strategies.HMO.note || 'N/A'}\n`
+    }
+    if (strategies.BRR) {
+      const status = strategies.BRR.suitable ? '✅' : '⚠️'
+      formatted += `  ${status} BRR: ${strategies.BRR.note || 'N/A'}\n`
+    }
+    if (strategies.FLIP) {
+      const status = strategies.FLIP.suitable ? '✅' : '⚠️'
+      formatted += `  ${status} FLIP: ${strategies.FLIP.note || 'N/A'}\n`
+    }
+    if (strategies.SOCIAL_HOUSING?.suitable) {
+      formatted += `  ✅ SOCIAL HOUSING (C3-C3b): ${strategies.SOCIAL_HOUSING.note || 'N/A'}\n`
+    }
+    formatted += `\n`
+  }
+  
+  // REFURB ESTIMATES
+  if (r.refurb_estimates) {
+    formatted += `🔨 REFURBISHMENT COSTS (per sq meter)\n`
+    formatted += `─`.repeat(55) + `\n`
+    const ref = r.refurb_estimates
+    if (ref.light) formatted += `  • Light (cosmetic): £${ref.light.total} (£${ref.light.per_sqm}/sqm)\n`
+    if (ref.medium) formatted += `  • Medium (kitchen/bath): £${ref.medium.total} (£${ref.medium.per_sqm}/sqm)\n`
+    if (ref.heavy) formatted += `  • Heavy (full refurb): £${ref.heavy.total} (£${ref.heavy.per_sqm}/sqm)\n`
+    if (ref.structural) formatted += `  • Structural: £${ref.structural.total} (£${ref.structural.per_sqm}/sqm)\n`
+    formatted += `\n`
+  }
+  
+  // COMPARABLE SOLD PRICES TABLE
+  if (r.comparable_sales && r.comparable_sales.length > 0) {
+    formatted += `📈 COMPARABLE SOLD PRICES\n`
+    formatted += `─`.repeat(75) + `\n`
+    formatted += `  ${'Address'.padEnd(25)} ${'Price'.padStart(12)} ${'Type'.padEnd(15)} ${'Date'.padStart(12)}\n`
+    formatted += `  ${'─'.repeat(75)}\n`
+    r.comparable_sales.slice(0, 5).forEach((sale: any) => {
+      const addr = (sale.address || 'N/A').substring(0, 22).padEnd(25)
+      const price = `£${(sale.price || 0).toLocaleString()}`.padStart(12)
+      const type = (sale.type || 'N/A').padEnd(15)
+      const date = (sale.date || 'N/A').padStart(12)
+      formatted += `  ${addr} ${price} ${type} ${date}\n`
+    })
+    formatted += `\n`
+  }
+  
+  // COMPARABLE RENT PRICES TABLE
+  if (r.comparable_rents && r.comparable_rents.length > 0) {
+    formatted += `🏠 COMPARABLE RENTAL PRICES\n`
+    formatted += `─`.repeat(75) + `\n`
+    formatted += `  ${'Address'.padEnd(25)} ${'Rent'.padStart(12)} ${'Type'.padEnd(15)} ${'Beds'.padStart(6)}\n`
+    formatted += `  ${'─'.repeat(75)}\n`
+    r.comparable_rents.slice(0, 5).forEach((rent: any) => {
+      const addr = (rent.address || 'N/A').substring(0, 22).padEnd(25)
+      const price = `£${(rent.rent || 0).toLocaleString()}/mo`.padStart(12)
+      const type = (rent.type || 'N/A').padEnd(15)
+      const beds = (rent.bedrooms || 'N/A').toString().padStart(6)
+      formatted += `  ${addr} ${price} ${type} ${beds}\n`
+    })
+    formatted += `\n`
+  }
+  
+  // STRENGTHS
   if (r.ai_strengths) {
     formatted += `✅ STRENGTHS\n`
-    formatted += `─`.repeat(40) + `\n`
+    formatted += `─`.repeat(55) + `\n`
     const strengths = r.ai_strengths.split('<br>').filter((s: string) => s.trim())
     strengths.slice(0, 3).forEach((s: string) => {
-      formatted += `• ${s.trim().substring(0, 60)}\n`
+      formatted += `  • ${s.trim().substring(0, 60)}\n`
     })
     formatted += `\n`
   }
   
+  // RISKS
   if (r.ai_risks) {
     formatted += `⚠️  RISKS\n`
-    formatted += `─`.repeat(40) + `\n`
+    formatted += `─`.repeat(55) + `\n`
     const risks = r.ai_risks.split('<br>').filter((s: string) => s.trim())
     risks.slice(0, 3).forEach((s: string) => {
-      formatted += `• ${s.trim().substring(0, 60)}\n`
+      formatted += `  • ${s.trim().substring(0, 60)}\n`
     })
     formatted += `\n`
   }
   
+  // NEXT STEPS
   if (r.next_steps && r.next_steps.length > 0) {
     formatted += `📋 NEXT STEPS\n`
-    formatted += `─`.repeat(40) + `\n`
-    r.next_steps.slice(0, 4).forEach((step: string) => {
-      formatted += `→ ${step}\n`
+    formatted += `─`.repeat(55) + `\n`
+    r.next_steps.slice(0, 5).forEach((step: string) => {
+      formatted += `  → ${step}\n`
     })
   }
   
