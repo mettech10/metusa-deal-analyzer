@@ -1377,13 +1377,15 @@ def ai_analyze():
         if not data:
             return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
         
-        # Validate required fields (address and postcode are optional - will default)
-        required = ['dealType', 'purchasePrice']
-        for field in required:
-            if field not in data or data[field] is None or data[field] == '':
-                return jsonify({'success': False, 'message': f'Missing required field: {field}'}), 400
+        # Validate required fields (only purchasePrice is truly required)
+        if 'purchasePrice' not in data or data['purchasePrice'] is None or data['purchasePrice'] == '':
+            return jsonify({'success': False, 'message': 'Missing required field: purchasePrice'}), 400
         
         # Set defaults for optional fields
+        if not data.get('dealType') or data['dealType'] is None or data['dealType'] == '':
+            data['dealType'] = 'BTL'  # Default to Buy-to-Let
+            app.logger.info("dealType not provided - defaulting to BTL")
+        
         if not data.get('address') or data['address'] is None:
             data['address'] = 'Unknown Address'
         
