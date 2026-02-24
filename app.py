@@ -509,6 +509,7 @@ def analyze_deal(data):
     # Security: Sanitize text inputs
     address = sanitize_input(data.get('address', ''), 200)
     postcode = sanitize_input(data.get('postcode', ''), 20)
+    bedrooms = int(data.get('bedrooms', 3) or 3)
     
     # Security: Validate postcode format if provided
     if postcode and not validate_postcode(postcode):
