@@ -26,7 +26,7 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 from scrapling_extractor import extract_property_from_url  # For most sites
 
 # ScrapingBee configuration (set SCRAPINGBEE_API_KEY env var for URL scraping)
-SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY')
+SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY') or 'FLJ5HUFLWZTW46GNZDDXRD93VM3ONK6BO3YYEKRR9L77O1NA5BYNUVFTYXV3J9BJ056ZWF50ZRY1DNDA'
 
 
 def scrape_with_scrapingbee(url: str) -> dict:
