@@ -25,6 +25,82 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
+# ScrapingBee configuration (set SCRAPINGBEE_API_KEY env var for URL scraping)
+SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY')
+
+
+def scrape_with_scrapingbee(url: str) -> dict:
+    """Scrape property using ScrapingBee API with residential proxies"""
+    if not SCRAPINGBEE_API_KEY:
+        print("[ScrapingBee] No API key configured")
+        return None
+    
+    api_url = 'https://app.scrapingbee.com/api/v1/'
+    params = {
+        'api_key': SCRAPINGBEE_API_KEY,
+        'url': url,
+        'render_js': 'true',
+        'premium_proxy': 'true',
+        'country_code': 'gb',
+        'wait': '2000',
+    }
+    
+    try:
+        response = requests.get(api_url, params=params, timeout=60)
+        if response.status_code != 200:
+            print(f"[ScrapingBee] Error: status {response.status_code}")
+            return None
+        
+        html = response.text
+        
+        # Extract data from HTML
+        data = {
+            'address': None,
+            'postcode': None,
+            'price': None,
+            'property_type': None,
+            'bedrooms': None,
+            'description': None
+        }
+        
+        # Price
+        price_match = re.search(r'£([\d,]+)', html)
+        if price_match:
+            try:
+                data['price'] = int(price_match.group(1).replace(',', ''))
+            except:
+                pass
+        
+        # Bedrooms
+        bed_match = re.search(r'(\d+)\s*bed', html, re.IGNORECASE)
+        if bed_match:
+            data['bedrooms'] = int(bed_match.group(1))
+        
+        # Property type
+        for ptype in ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow']:
+            if re.search(r'\b' + ptype + r'\b', html, re.IGNORECASE):
+                data['property_type'] = ptype.title()
+                break
+        
+        # Postcode
+        postcode_match = re.search(r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})', html)
+        if postcode_match:
+            data['postcode'] = postcode_match.group(1)
+        
+        # Address from title
+        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+        if title_match:
+            title = title_match.group(1)
+            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
+            data['address'] = title.strip()
+        
+        print(f"[ScrapingBee] Extracted: price={data['price']}, beds={data['bedrooms']}")
+        return data
+        
+    except Exception as e:
+        print(f"[ScrapingBee] Exception: {e}")
+        return None
+
 # Security: Input validation functions
 def validate_postcode(postcode):
     """Validate UK postcode format"""
@@ -1548,8 +1624,21 @@ def extract_url():
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
         
-        # Extract data using enhanced scraper with better anti-bot headers
-        print("[extract-url] Extracting property data...")
+        # Try ScrapingBee first (for protected sites like Rightmove, Zoopla, OTM)
+        if SCRAPINGBEE_API_KEY:
+            print("[extract-url] Trying ScrapingBee...")
+            extracted_data = scrape_with_scrapingbee(url)
+            if extracted_data and (extracted_data.get('address') or extracted_data.get('price')):
+                print("[extract-url] ScrapingBee succeeded")
+                return jsonify({
+                    'success': True,
+                    'data': extracted_data,
+                    'message': 'Data extracted successfully'
+                })
+            print("[extract-url] ScrapingBee failed, trying fallback...")
+        
+        # Fallback to basic scraper
+        print("[extract-url] Using basic scraper...")
         extracted_data = extract_property_from_url(url)
         
         if extracted_data and (extracted_data['address'] or extracted_data['price']):
