@@ -45,6 +45,12 @@ export function Navbar({ user }: NavbarProps) {
           >
             Pricing
           </a>
+          <Link
+            href="/waitlist"
+            className="text-sm font-medium text-primary transition-colors hover:text-primary/80"
+          >
+            Waitlist
+          </Link>
         </div>
 
         {/* Desktop auth area */}
@@ -119,6 +125,13 @@ export function Navbar({ user }: NavbarProps) {
             >
               Pricing
             </a>
+            <Link
+              href="/waitlist"
+              className="text-sm font-medium text-primary transition-colors hover:text-primary/80"
+              onClick={() => setMobileOpen(false)}
+            >
+              Join Waitlist
+            </Link>
 
             {user ? (
               <>

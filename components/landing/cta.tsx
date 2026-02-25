@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Sparkles } from "lucide-react"
 
 export function CTA() {
   return (
@@ -11,18 +11,27 @@ export function CTA() {
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,oklch(0.75_0.15_190_/_0.08)_0%,transparent_70%)]" />
 
           <div className="relative">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
+              <Sparkles className="size-4" />
+              Launching Soon
+            </div>
             <h2 className="text-balance text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-              Start Analysing Your Next Deal
+              Get Early Access to Metalyzi
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-              Join over 10,000 investors who trust Metalyzi to make smarter,
-              data-driven property investment decisions.
+              Join the waitlist for exclusive early access and 30% off the launch price.
+              Be the first to analyse deals like a pro.
             </p>
-            <div className="mt-8">
+            <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <Button asChild size="xl">
-                <Link href="/analyse">
-                  Analyse a Deal Now
+                <Link href="/waitlist">
+                  Join Waitlist
                   <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <Button asChild size="xl" variant="outline">
+                <Link href="/analyse">
+                  Try Demo
                 </Link>
               </Button>
             </div>
