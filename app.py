@@ -97,22 +97,35 @@ def scrape_with_scrapingbee(url: str) -> dict:
                 data['property_type'] = ptype.title()
                 break
         
-        # Postcode - improved extraction with validation
+        # Postcode - improved extraction with validation and formatting
         # UK postcode pattern: AA9 9AA or A9 9AA or AA99 9AA etc.
-        postcode_pattern = r'[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}'
-        all_postcodes = re.findall(postcode_pattern, html.upper())
+        # Look for postcodes with OR without spaces
+        postcode_patterns = [
+            r'[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}',  # With space: BB1 9BA
+            r'[A-Z]{1,2}\d[A-Z\d]\d[A-Z]{2}',       # Without space: BB19BA
+        ]
         
-        # Filter and validate postcodes
+        all_postcodes = []
+        for pattern in postcode_patterns:
+            matches = re.findall(pattern, html.upper())
+            all_postcodes.extend(matches)
+        
+        # Clean and validate postcodes
         valid_postcodes = []
         for pc in all_postcodes:
             pc_clean = pc.strip()
-            # Basic validation - should look like a real UK postcode
-            if len(pc_clean) >= 5 and len(pc_clean) <= 8:
-                # Check it starts with a valid area code
-                if re.match(r'^[A-Z]{1,2}\d', pc_clean):
+            # Add space if missing (format: AANN NAA or AN NAA)
+            if ' ' not in pc_clean and len(pc_clean) >= 5:
+                # Insert space before last 3 characters
+                pc_clean = pc_clean[:-3] + ' ' + pc_clean[-3:]
+            
+            # Basic validation
+            if len(pc_clean) >= 6 and len(pc_clean) <= 8:
+                # Check format: starts with letters, has space, ends with letters
+                if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', pc_clean):
                     valid_postcodes.append(pc_clean)
         
-        # Remove duplicates while preserving order
+        # Remove duplicates
         seen = set()
         unique_postcodes = []
         for pc in valid_postcodes:
@@ -120,37 +133,33 @@ def scrape_with_scrapingbee(url: str) -> dict:
                 seen.add(pc)
                 unique_postcodes.append(pc)
         
-        # Pick the most likely postcode (usually appears in address or title)
-        # Look for postcode near address keywords or in the title
+        # Pick the most likely postcode
         if unique_postcodes:
-            # Try to find which postcode is associated with the address
-            # by looking at the context around each postcode
+            # Try to find postcode near address-related context
             best_postcode = None
-            for pc in unique_postcodes[:5]:  # Check first 5 found
-                # Look for this postcode in the HTML and check surrounding context
-                idx = html.upper().find(pc)
+            for pc in unique_postcodes[:5]:
+                idx = html.upper().find(pc.replace(' ', ''))  # Search without space too
+                if idx < 0:
+                    idx = html.upper().find(pc)
                 if idx > 0:
                     context = html[max(0, idx-200):idx+200].lower()
-                    # Check if it's near address-related words
-                    if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'sale', 'manchester']):
+                    # Check if near property address words
+                    if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'for sale', 'property', 'bedroom']):
                         best_postcode = pc
                         break
             
             if not best_postcode:
-                # Fallback to first valid postcode that's not in the agent's address
+                # Skip agent/office postcodes
                 for pc in unique_postcodes:
-                    # Skip postcodes that are likely agent addresses (contain M33, M23 etc in agent info)
-                    # Check if this postcode appears in agent/office context
-                    idx = html.upper().find(pc)
+                    idx = html.upper().find(pc.replace(' ', ''))
+                    if idx < 0:
+                        idx = html.upper().find(pc)
                     context = html[max(0, idx-100):idx+100].lower()
                     if 'agent' not in context and 'office' not in context and 'branch' not in context:
                         best_postcode = pc
                         break
                 
-            if best_postcode:
-                data['postcode'] = best_postcode
-            else:
-                data['postcode'] = unique_postcodes[0] if unique_postcodes else None
+            data['postcode'] = best_postcode if best_postcode else unique_postcodes[0]
         
         # Address extraction - improved
         # Try multiple sources for address
