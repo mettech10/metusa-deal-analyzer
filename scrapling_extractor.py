@@ -1,39 +1,80 @@
 """
 Scrapling-Style Web Scraper
-Uses working requests as primary (since it works reliably)
-Keeps Scrapling structure for future upgrade
+Enhanced with better anti-bot bypass headers
 """
 
 import requests
 import re
+import time
+import random
 from typing import Dict, Optional
+
+# Rotate user agents to avoid detection
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+]
 
 class PropertyExtractor:
     """
     Extracts property data from listing pages
-    Works reliably with Rightmove, Zoopla, OnTheMarket
+    Enhanced anti-bot measures
     """
     
+    def __init__(self):
+        self.session = requests.Session()
+    
     def fetch(self, url: str) -> Optional[str]:
-        """Fetch page with anti-bot headers"""
+        """Fetch page with enhanced anti-bot headers"""
+        
+        # Select random user agent
+        ua = random.choice(USER_AGENTS)
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-GB,en;q=0.9',
-            'Referer': 'https://www.google.com/search?q=property+for+sale'
+            'User-Agent': ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-GB,en;q=0.9,en-US;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.google.com/',
         }
         
+        # Add some delays to seem more human
+        time.sleep(random.uniform(0.5, 1.5))
+        
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            # Use session with cookies
+            response = self.session.get(url, headers=headers, timeout=20, allow_redirects=True)
             response.raise_for_status()
             
             # Check for blocks
-            if 'captcha' in response.text.lower():
-                print("[Scraper] CAPTCHA detected")
+            text_lower = response.text.lower()
+            if any(block in text_lower for block in ['captcha', 'blocked', 'access denied', 'rate limit', 'we\'re sorry']):
+                print("[Scraper] Blocked or CAPTCHA detected")
+                return None
+            
+            # Check if we got a valid property page or a 404/redirect
+            if 'property' not in response.url.lower() and 'properties' not in response.url.lower():
+                print(f"[Scraper] Redirected away from property: {response.url}")
                 return None
                 
             return response.text
-        except Exception as e:
+        except requests.exceptions.Timeout:
+            print("[Scraper] Request timed out")
+            return None
+        except requests.exceptions.RequestException as e:
             print(f"[Scraper] Fetch failed: {e}")
             return None
     
