@@ -63,43 +63,161 @@ def scrape_with_scrapingbee(url: str) -> dict:
             'description': None
         }
         
-        # Price
-        price_match = re.search(r'£([\d,]+)', html)
-        if price_match:
-            try:
-                data['price'] = int(price_match.group(1).replace(',', ''))
-            except:
-                pass
+        # Price - look for price patterns
+        price_patterns = [
+            r'£([\d,]+)',  # Standard £price
+            r'price[":\s]*£?([\d,]+)',  # JSON/structured data
+            r'"price":\s*"?£?([\d,]+)',  # JSON format
+        ]
+        for pattern in price_patterns:
+            price_match = re.search(pattern, html, re.IGNORECASE)
+            if price_match:
+                try:
+                    data['price'] = int(price_match.group(1).replace(',', ''))
+                    break
+                except:
+                    pass
         
-        # Bedrooms
-        bed_match = re.search(r'(\d+)\s*bed', html, re.IGNORECASE)
-        if bed_match:
-            data['bedrooms'] = int(bed_match.group(1))
+        # Bedrooms - look for bedroom patterns
+        bed_patterns = [
+            r'(\d+)\s*bed',
+            r'"bedrooms":\s*(\d+)',
+            r'(\d+)\s*bedroom',
+        ]
+        for pattern in bed_patterns:
+            bed_match = re.search(pattern, html, re.IGNORECASE)
+            if bed_match:
+                data['bedrooms'] = int(bed_match.group(1))
+                break
         
         # Property type
-        for ptype in ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow']:
+        property_types = ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
+        for ptype in property_types:
             if re.search(r'\b' + ptype + r'\b', html, re.IGNORECASE):
                 data['property_type'] = ptype.title()
                 break
         
-        # Postcode
-        postcode_match = re.search(r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})', html)
-        if postcode_match:
-            data['postcode'] = postcode_match.group(1)
+        # Postcode - improved extraction with validation
+        # UK postcode pattern: AA9 9AA or A9 9AA or AA99 9AA etc.
+        postcode_pattern = r'[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}'
+        all_postcodes = re.findall(postcode_pattern, html.upper())
         
-        # Address from title
+        # Filter and validate postcodes
+        valid_postcodes = []
+        for pc in all_postcodes:
+            pc_clean = pc.strip()
+            # Basic validation - should look like a real UK postcode
+            if len(pc_clean) >= 5 and len(pc_clean) <= 8:
+                # Check it starts with a valid area code
+                if re.match(r'^[A-Z]{1,2}\d', pc_clean):
+                    valid_postcodes.append(pc_clean)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_postcodes = []
+        for pc in valid_postcodes:
+            if pc not in seen:
+                seen.add(pc)
+                unique_postcodes.append(pc)
+        
+        # Pick the most likely postcode (usually appears in address or title)
+        # Look for postcode near address keywords or in the title
+        if unique_postcodes:
+            # Try to find which postcode is associated with the address
+            # by looking at the context around each postcode
+            best_postcode = None
+            for pc in unique_postcodes[:5]:  # Check first 5 found
+                # Look for this postcode in the HTML and check surrounding context
+                idx = html.upper().find(pc)
+                if idx > 0:
+                    context = html[max(0, idx-200):idx+200].lower()
+                    # Check if it's near address-related words
+                    if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'sale', 'manchester']):
+                        best_postcode = pc
+                        break
+            
+            if not best_postcode:
+                # Fallback to first valid postcode that's not in the agent's address
+                for pc in unique_postcodes:
+                    # Skip postcodes that are likely agent addresses (contain M33, M23 etc in agent info)
+                    # Check if this postcode appears in agent/office context
+                    idx = html.upper().find(pc)
+                    context = html[max(0, idx-100):idx+100].lower()
+                    if 'agent' not in context and 'office' not in context and 'branch' not in context:
+                        best_postcode = pc
+                        break
+                
+            if best_postcode:
+                data['postcode'] = best_postcode
+            else:
+                data['postcode'] = unique_postcodes[0] if unique_postcodes else None
+        
+        # Address extraction - improved
+        # Try multiple sources for address
+        address_sources = []
+        
+        # 1. Try to find address in meta tags or structured data
+        address_match = re.search(r'"address"[:>"\s]*([^"<]+)', html, re.IGNORECASE)
+        if address_match:
+            addr = address_match.group(1).strip()
+            if len(addr) > 10 and any(char.isdigit() for char in addr):
+                address_sources.append(addr)
+        
+        # 2. Look for address in specific divs/spans (common patterns)
+        address_div = re.search(r'data-test=["\']property-title["\'][^>]*>([^<]+)', html, re.IGNORECASE)
+        if address_div:
+            address_sources.append(address_div.group(1).strip())
+        
+        # 3. Extract from title - but clean it up better
         title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
         if title_match:
             title = title_match.group(1)
-            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
-            data['address'] = title.strip()
+            # Clean up the title
+            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*', '', title, flags=re.IGNORECASE)
+            title = re.sub(r'\s*\d+\s*bed\s*\w+\s*house', '', title, flags=re.IGNORECASE)
+            title = title.strip()
+            if title and len(title) > 5:
+                address_sources.append(title)
         
-        print(f"[ScrapingBee] Extracted: price={data['price']}, beds={data['bedrooms']}")
+        # 4. Look for address patterns in the HTML
+        # Common pattern: Street name + location
+        addr_pattern = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Street|Avenue|Lane|Drive|Way|Close|Crescent|Gardens))[^<]*,\s*([^<,]{5,50})', html)
+        if addr_pattern:
+            street = addr_pattern.group(1)
+            area = addr_pattern.group(2).strip()
+            if street and area:
+                address_sources.append(f"{street}, {area}")
+        
+        # Pick the best address
+        for addr in address_sources:
+            if addr and len(addr) > 5:
+                # Clean up the address
+                addr = re.sub(r'\s+', ' ', addr)
+                addr = re.sub(r'\s*,\s*', ', ', addr)
+                if validate_postcode_str(data.get('postcode', '')):
+                    # If we have a postcode, make sure it's in the address or add it
+                    if data['postcode'] and data['postcode'] not in addr:
+                        addr = f"{addr}, {data['postcode']}"
+                data['address'] = addr.strip()
+                break
+        
+        # If still no address, use a default
+        if not data['address']:
+            data['address'] = "Address not available"
+        
+        print(f"[ScrapingBee] Extracted: price={data['price']}, beds={data['bedrooms']}, postcode={data['postcode']}")
         return data
         
     except Exception as e:
         print(f"[ScrapingBee] Exception: {e}")
         return None
+
+def validate_postcode_str(postcode):
+    """Quick validation of UK postcode format"""
+    if not postcode:
+        return False
+    pattern = r'^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$'
+    return bool(re.match(pattern, postcode.upper().strip()))
 
 # Security: Input validation functions
 def validate_postcode(postcode):
