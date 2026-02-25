@@ -6,6 +6,7 @@ Jinja2==3.1.2
 pdfkit==1.0.0
 requests==2.31.0
 redis==5.0.1
+playwright==1.40.0
 
 # Note: Set these environment variables for API access:
 # PROPERTY_DATA_API_KEY - Get from https://propertydata.co.uk/api (£49-149/mo)

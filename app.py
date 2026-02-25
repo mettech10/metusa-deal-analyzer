@@ -1549,7 +1549,27 @@ def extract_url():
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
         
-        # Extract data
+        # Check which site and use appropriate scraper
+        url_lower = url.lower()
+        
+        # Try Playwright first for protected sites (Rightmove, Zoopla, OnTheMarket)
+        if any(site in url_lower for site in ['rightmove', 'zoopla', 'onthemarket']):
+            try:
+                print("[extract-url] Trying Playwright for protected site...")
+                extracted_data = extract_property_advanced(url)
+                if extracted_data and (extracted_data.get('address') or extracted_data.get('price')):
+                    print("[extract-url] Playwright succeeded")
+                    return jsonify({
+                        'success': True,
+                        'data': extracted_data,
+                        'message': 'Data extracted successfully'
+                    })
+            except Exception as e:
+                print(f"[extract-url] Playwright failed: {e}")
+                # Fall through to basic scraper
+        
+        # Fall back to basic scraper
+        print("[extract-url] Using basic scraper...")
         extracted_data = extract_property_from_url(url)
         
         if extracted_data and (extracted_data['address'] or extracted_data['price']):
