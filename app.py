@@ -97,69 +97,82 @@ def scrape_with_scrapingbee(url: str) -> dict:
                 data['property_type'] = ptype.title()
                 break
         
-        # Postcode - improved extraction with validation and formatting
+        # Postcode - improved extraction with smart filtering
         # UK postcode pattern: AA9 9AA or A9 9AA or AA99 9AA etc.
-        # Look for postcodes with OR without spaces
-        postcode_patterns = [
-            r'[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}',  # With space: BB1 9BA
-            r'[A-Z]{1,2}\d[A-Z\d]\d[A-Z]{2}',       # Without space: BB19BA
-        ]
+        postcode_pattern = r'[A-Z]{1,2}\d[A-Z\d]?(?:\s)?\d[A-Z]{2}'
+        all_postcodes = re.findall(postcode_pattern, html.upper())
         
-        all_postcodes = []
-        for pattern in postcode_patterns:
-            matches = re.findall(pattern, html.upper())
-            all_postcodes.extend(matches)
-        
-        # Clean and validate postcodes
-        valid_postcodes = []
-        for pc in all_postcodes:
-            pc_clean = pc.strip()
-            # Add space if missing (format: AANN NAA or AN NAA)
-            if ' ' not in pc_clean and len(pc_clean) >= 5:
+        # Clean postcodes - ensure space is present
+        def format_postcode(pc):
+            pc = pc.strip()
+            if ' ' not in pc:
                 # Insert space before last 3 characters
-                pc_clean = pc_clean[:-3] + ' ' + pc_clean[-3:]
-            
-            # Basic validation
-            if len(pc_clean) >= 6 and len(pc_clean) <= 8:
-                # Check format: starts with letters, has space, ends with letters
-                if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', pc_clean):
-                    valid_postcodes.append(pc_clean)
+                pc = pc[:-3] + ' ' + pc[-3:]
+            return pc
         
-        # Remove duplicates
-        seen = set()
-        unique_postcodes = []
-        for pc in valid_postcodes:
-            if pc not in seen:
-                seen.add(pc)
-                unique_postcodes.append(pc)
-        
-        # Pick the most likely postcode
-        if unique_postcodes:
-            # Try to find postcode near address-related context
-            best_postcode = None
-            for pc in unique_postcodes[:5]:
-                idx = html.upper().find(pc.replace(' ', ''))  # Search without space too
-                if idx < 0:
-                    idx = html.upper().find(pc)
-                if idx > 0:
-                    context = html[max(0, idx-200):idx+200].lower()
-                    # Check if near property address words
-                    if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'for sale', 'property', 'bedroom']):
-                        best_postcode = pc
-                        break
-            
-            if not best_postcode:
-                # Skip agent/office postcodes
-                for pc in unique_postcodes:
-                    idx = html.upper().find(pc.replace(' ', ''))
-                    if idx < 0:
-                        idx = html.upper().find(pc)
-                    context = html[max(0, idx-100):idx+100].lower()
-                    if 'agent' not in context and 'office' not in context and 'branch' not in context:
-                        best_postcode = pc
-                        break
+        # Get unique postcodes with their context
+        postcode_scores = {}
+        for pc in all_postcodes:
+            formatted_pc = format_postcode(pc)
+            if formatted_pc in postcode_scores:
+                continue
                 
-            data['postcode'] = best_postcode if best_postcode else unique_postcodes[0]
+            # Find all occurrences and score them
+            best_score = 0
+            for match in re.finditer(re.escape(pc), html.upper()):
+                idx = match.start()
+                context = html[max(0, idx-300):idx+300].lower()
+                score = 0
+                
+                # High scoring - near price/property indicators
+                if any(word in context for word in ['price', '£', 'for sale', 'guide price']):
+                    score += 50
+                if any(word in context for word in ['property', 'bedroom', 'house', 'flat']):
+                    score += 40
+                if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way']):
+                    score += 30
+                if 'postcode' in context or 'post code' in context:
+                    score += 25
+                    
+                # Medium scoring - in address context
+                if 'address' in context:
+                    score += 20
+                    
+                # Penalize agent/office contexts
+                if any(word in context for word in ['agent', 'office', 'branch', 'contact us', 'tel:', 'phone']):
+                    score -= 100
+                if 'reeds rains' in context or 'estate agent' in context:
+                    score -= 80
+                    
+                # Boost if appears in title or main content area
+                if idx < 5000:  # Early in page (likely main content)
+                    score += 10
+                    
+                best_score = max(best_score, score)
+            
+            # Validate format
+            if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
+                postcode_scores[formatted_pc] = best_score
+        
+        # Pick the postcode with highest score
+        if postcode_scores:
+            # Sort by score descending
+            sorted_postcodes = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
+            print(f"[ScrapingBee] Postcode candidates: {sorted_postcodes[:3]}")
+            
+            # Take the highest scoring one
+            best_postcode = sorted_postcodes[0][0]
+            
+            # If best score is negative or 0, try to find one with positive score
+            if sorted_postcodes[0][1] <= 0 and len(sorted_postcodes) > 1:
+                for pc, score in sorted_postcodes[1:]:
+                    if score > 0:
+                        best_postcode = pc
+                        break
+            
+            data['postcode'] = best_postcode
+        else:
+            data['postcode'] = None
         
         # Address extraction - improved
         # Try multiple sources for address
