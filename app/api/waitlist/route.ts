@@ -10,14 +10,18 @@ async function addToHubSpot(email: string) {
     return null
   }
 
+  console.log("Starting HubSpot sync for email:", email)
+  console.log("API Key present (first 10 chars):", hubspotApiKey.substring(0, 10) + "...")
+
   try {
-    // Create or update contact in HubSpot
+    // Try the newer Private App / Access Token method first
     const response = await fetch(
-      `https://api.hubapi.com/crm/v3/objects/contacts?hapikey=${hubspotApiKey}`,
+      `https://api.hubapi.com/crm/v3/objects/contacts`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${hubspotApiKey}`,
         },
         body: JSON.stringify({
           properties: {
@@ -31,16 +35,27 @@ async function addToHubSpot(email: string) {
       }
     )
 
+    console.log("HubSpot create response status:", response.status)
+    const responseText = await response.text()
+    console.log("HubSpot create response body:", responseText)
+
     if (!response.ok) {
-      // Contact might already exist, try updating instead
-      if (response.status === 409) {
-        // Search for existing contact and update
+      // If 409 (conflict) or 400 with "duplicate" error, try updating
+      const isDuplicate = response.status === 409 || 
+                         responseText.toLowerCase().includes("duplicate") ||
+                         responseText.toLowerCase().includes("already exists")
+      
+      if (isDuplicate) {
+        console.log("Contact already exists, searching to update...")
+        
+        // Search for existing contact
         const searchResponse = await fetch(
-          `https://api.hubapi.com/crm/v3/objects/contacts/search?hapikey=${hubspotApiKey}`,
+          `https://api.hubapi.com/crm/v3/objects/contacts/search`,
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Authorization": `Bearer ${hubspotApiKey}`,
             },
             body: JSON.stringify({
               filterGroups: [
@@ -58,18 +73,24 @@ async function addToHubSpot(email: string) {
           }
         )
 
+        console.log("HubSpot search response status:", searchResponse.status)
+        const searchText = await searchResponse.text()
+        console.log("HubSpot search response body:", searchText)
+
         if (searchResponse.ok) {
-          const searchData = await searchResponse.json()
+          const searchData = JSON.parse(searchText)
           if (searchData.results && searchData.results.length > 0) {
             const contactId = searchData.results[0].id
+            console.log("Found existing contact, updating ID:", contactId)
 
             // Update existing contact
-            await fetch(
-              `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}?hapikey=${hubspotApiKey}`,
+            const updateResponse = await fetch(
+              `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
               {
                 method: "PATCH",
                 headers: {
                   "Content-Type": "application/json",
+                  "Authorization": `Bearer ${hubspotApiKey}`,
                 },
                 body: JSON.stringify({
                   properties: {
@@ -79,11 +100,19 @@ async function addToHubSpot(email: string) {
                 }),
               }
             )
+            
+            console.log("HubSpot update response status:", updateResponse.status)
+            const updateText = await updateResponse.text()
+            console.log("HubSpot update response body:", updateText)
+          } else {
+            console.log("No existing contact found with that email")
           }
         }
       } else {
-        console.error("HubSpot API error:", await response.text())
+        console.error("HubSpot API error:", response.status, responseText)
       }
+    } else {
+      console.log("Successfully created new contact in HubSpot")
     }
 
     return true
