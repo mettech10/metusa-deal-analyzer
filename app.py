@@ -1531,6 +1531,38 @@ def test_scrapingbee():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/test-propertydata')
+def test_propertydata():
+    """Test PropertyData API configuration"""
+    env_key = os.environ.get('PROPERTY_DATA_API_KEY', '')
+    module_key = property_data.api_key if hasattr(property_data, 'api_key') else 'N/A'
+    
+    # Quick test of the API
+    test_result = None
+    if env_key:
+        try:
+            import requests
+            test_response = requests.get(
+                'https://api.propertydata.co.uk/prices?postcode=M1+1AA&key=' + env_key,
+                timeout=10
+            )
+            test_result = {
+                'status': test_response.status_code,
+                'ok': test_response.ok
+            }
+        except Exception as e:
+            test_result = {'error': str(e)}
+    
+    return jsonify({
+        'env_key_set': bool(env_key),
+        'env_key_length': len(env_key),
+        'env_key_prefix': env_key[:10] + "..." if env_key else None,
+        'module_key_length': len(module_key) if module_key else 0,
+        'module_key_prefix': module_key[:10] + "..." if module_key else None,
+        'test_result': test_result,
+        'timestamp': datetime.now().isoformat()
+    })
+
 # Security: Error handlers
 @app.errorhandler(429)
 def ratelimit_handler(e):
@@ -2217,13 +2249,23 @@ def get_propertydata_rental():
         if not validate_postcode(postcode):
             return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
         
+        # Debug: Log API key info (masked)
+        app.logger.info(f"[PropertyData] Using key length: {len(property_data.api_key)}")
+        
         # Get rental valuation from PropertyData
         result = property_data.get_rental_valuation(postcode, bedrooms)
+        
+        app.logger.info(f"[PropertyData] Result: {result}")
         
         if 'error' in result:
             return jsonify({
                 'success': False,
-                'message': result['error']
+                'message': result['error'],
+                'debug': {
+                    'key_length': len(property_data.api_key),
+                    'postcode': postcode,
+                    'bedrooms': bedrooms
+                }
             }), 500
         
         return jsonify({
