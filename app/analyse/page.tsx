@@ -276,7 +276,8 @@ export default function AnalysePage() {
           const propertyData: PropertyFormData = {
             address: parsedResults.address || 'Unknown',
             postcode: parsedResults.postcode || '',
-            propertyType: parsedResults.property_type || 'Terrace',
+            propertyType: parsedResults.property_type || 'house',
+            investmentType: 'btl',
             bedrooms: parseInt(parsedResults.bedrooms) || 3,
             condition: 'good',
             purchasePrice: parseFloat(parsedResults.purchase_price?.toString().replace(/[^0-9.]/g, '')) || 0,
@@ -293,7 +294,7 @@ export default function AnalysePage() {
             insurance: 480,
             maintenance: 8,
             groundRent: 0,
-            serviceCharge: 0,
+            bills: 0,
             refurbishmentBudget: 0,
             legalFees: 1500,
             surveyCosts: 500
