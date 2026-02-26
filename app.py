@@ -2250,7 +2250,22 @@ def get_propertydata_rental():
             return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
         
         # Debug: Log API key info (masked)
-        app.logger.info(f"[PropertyData] Using key length: {len(property_data.api_key)}")
+        key_length = len(property_data.api_key) if hasattr(property_data, 'api_key') else 0
+        key_prefix = property_data.api_key[:10] if key_length > 0 else 'NONE'
+        app.logger.info(f"[PropertyData] Key prefix: {key_prefix}..., Length: {key_length}")
+        app.logger.info(f"[PropertyData] Postcode: {postcode}, Bedrooms: {bedrooms}")
+        
+        # Check if key seems wrong
+        if key_length < 20:
+            return jsonify({
+                'success': False,
+                'message': f'API key appears invalid (length: {key_length}). Check PROPERTY_DATA_API_KEY environment variable.',
+                'debug': {
+                    'key_length': key_length,
+                    'key_prefix': key_prefix,
+                    'env_var_set': bool(os.environ.get('PROPERTY_DATA_API_KEY'))
+                }
+            }), 500
         
         # Get rental valuation from PropertyData
         result = property_data.get_rental_valuation(postcode, bedrooms)
