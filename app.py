@@ -78,17 +78,45 @@ def scrape_with_scrapingbee(url: str) -> dict:
                 except:
                     pass
         
-        # Bedrooms - look for bedroom patterns
-        bed_patterns = [
-            r'(\d+)\s*bed',
-            r'"bedrooms":\s*(\d+)',
-            r'(\d+)\s*bedroom',
-        ]
-        for pattern in bed_patterns:
-            bed_match = re.search(pattern, html, re.IGNORECASE)
-            if bed_match:
-                data['bedrooms'] = int(bed_match.group(1))
-                break
+        # Bedrooms - improved extraction with validation
+        # Try multiple patterns and validate the result
+        bed_candidates = []
+        
+        # Pattern 1: Structured data (most reliable)
+        structured_bed = re.search(r'"bedrooms"[:>"\s]*(\d+)', html, re.IGNORECASE)
+        if structured_bed:
+            val = int(structured_bed.group(1))
+            if 1 <= val <= 20:  # Sanity check
+                bed_candidates.append(('structured', val, 100))
+        
+        # Pattern 2: Near property type indicators
+        bed_near_property = re.search(r'(\d+)\s*bed(?:room)?s?\s+(?:semi-detached|detached|terraced|flat|house|bungalow)', html, re.IGNORECASE)
+        if bed_near_property:
+            val = int(bed_near_property.group(1))
+            if 1 <= val <= 20:
+                bed_candidates.append(('near_property_type', val, 90))
+        
+        # Pattern 3: In hero/title section (early in HTML)
+        early_bed = re.search(r'<title[^>]*>.*?(\d+)\s*bed', html[:5000], re.IGNORECASE)
+        if early_bed:
+            val = int(early_bed.group(1))
+            if 1 <= val <= 20:
+                bed_candidates.append(('title', val, 80))
+        
+        # Pattern 4: Standard pattern with context
+        bed_with_context = re.search(r'(\d+)\s*bed(?:room)?s?\s*(?:semi|detached|terraced|flat|house)?', html, re.IGNORECASE)
+        if bed_with_context:
+            val = int(bed_with_context.group(1))
+            if 1 <= val <= 20:
+                bed_candidates.append(('standard', val, 50))
+        
+        # Pick the highest confidence bedroom count
+        if bed_candidates:
+            bed_candidates.sort(key=lambda x: x[2], reverse=True)
+            data['bedrooms'] = bed_candidates[0][1]
+            print(f"[ScrapingBee] Bedroom candidates: {bed_candidates}")
+        else:
+            data['bedrooms'] = None
         
         # Property type
         property_types = ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
@@ -99,6 +127,9 @@ def scrape_with_scrapingbee(url: str) -> dict:
         
         # Postcode - improved extraction with smart filtering
         # UK postcode pattern: AA9 9AA or A9 9AA or AA99 9AA etc.
+        # Valid UK postcode areas (first 1-2 letters)
+        VALID_AREAS = {'AB', 'AL', 'B', 'BA', 'BB', 'BD', 'BH', 'BL', 'BN', 'BR', 'BS', 'BT', 'CA', 'CB', 'CF', 'CH', 'CM', 'CO', 'CR', 'CT', 'CV', 'CW', 'DA', 'DD', 'DE', 'DG', 'DH', 'DL', 'DN', 'DT', 'DY', 'E', 'EC', 'EH', 'EN', 'EX', 'FK', 'FY', 'G', 'GL', 'GU', 'HA', 'HD', 'HG', 'HP', 'HR', 'HS', 'HU', 'HX', 'IG', 'IP', 'IV', 'KA', 'KT', 'KW', 'KY', 'L', 'LA', 'LD', 'LE', 'LL', 'LN', 'LS', 'LU', 'M', 'ME', 'MK', 'ML', 'N', 'NE', 'NG', 'NN', 'NP', 'NR', 'NW', 'OL', 'OX', 'PA', 'PE', 'PH', 'PL', 'PO', 'PR', 'RG', 'RH', 'RM', 'S', 'SA', 'SE', 'SG', 'SK', 'SL', 'SM', 'SN', 'SO', 'SP', 'SR', 'SS', 'ST', 'SW', 'SY', 'TA', 'TD', 'TF', 'TN', 'TQ', 'TR', 'TS', 'TW', 'UB', 'W', 'WA', 'WC', 'WD', 'WF', 'WN', 'WR', 'WS', 'WV', 'YO', 'ZE'}
+        
         postcode_pattern = r'[A-Z]{1,2}\d[A-Z\d]?(?:\s)?\d[A-Z]{2}'
         all_postcodes = re.findall(postcode_pattern, html.upper())
         
@@ -110,69 +141,122 @@ def scrape_with_scrapingbee(url: str) -> dict:
                 pc = pc[:-3] + ' ' + pc[-3:]
             return pc
         
+        def is_valid_area(pc):
+            """Check if postcode has a valid UK area code"""
+            area = pc.split()[0]
+            # Remove digits to get just the letters
+            area_letters = ''.join(c for c in area if c.isalpha())
+            return area_letters in VALID_AREAS
+        
         # Get unique postcodes with their context
         postcode_scores = {}
         for pc in all_postcodes:
             formatted_pc = format_postcode(pc)
+            
+            # Skip if we've seen this postcode
             if formatted_pc in postcode_scores:
+                continue
+            
+            # Validate format and area
+            if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
+                continue
+            
+            # Check it's a valid UK area
+            if not is_valid_area(formatted_pc):
+                print(f"[ScrapingBee] Skipping invalid area: {formatted_pc}")
+                continue
+            
+            # Skip obviously wrong postcodes (too short area codes like E4, M2)
+            area_part = formatted_pc.split()[0]
+            if len(area_part) < 2:
                 continue
                 
             # Find all occurrences and score them
             best_score = 0
             for match in re.finditer(re.escape(pc), html.upper()):
                 idx = match.start()
-                context = html[max(0, idx-300):idx+300].lower()
+                context = html[max(0, idx-400):idx+400].lower()
                 score = 0
                 
+                # Very high scoring - near property title or hero section (Zoopla/Rightmove)
+                if 'data-test="address-title"' in context or 'property-title' in context:
+                    score += 200
+                if '<h1' in context and ('property' in context or 'bed' in context):
+                    score += 150
+                if 'dp-address' in context or 'property-address' in context:
+                    score += 140
+                    
                 # High scoring - near price/property indicators
-                if any(word in context for word in ['price', '£', 'for sale', 'guide price']):
-                    score += 50
-                if any(word in context for word in ['property', 'bedroom', 'house', 'flat']):
-                    score += 40
-                if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way']):
-                    score += 30
+                if any(word in context for word in ['price', '£', 'for sale', 'guide price', 'asking price']):
+                    score += 100
+                if any(word in context for word in ['property', 'bedroom', 'bed', 'house', 'flat']):
+                    score += 80
+                if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'close']):
+                    score += 60
                 if 'postcode' in context or 'post code' in context:
-                    score += 25
+                    score += 40
+                if 'manchester' in context or 'london' in context or 'birmingham' in context or 'bristol' in context:
+                    score += 30  # Major city context
                     
                 # Medium scoring - in address context
                 if 'address' in context:
                     score += 20
                     
                 # Penalize agent/office contexts
-                if any(word in context for word in ['agent', 'office', 'branch', 'contact us', 'tel:', 'phone']):
+                if any(word in context for word in ['agent', 'office', 'branch', 'contact us', 'tel:', 'phone', 'call us']):
+                    score -= 150
+                if any(agent in context for agent in ['reeds rains', 'estate agent', 'your move', 'haart', 'connells']):
                     score -= 100
-                if 'reeds rains' in context or 'estate agent' in context:
-                    score -= 80
                     
-                # Boost if appears in title or main content area
-                if idx < 5000:  # Early in page (likely main content)
-                    score += 10
+                # Heavy penalty for financial/legal contexts
+                if any(word in context for word in ['vat', 'registration', 'company number', 'vat no']):
+                    score -= 200
+                    
+                # Boost if appears in title or main content area (first 8000 chars)
+                if idx < 8000:
+                    score += 50
+                if idx < 3000:
+                    score += 30  # Even earlier = main property section
                     
                 best_score = max(best_score, score)
             
-            # Validate format
-            if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
-                postcode_scores[formatted_pc] = best_score
+            postcode_scores[formatted_pc] = best_score
         
         # Pick the postcode with highest score
         if postcode_scores:
             # Sort by score descending
             sorted_postcodes = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
-            print(f"[ScrapingBee] Postcode candidates: {sorted_postcodes[:3]}")
+            print(f"[ScrapingBee] Postcode candidates: {sorted_postcodes[:5]}")
             
-            # Take the highest scoring one
-            best_postcode = sorted_postcodes[0][0]
+            # Take the highest scoring one with minimum score threshold
+            best_postcode = None
+            best_score = sorted_postcodes[0][1]
             
-            # If best score is negative or 0, try to find one with positive score
-            if sorted_postcodes[0][1] <= 0 and len(sorted_postcodes) > 1:
-                for pc, score in sorted_postcodes[1:]:
+            # Use the top one if it has a decent score
+            if best_score >= 50:
+                best_postcode = sorted_postcodes[0][0]
+            else:
+                # Try to find any with positive score
+                for pc, score in sorted_postcodes:
                     if score > 0:
                         best_postcode = pc
                         break
+                
+                # If still nothing, take the one that appears earliest in the page
+                if not best_postcode and sorted_postcodes:
+                    # Find which appears first
+                    earliest_idx = float('inf')
+                    for pc, _ in sorted_postcodes:
+                        match = re.search(re.escape(pc.replace(' ', '')), html.upper())
+                        if match and match.start() < earliest_idx:
+                            earliest_idx = match.start()
+                            best_postcode = format_postcode(pc)
             
             data['postcode'] = best_postcode
+            print(f"[ScrapingBee] Selected postcode: {best_postcode} (score: {postcode_scores.get(best_postcode, 'N/A')})")
         else:
             data['postcode'] = None
+            print("[ScrapingBee] No valid postcodes found")
         
         # Address extraction - improved
         # Try multiple sources for address
