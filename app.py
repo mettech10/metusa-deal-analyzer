@@ -2177,6 +2177,8 @@ def ai_analyze():
         # Set defaults for optional fields
         if not data.get('dealType') or data['dealType'] is None or data['dealType'] == '':
             data['dealType'] = 'BTL'  # Default to Buy-to-Let
+        
+        app.logger.info(f"[ai-analyze] Processing request with purchasePrice: {data.get('purchasePrice')}, dealType: {data.get('dealType')}")
             app.logger.info("dealType not provided - defaulting to BTL")
         
         if not data.get('address') or data['address'] is None:
@@ -2199,7 +2201,9 @@ def ai_analyze():
             app.logger.info(f"Estimated monthly rent: £{data['monthlyRent']}")
         
         # Step 1: Calculate financial metrics
+        app.logger.info(f"[ai-analyze] Calling analyze_deal with data: {data}")
         calculated_metrics = analyze_deal(data)
+        app.logger.info(f"[ai-analyze] analyze_deal completed successfully")
         
         # Step 2: Get market data (PropertyData primary, Land Registry fallback)
         postcode = data.get('postcode', '').strip().upper()
@@ -2385,10 +2389,13 @@ def ai_analyze():
         }), 400
     
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         app.logger.error(f'AI analysis error: {str(e)}')
+        app.logger.error(f'AI analysis traceback: {error_trace}')
         return jsonify({
             'success': False,
-            'message': 'An error occurred during AI analysis. Please try again.'
+            'message': f'An error occurred during AI analysis: {str(e)}'
         }), 500
 
 @app.route('/api/sold-prices', methods=['POST'])
