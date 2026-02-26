@@ -1503,6 +1503,34 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
+@app.route('/api/test-scrapingbee')
+def test_scrapingbee():
+    """Test ScrapingBee configuration"""
+    api_key = os.environ.get('SCRAPINGBEE_API_KEY')
+    hardcoded_key = 'FLJ5HUFLWZTW46GNZDDXRD93VM3ONK6BO3YYEKRR9L77O1NA5BYNUVFTYXV3J9BJ056ZWF50ZRY1DNDA'
+    
+    # Determine which key is being used
+    if api_key:
+        key_source = "Environment Variable"
+        key_prefix = api_key[:20]
+        key_length = len(api_key)
+    elif SCRAPINGBEE_API_KEY == hardcoded_key:
+        key_source = "Hardcoded Fallback"
+        key_prefix = SCRAPINGBEE_API_KEY[:20]
+        key_length = len(SCRAPINGBEE_API_KEY)
+    else:
+        key_source = "Not Configured"
+        key_prefix = None
+        key_length = 0
+    
+    return jsonify({
+        'status': 'configured' if SCRAPINGBEE_API_KEY else 'not_configured',
+        'key_source': key_source,
+        'key_prefix': key_prefix + "..." if key_prefix else None,
+        'key_length': key_length,
+        'timestamp': datetime.now().isoformat()
+    })
+
 # Security: Error handlers
 @app.errorhandler(429)
 def ratelimit_handler(e):
