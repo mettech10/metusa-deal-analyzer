@@ -1537,9 +1537,19 @@ def test_propertydata():
     env_key = os.environ.get('PROPERTY_DATA_API_KEY', '')
     module_key = property_data.api_key if hasattr(property_data, 'api_key') else 'N/A'
     
+    # Detailed diagnostics
+    diagnostics = {
+        'env_key_present': 'PROPERTY_DATA_API_KEY' in os.environ,
+        'env_key_length': len(env_key),
+        'env_key_full': env_key,  # Show full key for debugging (remove in production)
+        'module_key_length': len(module_key) if module_key else 0,
+        'module_key_full': module_key if module_key else 'N/A',
+        'keys_match': env_key == module_key,
+    }
+    
     # Quick test of the API
     test_result = None
-    if env_key:
+    if env_key and len(env_key) > 20:
         try:
             import requests
             test_response = requests.get(
@@ -1552,13 +1562,11 @@ def test_propertydata():
             }
         except Exception as e:
             test_result = {'error': str(e)}
+    else:
+        test_result = {'skipped': 'Key too short or missing'}
     
     return jsonify({
-        'env_key_set': bool(env_key),
-        'env_key_length': len(env_key),
-        'env_key_prefix': env_key[:10] + "..." if env_key else None,
-        'module_key_length': len(module_key) if module_key else 0,
-        'module_key_prefix': module_key[:10] + "..." if module_key else None,
+        'diagnostics': diagnostics,
         'test_result': test_result,
         'timestamp': datetime.now().isoformat()
     })
