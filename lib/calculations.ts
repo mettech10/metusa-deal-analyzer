@@ -215,12 +215,12 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
 
   // Deposit & Mortgage
   const depositAmount =
-    data.purchaseMethod === "cash"
+    data.purchaseType === "cash"
       ? data.purchasePrice
       : Math.round(data.purchasePrice * (data.depositPercentage / 100))
 
   const mortgageAmount =
-    data.purchaseMethod === "cash" ? 0 : data.purchasePrice - depositAmount
+    data.purchaseType === "cash" ? 0 : data.purchasePrice - depositAmount
 
   // Total purchase cost
   const totalPurchaseCost =
@@ -243,7 +243,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
   let annualMortgageCost = 0
   let bridgingLoanDetails = undefined
 
-  if (data.purchaseMethod === "cash") {
+  if (data.purchaseType === "cash") {
     // Cash purchase - no financing costs
     monthlyMortgagePayment = 0
     annualMortgageCost = 0
@@ -253,7 +253,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
     const bridgingMonthlyRate = data.bridgingMonthlyRate || 0.75 // 0.75% per month default
     const bridgingTermMonths = data.bridgingTermMonths || 12 // 12 months default
     
-    bridgingLoanDetails = calculateBridgingLoan(
+    const bridgingResult = calculateBridgingLoan(
       mortgageAmount,
       bridgingMonthlyRate,
       bridgingTermMonths,
@@ -261,6 +261,20 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
       data.bridgingExitFee || 0.5, // 0.5% default
       true // interest rolled up
     )
+    
+    // Map to the correct type format
+    bridgingLoanDetails = {
+      loanAmount: mortgageAmount,
+      monthlyInterestRate: bridgingMonthlyRate,
+      termMonths: bridgingTermMonths,
+      monthlyInterest: bridgingResult.monthlyInterest,
+      totalInterest: bridgingResult.totalInterest,
+      arrangementFee: bridgingResult.arrangementFee,
+      exitFee: bridgingResult.exitFee,
+      totalCost: bridgingResult.totalCost,
+      totalRepayment: bridgingResult.totalRepayment,
+      apr: bridgingResult.apr
+    }
     
     // For cash flow calculations, bridging has no monthly payments
     // (interest is rolled up and paid at exit)
@@ -287,7 +301,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
   const monthlyInsurance = data.insurance / 12
   const monthlyMaintenance = data.maintenance / 12
   const monthlyGroundRent = data.groundRent / 12
-  const monthlyServiceCharge = data.serviceCharge / 12
+  const monthlyBills = data.bills / 12
 
   const monthlyRunningCosts =
     Math.round(
@@ -295,7 +309,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
         monthlyInsurance +
         monthlyMaintenance +
         monthlyGroundRent +
-        monthlyServiceCharge) *
+        monthlyBills) *
         100
     ) / 100
 

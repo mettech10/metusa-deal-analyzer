@@ -58,7 +58,7 @@ export function Hero() {
       {/* Floating particles */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         {[...Array(6)].map((_, i) => (
-          <FloatingElement
+          <div
             key={i}
             className="absolute"
             style={{
@@ -66,20 +66,22 @@ export function Hero() {
               top: `${20 + (i % 3) * 25}%`,
             }}
           >
-            <motion.div
-              className="h-2 w-2 rounded-full bg-[#D4AF37]/30"
-              animate={{
-                scale: [1, 1.5, 1],
-                opacity: [0.3, 0.6, 0.3],
-              }}
-              transition={{
-                duration: 3,
-                delay: i * 0.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-          </FloatingElement>
+            <FloatingElement>
+              <motion.div
+                className="h-2 w-2 rounded-full bg-[#D4AF37]/30"
+                animate={{
+                  scale: [1, 1.5, 1],
+                  opacity: [0.3, 0.6, 0.3],
+                }}
+                transition={{
+                  duration: 3,
+                  delay: i * 0.5,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              />
+            </FloatingElement>
+          </div>
         ))}
       </div>
 

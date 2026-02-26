@@ -92,6 +92,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     depositPercentage: 25,
     interestRate: 5.5,
     mortgageTerm: 25,
+    mortgageType: "interest-only",
     monthlyRent: 0,
     annualRentIncrease: 2,
     voidWeeks: 2,
