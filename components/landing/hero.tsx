@@ -20,86 +20,20 @@ import {
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden min-h-screen flex items-center justify-center">
-      {/* Animated gradient background */}
-      <motion.div
-        className="absolute inset-0 -z-20"
-        style={{
-          background: "linear-gradient(135deg, #1B1F3B 0%, #2d3561 25%, #1B1F3B 50%, #3d4171 75%, #1B1F3B 100%)",
-          backgroundSize: "400% 400%",
-        }}
-        animate={{
-          backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
-        }}
-        transition={{
-          duration: 20,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-      />
-
-      {/* Grid background with pulse */}
-      <motion.div
-        className="pointer-events-none absolute inset-0 -z-10"
+    <section className="relative overflow-hidden">
+      {/* Grid background - Original */}
+      <div
+        className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
             "linear-gradient(to right, oklch(0.25 0.02 260 / 0.3) 1px, transparent 1px), linear-gradient(to bottom, oklch(0.25 0.02 260 / 0.3) 1px, transparent 1px)",
           backgroundSize: "60px 60px",
         }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0.3, 0.5, 0.3] }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: "easeInOut",
-        }}
       />
+      {/* Radial glow - Original */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,oklch(0.75_0.15_190_/_0.08)_0%,transparent_70%)]" />
 
-      {/* Floating particles */}
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        {[...Array(6)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute"
-            style={{
-              left: `${15 + i * 15}%`,
-              top: `${20 + (i % 3) * 25}%`,
-            }}
-          >
-            <FloatingElement>
-              <motion.div
-                className="h-2 w-2 rounded-full bg-[#D4AF37]/30"
-                animate={{
-                  scale: [1, 1.5, 1],
-                  opacity: [0.3, 0.6, 0.3],
-                }}
-                transition={{
-                  duration: 3,
-                  delay: i * 0.5,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-              />
-            </FloatingElement>
-          </div>
-        ))}
-      </div>
-
-      {/* Radial glow with animation */}
-      <motion.div 
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_center,oklch(0.75_0.15_190_/_0.15)_0%,transparent_70%)]"
-        animate={{
-          scale: [1, 1.1, 1],
-          opacity: [0.8, 1, 0.8],
-        }}
-        transition={{
-          duration: 6,
-          repeat: Infinity,
-          ease: "easeInOut",
-        }}
-      />
-
-      <div className="relative mx-auto flex max-w-7xl flex-col items-center px-6 pb-24 pt-20 text-center md:pb-32 md:pt-28">
+      <div className="relative mx-auto flex max-w-7xl flex-col items-center px-6 pb-24 pt-20 text-center md:pb-32 md:pt-28" style={{ minHeight: "auto" }}>
         {/* Animated Badge */}
         <motion.div
           initial={{ opacity: 0, y: -30, scale: 0.9 }}
