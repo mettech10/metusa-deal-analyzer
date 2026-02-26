@@ -27,7 +27,7 @@ async function addToHubSpot(email: string) {
           properties: {
             email: email,
             lifecyclestage: "lead",
-            // lead_source: "Website Waitlist", // Temporarily disabled - HubSpot dropdown not synced yet
+            lead_source: "Website Waitlist",
             metalyzi_waitlist: "true",
             metalyzi_waitlist_date: new Date().toISOString().split("T")[0], // Date format YYYY-MM-DD
           },
@@ -144,7 +144,7 @@ async function addToHubSpot(email: string) {
                 properties: {
                   metalyzi_waitlist: "true",
                   metalyzi_waitlist_date: new Date().toISOString().split("T")[0],
-                  // lead_source: "Website Waitlist", // Temporarily disabled - HubSpot dropdown not synced
+                  lead_source: "Website Waitlist",
                 },
               }),
             }
