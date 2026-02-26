@@ -10,11 +10,11 @@ async function addToHubSpot(email: string) {
     return null
   }
 
-  console.log("Starting HubSpot sync for email:", email)
-  console.log("API Key present (first 10 chars):", hubspotApiKey.substring(0, 10) + "...")
+  console.log("[HubSpot] Starting sync for email:", email)
+  console.log("[HubSpot] API Key length:", hubspotApiKey.length)
 
   try {
-    // Try the newer Private App / Access Token method first
+    // First, try creating with all custom properties
     const response = await fetch(
       `https://api.hubapi.com/crm/v3/objects/contacts`,
       {
@@ -29,62 +29,140 @@ async function addToHubSpot(email: string) {
             lifecyclestage: "lead",
             lead_source: "Website Waitlist",
             metalyzi_waitlist: "true",
-            metalyzi_waitlist_date: new Date().toISOString(),
+            metalyzi_waitlist_date: new Date().toISOString().split("T")[0], // Date format YYYY-MM-DD
           },
         }),
       }
     )
 
-    console.log("HubSpot create response status:", response.status)
+    console.log("[HubSpot] Create response status:", response.status)
     const responseText = await response.text()
-    console.log("HubSpot create response body:", responseText)
+    console.log("[HubSpot] Create response body:", responseText)
 
-    if (!response.ok) {
-      // If 409 (conflict) or 400 with "duplicate" error, try updating
-      const isDuplicate = response.status === 409 || 
-                         responseText.toLowerCase().includes("duplicate") ||
-                         responseText.toLowerCase().includes("already exists")
+    if (response.ok) {
+      console.log("[HubSpot] ✓ Successfully created new contact")
+      return true
+    }
+
+    // Parse error to check if it's a duplicate
+    let errorData
+    try {
+      errorData = JSON.parse(responseText)
+    } catch {
+      errorData = { message: responseText }
+    }
+
+    const isDuplicate = response.status === 409 || 
+                       responseText.toLowerCase().includes("duplicate") ||
+                       responseText.toLowerCase().includes("already exists") ||
+                       errorData?.message?.toLowerCase().includes("already exists")
+
+    // Check if error is due to unknown properties
+    const isUnknownProperty = responseText.toLowerCase().includes("unknown property") ||
+                              errorData?.message?.toLowerCase().includes("does not exist")
+
+    if (isUnknownProperty) {
+      console.log("[HubSpot] ⚠️ Custom properties not found. Trying with basic fields only...")
       
-      if (isDuplicate) {
-        console.log("Contact already exists, searching to update...")
-        
-        // Search for existing contact
-        const searchResponse = await fetch(
-          `https://api.hubapi.com/crm/v3/objects/contacts/search`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${hubspotApiKey}`,
+      // Retry without custom properties
+      const retryResponse = await fetch(
+        `https://api.hubapi.com/crm/v3/objects/contacts`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${hubspotApiKey}`,
+          },
+          body: JSON.stringify({
+            properties: {
+              email: email,
+              lifecyclestage: "lead",
             },
-            body: JSON.stringify({
-              filterGroups: [
-                {
-                  filters: [
-                    {
-                      propertyName: "email",
-                      operator: "EQ",
-                      value: email,
-                    },
-                  ],
+          }),
+        }
+      )
+
+      const retryText = await retryResponse.text()
+      console.log("[HubSpot] Retry response status:", retryResponse.status)
+      console.log("[HubSpot] Retry response body:", retryText)
+
+      if (retryResponse.ok) {
+        console.log("[HubSpot] ✓ Contact created (without custom properties - you need to create them in HubSpot)")
+        console.log("[HubSpot] Missing properties: metalyzi_waitlist, metalyzi_waitlist_date, lead_source")
+        return true
+      }
+    }
+
+    if (isDuplicate) {
+      console.log("[HubSpot] Contact already exists, searching to update...")
+      
+      // Search for existing contact
+      const searchResponse = await fetch(
+        `https://api.hubapi.com/crm/v3/objects/contacts/search`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${hubspotApiKey}`,
+          },
+          body: JSON.stringify({
+            filterGroups: [
+              {
+                filters: [
+                  {
+                    propertyName: "email",
+                    operator: "EQ",
+                    value: email,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      )
+
+      console.log("[HubSpot] Search response status:", searchResponse.status)
+      const searchText = await searchResponse.text()
+      console.log("[HubSpot] Search response body:", searchText)
+
+      if (searchResponse.ok) {
+        const searchData = JSON.parse(searchText)
+        if (searchData.results && searchData.results.length > 0) {
+          const contactId = searchData.results[0].id
+          console.log("[HubSpot] Found existing contact ID:", contactId)
+
+          // Try update with custom properties
+          const updateResponse = await fetch(
+            `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${hubspotApiKey}`,
+              },
+              body: JSON.stringify({
+                properties: {
+                  metalyzi_waitlist: "true",
+                  metalyzi_waitlist_date: new Date().toISOString().split("T")[0],
+                  lead_source: "Website Waitlist",
                 },
-              ],
-            }),
+              }),
+            }
+          )
+          
+          console.log("[HubSpot] Update response status:", updateResponse.status)
+          const updateText = await updateResponse.text()
+          console.log("[HubSpot] Update response body:", updateText)
+
+          if (updateResponse.ok) {
+            console.log("[HubSpot] ✓ Successfully updated existing contact")
+            return true
           }
-        )
-
-        console.log("HubSpot search response status:", searchResponse.status)
-        const searchText = await searchResponse.text()
-        console.log("HubSpot search response body:", searchText)
-
-        if (searchResponse.ok) {
-          const searchData = JSON.parse(searchText)
-          if (searchData.results && searchData.results.length > 0) {
-            const contactId = searchData.results[0].id
-            console.log("Found existing contact, updating ID:", contactId)
-
-            // Update existing contact
-            const updateResponse = await fetch(
+          
+          // If update failed due to unknown properties, try basic update
+          if (updateText.toLowerCase().includes("unknown property")) {
+            console.log("[HubSpot] ⚠️ Custom properties not found on update. Skipping them...")
+            const basicUpdateResponse = await fetch(
               `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
               {
                 method: "PATCH",
@@ -94,31 +172,28 @@ async function addToHubSpot(email: string) {
                 },
                 body: JSON.stringify({
                   properties: {
-                    metalyzi_waitlist: "true",
-                    metalyzi_waitlist_date: new Date().toISOString(),
+                    lifecyclestage: "lead",
                   },
                 }),
               }
             )
             
-            console.log("HubSpot update response status:", updateResponse.status)
-            const updateText = await updateResponse.text()
-            console.log("HubSpot update response body:", updateText)
-          } else {
-            console.log("No existing contact found with that email")
+            if (basicUpdateResponse.ok) {
+              console.log("[HubSpot] ✓ Updated existing contact (without custom properties)")
+              return true
+            }
           }
+        } else {
+          console.log("[HubSpot] ⚠️ No existing contact found with that email")
         }
-      } else {
-        console.error("HubSpot API error:", response.status, responseText)
       }
-    } else {
-      console.log("Successfully created new contact in HubSpot")
     }
 
-    return true
+    console.error("[HubSpot] ✗ Failed:", response.status, errorData)
+    return false
   } catch (error) {
-    console.error("HubSpot integration error:", error)
-    return null
+    console.error("[HubSpot] Integration error:", error)
+    return false
   }
 }
 
@@ -163,13 +238,20 @@ export async function POST(request: Request) {
       )
     }
 
-    // Add to HubSpot (non-blocking)
-    addToHubSpot(email).catch((err) => {
-      console.error("HubSpot sync failed:", err)
-    })
+    // Add to HubSpot and capture result for better feedback
+    let hubspotResult = null
+    try {
+      hubspotResult = await addToHubSpot(email)
+      console.log("[HubSpot] Final result:", hubspotResult)
+    } catch (err) {
+      console.error("[HubSpot] Sync failed:", err)
+    }
 
     return NextResponse.json(
-      { message: "Successfully joined waitlist" },
+      { 
+        message: "Successfully joined waitlist",
+        hubspot: hubspotResult === true ? "synced" : hubspotResult === false ? "failed" : "skipped"
+      },
       { status: 201 }
     )
   } catch (error) {
