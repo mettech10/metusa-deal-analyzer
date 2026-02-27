@@ -1963,20 +1963,46 @@ def get_ai_property_analysis(property_data, calculated_metrics, market_data=None
         if source == 'PropertyData API':
             estimated_rent    = market_data.get('estimated_rent')
             rental_confidence = market_data.get('rental_confidence')
+            rental_range      = market_data.get('rental_range', {})
+            demand_score      = market_data.get('rental_demand_score')
             price_growth      = market_data.get('price_growth_12m')
             avg_sold          = market_data.get('avg_sold_price')
             area_score        = market_data.get('area_score')
             transport_score   = market_data.get('transport_score')
+            rent_comps        = market_data.get('rent_comparables', [])
+            sold_comps        = market_data.get('comparable_sales', [])
+            sales_val         = market_data.get('sales_valuation', {})
 
+            market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
+
+            # Rental valuation
             if estimated_rent:
-                market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
                 market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
-                # Flag if the assumed rent is far from market
+                if rental_range:
+                    low_w  = rental_range.get('low_weekly', 0)
+                    high_w = rental_range.get('high_weekly', 0)
+                    if low_w and high_w:
+                        market_context += f" | Range: £{round(low_w*52/12):,}-£{round(high_w*52/12):,}/mo"
+                if demand_score:
+                    market_context += f"\n- Rental Demand Score: {demand_score}/10"
                 assumed_rent = property_data.get('monthlyRent', 0)
                 if assumed_rent and estimated_rent:
                     diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
                     if abs(diff_pct) > 15:
-                        market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate"
+                        market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate — verify with local agents"
+
+            # Sales valuation (real house value)
+            if sales_val and sales_val.get('estimate'):
+                sv_est = sales_val['estimate']
+                sv_conf = sales_val.get('confidence', 'N/A')
+                market_context += f"\n- PropertyData Sales Valuation: £{sv_est:,.0f} (Confidence: {sv_conf})"
+                pp = property_data.get('purchasePrice', 0)
+                if pp and sv_est:
+                    vs_val = ((pp - sv_est) / sv_est) * 100
+                    tag = "BELOW" if vs_val < 0 else "ABOVE"
+                    market_context += f" → purchase price is {abs(vs_val):.1f}% {tag} estimated value"
+
+            # Price growth + average sold
             if price_growth is not None:
                 market_context += f"\n- 12-Month Price Growth: {price_growth:.1f}%"
             if avg_sold:
@@ -1984,11 +2010,38 @@ def get_ai_property_analysis(property_data, calculated_metrics, market_data=None
                 pp = property_data.get('purchasePrice', 0)
                 if pp and avg_sold:
                     vs_avg = ((pp - avg_sold) / avg_sold) * 100
-                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
+                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average sold)"
+
+            # Area scores
             if area_score:
                 market_context += f"\n- Area Quality Score: {area_score}/10"
             if transport_score:
                 market_context += f"\n- Transport Links Score: {transport_score}/10"
+
+            # Real rent comparables
+            if rent_comps:
+                market_context += f"\n- Rental Comparables ({len(rent_comps)} nearby lettings used for estimate):"
+                for i, rc in enumerate(rent_comps[:5], 1):
+                    mr = rc.get('monthly_rent')
+                    addr = rc.get('address', 'Nearby property')
+                    date = rc.get('date', 'N/A')
+                    dist = rc.get('distance_miles')
+                    line = f"\n  {i}. {addr}: £{mr:,}/mo" if mr else f"\n  {i}. {addr}"
+                    if dist:
+                        line += f" ({dist:.1f} miles away)"
+                    if date and date != 'N/A':
+                        line += f" — {date}"
+                    market_context += line
+
+            # Real sold comparables
+            if sold_comps:
+                market_context += f"\n- Sold Comparables ({len(sold_comps)} recent sales):"
+                for i, sc in enumerate(sold_comps[:5], 1):
+                    market_context += (
+                        f"\n  {i}. {sc.get('address', 'Nearby property')}: "
+                        f"£{sc.get('price', 0):,} — {sc.get('type', 'N/A')} "
+                        f"({sc.get('bedrooms', '?')} bed) on {sc.get('date', 'N/A')}"
+                    )
 
         elif source == 'Land Registry':
             avg_price    = market_data.get('average_price')
@@ -2314,121 +2367,65 @@ def ai_analyze():
         
         # Step 3: Get AI insights (with market data)
         ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
-        
-        # Get sales valuation
-        sales_valuation = None
-        if property_data.is_configured() and postcode:
-            try:
-                valuation = property_data.get_sales_valuation(postcode, bedrooms)
-                if 'estimate' in valuation:
-                    sales_valuation = {
-                        'estimate': valuation['estimate'].get('sale_price'),
-                        'confidence': valuation.get('confidence'),
-                        'range': valuation.get('range', {})
-                    }
-            except Exception as e:
-                app.logger.warning(f'Could not get sales valuation: {e}')
-        
-        # Generate comparable data sections (workaround for limited PropertyData API)
-        # SOLD COMPARABLES - Use Land Registry or estimates
+
+        # ------------------------------------------------------------------ #
+        # SOLD COMPARABLES                                                     #
+        # Priority: PropertyData real sales → Land Registry → empty           #
+        # ------------------------------------------------------------------ #
         sold_comparables = market_data.get('comparable_sales', [])
         if not sold_comparables and market_data.get('recent_sales'):
             sold_comparables = [
                 {
-                    'address': f"{s.get('street', 'Similar Property')}, {postcode}",
+                    'address': f"{s.get('street', 'Similar property')}, {postcode}",
                     'price': s.get('price', 0),
                     'bedrooms': bedrooms,
-                    'date': s.get('date', 'Recent'),
-                    'type': data.get('property_type', 'House').title()
+                    'date': s.get('date', 'N/A'),
+                    'type': data.get('property_type', 'House').title(),
+                    'source': 'Land Registry'
                 }
                 for s in market_data['recent_sales'][:5]
+                if s.get('price')
             ]
-        # Fallback: generate estimated comparables based on purchase price
-        if not sold_comparables:
-            avg_price = float(str(calculated_metrics.get('purchase_price', 200000)).replace(',', ''))
-            sold_comparables = [
-                {
-                    'address': f"Similar 3-bed property, {postcode}",
-                    'price': int(avg_price * 0.95),
-                    'bedrooms': bedrooms,
-                    'date': 'Recent sale',
-                    'type': 'Semi-Detached',
-                    'note': 'Estimated comparable'
-                },
-                {
-                    'address': f"Similar 3-bed property, {postcode}",
-                    'price': int(avg_price * 1.02),
-                    'bedrooms': bedrooms,
-                    'date': 'Recent sale',
-                    'type': 'Semi-Detached',
-                    'note': 'Estimated comparable'
-                },
-                {
-                    'address': f"Similar 2-bed property, {postcode}",
-                    'price': int(avg_price * 0.85),
-                    'bedrooms': max(1, bedrooms - 1),
-                    'date': 'Recent sale',
-                    'type': 'Terraced',
-                    'note': 'Estimated comparable (smaller)'
-                }
-            ]
-        
-        # RENT COMPARABLES - Use estimated rent or PropertyData
-        monthly_rent = int(data.get('monthlyRent', 0))
-        rent_comparables = []
-        if market_data.get('estimated_rent'):
-            market_rent = market_data['estimated_rent']
+
+        # ------------------------------------------------------------------ #
+        # RENT COMPARABLES                                                     #
+        # Priority: PropertyData real lettings → market estimate → empty      #
+        # ------------------------------------------------------------------ #
+        rent_comparables = market_data.get('rent_comparables', [])
+        if not rent_comparables and market_data.get('estimated_rent'):
+            # We have a market estimate but no individual comparables
             rent_comparables = [
                 {
-                    'address': f"3-bed property, {postcode}",
-                    'monthly_rent': market_rent,
+                    'address': f"{bedrooms}-bed property, {postcode}",
+                    'monthly_rent': market_data['estimated_rent'],
                     'bedrooms': bedrooms,
-                    'type': 'Similar property',
-                    'source': 'PropertyData estimate'
+                    'source': 'PropertyData market estimate',
+                    'confidence': market_data.get('rental_confidence', 'N/A')
                 }
             ]
-        elif monthly_rent > 0:
-            # Generate comparables around the expected rent
-            rent_comparables = [
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': int(monthly_rent * 0.95),
-                    'bedrooms': bedrooms,
-                    'type': 'Terraced',
-                    'source': 'Estimated comparable'
-                },
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': monthly_rent,
-                    'bedrooms': bedrooms,
-                    'type': 'Semi-Detached',
-                    'source': 'Target property estimate'
-                },
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': int(monthly_rent * 1.05),
-                    'bedrooms': bedrooms,
-                    'type': 'Detached',
-                    'source': 'Estimated comparable'
+
+        # ------------------------------------------------------------------ #
+        # HOUSE VALUATION                                                      #
+        # Priority: PropertyData valuation → Land Registry avg → asking price #
+        # ------------------------------------------------------------------ #
+        house_valuation = market_data.get('sales_valuation')
+        if not house_valuation:
+            avg_sold = market_data.get('avg_sold_price') or market_data.get('average_price')
+            if avg_sold:
+                house_valuation = {
+                    'estimate': int(avg_sold),
+                    'confidence': 'Low',
+                    'source': 'Land Registry area average',
+                    'note': 'Based on recent sold prices in postcode area — not property-specific.'
                 }
-            ]
-        
-        # HOUSE VALUATION - Use sales valuation, Land Registry, or estimate
-        house_valuation = sales_valuation or {}
-        if not house_valuation.get('estimate'):
-            purchase_price = int(data.get('purchasePrice', 0))
-            # Generate estimate based on purchase price with typical negotiation range
-            house_valuation = {
-                'estimate': purchase_price,
-                'confidence': 'Medium (based on asking price)',
-                'range': {
-                    'low': int(purchase_price * 0.95),
-                    'high': int(purchase_price * 1.05)
-                },
-                'source': 'Market estimate',
-                'note': 'Based on current listing price. Professional valuation recommended.'
-            }
-        
+            else:
+                house_valuation = {
+                    'estimate': int(data.get('purchasePrice', 0)),
+                    'confidence': 'Low',
+                    'source': 'Asking price only',
+                    'note': 'No external valuation available. Commission a RICS survey for an accurate figure.'
+                }
+
         # Combine results
         results = {
             **calculated_metrics,
@@ -2437,16 +2434,10 @@ def ai_analyze():
             'ai_risks': ai_insights['risks'],
             'ai_area': ai_insights['area'],
             'ai_next_steps': ai_insights['next_steps'],
-            # Add comparable data sections
             'sold_comparables': sold_comparables,
             'rent_comparables': rent_comparables,
             'house_valuation': house_valuation,
-            # Legacy fields
-            'comparable_sales': market_data.get('comparable_sales', []),
-            'comparable_listings': market_data.get('comparable_listings', []),
             'avg_sold_price': market_data.get('avg_sold_price'),
-            'avg_asking_price': market_data.get('avg_asking_price'),
-            'sales_valuation': sales_valuation,
             'market_source': market_data.get('source', 'None')
         }
         
