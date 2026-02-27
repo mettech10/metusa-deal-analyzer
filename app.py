@@ -34,13 +34,13 @@ def scrape_with_jina(url: str) -> dict:
     jina_url = f'https://r.jina.ai/{url}'
     headers = {
         'Accept': 'text/plain',
-        'X-Timeout': '30',
+        'X-Timeout': '20',
         'X-Return-Format': 'markdown',
         'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
     }
 
     try:
-        response = requests.get(jina_url, headers=headers, timeout=45)
+        response = requests.get(jina_url, headers=headers, timeout=22)
         if response.status_code != 200:
             print(f"[Jina] Error: status {response.status_code}")
             return None
@@ -1882,29 +1882,34 @@ def extract_url():
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
         
-        # Try Jina Reader first (free, no API key - handles Rightmove, Zoopla, OTM)
-        print("[extract-url] Trying Jina Reader...")
-        extracted_data = scrape_with_jina(url)
-        jina_address = extracted_data.get('address') if extracted_data else None
-        jina_has_data = (
-            extracted_data
-            and (extracted_data.get('price') or
-                 (jina_address and jina_address != 'Address not available'))
-        )
-        if jina_has_data:
-            print("[extract-url] Jina Reader succeeded")
-            return jsonify({
-                'success': True,
-                'data': extracted_data,
-                'message': 'Data extracted successfully'
-            })
-        print("[extract-url] Jina Reader failed, trying fallback...")
+        # Run Jina Reader and basic scraper in parallel to stay well under
+        # Gunicorn's 30s worker timeout (Jina alone can take 15-20s).
+        print("[extract-url] Running Jina Reader + basic scraper in parallel...")
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Fallback to basic scraper
-        print("[extract-url] Using basic scraper...")
-        extracted_data = extract_property_from_url(url)
-        
-        if extracted_data and (extracted_data['address'] or extracted_data['price']):
+        def _has_data(d):
+            if not d:
+                return False
+            addr = d.get('address')
+            return bool(d.get('price') or (addr and addr != 'Address not available'))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            jina_future = pool.submit(scrape_with_jina, url)
+            basic_future = pool.submit(extract_property_from_url, url)
+
+            extracted_data = None
+            for future in as_completed([jina_future, basic_future], timeout=25):
+                result = future.result()
+                if _has_data(result):
+                    extracted_data = result
+                    source = 'Jina Reader' if future is jina_future else 'basic scraper'
+                    print(f"[extract-url] Succeeded via {source}")
+                    # Cancel the other one (best-effort)
+                    jina_future.cancel()
+                    basic_future.cancel()
+                    break
+
+        if extracted_data and _has_data(extracted_data):
             return jsonify({
                 'success': True,
                 'data': extracted_data,
