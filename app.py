@@ -201,7 +201,8 @@ def scrape_with_jina(url: str) -> dict:
                     if any(w in context for w in ['estate agent', 'branch', 'contact us',
                                                    'tel:', 'phone', 'call us', 'our office']):
                         score -= 200
-                    if any(w in context for w in ['agent', 'office']):
+                    if any(w in context for w in ['agent address', 'agent postcode',
+                                                   'branch address', 'office address']):
                         score -= 100
                     if any(w in context for w in ['vat', 'registration', 'company number']):
                         score -= 200
@@ -2156,12 +2157,12 @@ Purchase Price: £{property_data.get('purchasePrice', 0):,}
 Monthly Rent:   £{property_data.get('monthlyRent', 0):,}
 
 == CALCULATED METRICS ==
-Gross Yield:        {calculated_metrics.get('gross_yield', 0):.2f}%  (benchmark ≥ {benchmarks['gross_yield']}%)
-Net Yield:          {calculated_metrics.get('net_yield', 0):.2f}%
+Gross Yield:        {calculated_metrics.get('gross_yield', 0)}%  (benchmark ≥ {benchmarks['gross_yield']}%)
+Net Yield:          {calculated_metrics.get('net_yield', 0)}%
 Monthly Cashflow:   £{calculated_metrics.get('monthly_cashflow', 0):,.0f}  (benchmark ≥ £{benchmarks['cashflow']}/mo)
-Cash-on-Cash:       {calculated_metrics.get('cash_on_cash', 0):.2f}%  (benchmark ≥ {benchmarks['coc']}%)
-Annual Net Income:  £{calculated_metrics.get('net_annual_income', 0):,.0f}
-Monthly Mortgage:   £{calculated_metrics.get('monthly_mortgage', 0):,.0f}
+Cash-on-Cash:       {calculated_metrics.get('cash_on_cash', 0)}%  (benchmark ≥ {benchmarks['coc']}%)
+Annual Net Income:  £{calculated_metrics.get('net_annual_income', 0)}
+Monthly Mortgage:   £{calculated_metrics.get('monthly_mortgage', 0)}
 Deal Score:         {calculated_metrics.get('deal_score', 0)}/100
 System Verdict:     {calculated_metrics.get('verdict', 'REVIEW')}
 {strategy_context}
