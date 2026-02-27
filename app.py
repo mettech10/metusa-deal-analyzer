@@ -10,6 +10,7 @@ from jinja2 import Template
 import requests
 import secrets
 import re
+import io
 from html import escape
 
 # Import Land Registry API
@@ -1607,7 +1608,7 @@ def download_pdf():
         if pdf:
             # Security: Set secure headers for PDF download
             response = send_file(
-                pdf,
+                io.BytesIO(pdf),
                 mimetype='application/pdf',
                 as_attachment=True,
                 download_name=f"deal_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -2265,7 +2266,7 @@ def ai_analyze():
                     'price': s.get('price', 0),
                     'bedrooms': bedrooms,
                     'date': s.get('date', 'Recent'),
-                    'type': property_data.get('property_type', 'House').title()
+                    'type': data.get('property_type', 'House').title()
                 }
                 for s in market_data['recent_sales'][:5]
             ]
@@ -2300,7 +2301,7 @@ def ai_analyze():
             ]
         
         # RENT COMPARABLES - Use estimated rent or PropertyData
-        monthly_rent = int(property_data.get('monthlyRent', 0))
+        monthly_rent = int(data.get('monthlyRent', 0))
         rent_comparables = []
         if market_data.get('estimated_rent'):
             market_rent = market_data['estimated_rent']
@@ -2342,7 +2343,7 @@ def ai_analyze():
         # HOUSE VALUATION - Use sales valuation, Land Registry, or estimate
         house_valuation = sales_valuation or {}
         if not house_valuation.get('estimate'):
-            purchase_price = int(property_data.get('purchasePrice', 0))
+            purchase_price = int(data.get('purchasePrice', 0))
             # Generate estimate based on purchase price with typical negotiation range
             house_valuation = {
                 'estimate': purchase_price,
