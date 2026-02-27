@@ -2179,7 +2179,6 @@ def ai_analyze():
             data['dealType'] = 'BTL'  # Default to Buy-to-Let
         
         app.logger.info(f"[ai-analyze] Processing request with purchasePrice: {data.get('purchasePrice')}, dealType: {data.get('dealType')}")
-            app.logger.info("dealType not provided - defaulting to BTL")
         
         if not data.get('address') or data['address'] is None:
             data['address'] = 'Unknown Address'
