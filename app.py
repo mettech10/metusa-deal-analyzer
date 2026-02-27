@@ -143,39 +143,61 @@ def scrape_with_jina(url: str) -> dict:
             area_letters = ''.join(c for c in area if c.isalpha())
             return area_letters in VALID_AREAS
 
-        # --- Postcode: title line first, then scored fallback ---
-        # Strategy 1: extract directly from Jina's "Title:" line.
+        # --- Postcode extraction: four strategies in priority order ---
+
+        def valid_pc(fp):
+            """Return True if fp looks like a real UK postcode."""
+            return (re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', fp)
+                    and is_valid_area(fp))
+
+        found_postcode = None
+
+        # Strategy 0: scan the first 1 200 chars (Jina always puts Title / URL
+        # Source at the top).  This catches postcodes in the page title even if
+        # the "Title:" line regex doesn't match due to line-ending quirks.
+        header_pcs = re.findall(postcode_pattern, text[:1200].upper())
+        for pc in header_pcs:
+            fp = format_postcode(pc)
+            if valid_pc(fp):
+                found_postcode = fp
+                print(f"[Jina] Postcode from header scan: {fp}")
+                break
+
+        # Strategy 1: parse the "Title:" line that Jina emits.
         # Rightmove/Zoopla titles look like:
         #   "3 bed semi for sale - Orme Avenue, Alkrington, Manchester M24 1JZ | Rightmove"
-        # This is the most reliable source because it IS the listing address.
-        title_postcode = None
-        title_search = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
-        if title_search:
-            title_text = title_search.group(1)
-            title_pcs = re.findall(postcode_pattern, title_text.upper())
-            for pc in title_pcs:
-                fp = format_postcode(pc)
-                if (re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', fp)
-                        and is_valid_area(fp)
-                        and len(fp.split()[0]) >= 2):
-                    title_postcode = fp
-                    break
+        if not found_postcode:
+            title_search = re.search(r'Title:\s*(.+)', text, re.IGNORECASE)
+            if title_search:
+                title_text = title_search.group(1)
+                title_pcs = re.findall(postcode_pattern, title_text.upper())
+                for pc in title_pcs:
+                    fp = format_postcode(pc)
+                    if valid_pc(fp):
+                        found_postcode = fp
+                        print(f"[Jina] Postcode from title line: {fp}")
+                        break
 
-        if title_postcode:
-            data['postcode'] = title_postcode
-            print(f"[Jina] Postcode from title: {title_postcode}")
-        else:
-            # Strategy 2: score all candidates; heavily penalise agent/contact context.
+        # Strategy 2: explicit label — "Postcode: OL1 3LA" anywhere in page.
+        if not found_postcode:
+            explicit = re.search(
+                r'postcode[:\s]+([A-Z]{1,2}\d[A-Z\d]?(?:\s)?\d[A-Z]{2})',
+                text, re.IGNORECASE
+            )
+            if explicit:
+                fp = format_postcode(explicit.group(1).upper())
+                if valid_pc(fp):
+                    found_postcode = fp
+                    print(f"[Jina] Postcode from explicit label: {fp}")
+
+        # Strategy 3: score every candidate; heavily penalise agent/footer context.
+        if not found_postcode:
             postcode_scores = {}
             for pc in all_postcodes:
                 formatted_pc = format_postcode(pc)
                 if formatted_pc in postcode_scores:
                     continue
-                if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
-                    continue
-                if not is_valid_area(formatted_pc):
-                    continue
-                if len(formatted_pc.split()[0]) < 2:
+                if not valid_pc(formatted_pc):
                     continue
 
                 best_score = 0
@@ -184,8 +206,8 @@ def scrape_with_jina(url: str) -> dict:
                     context = text[max(0, idx - 300):idx + 300].lower()
                     score = 0
 
-                    # Reward proximity to listing content
-                    if idx < 1500:
+                    # Reward proximity to start (listing data comes first in Jina output)
+                    if idx < 3000:
                         score += 60
 
                     if any(w in context for w in ['price', '£', 'for sale', 'asking']):
@@ -214,11 +236,12 @@ def scrape_with_jina(url: str) -> dict:
                 sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
                 print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
                 best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
-                data['postcode'] = best_postcode
+                found_postcode = best_postcode
                 print(f"[Jina] Selected postcode (scored): {best_postcode}")
             else:
-                data['postcode'] = None
                 print("[Jina] No valid postcodes found")
+
+        data['postcode'] = found_postcode
 
         # --- Address ---
         # Jina typically starts its output with "Title: <page title>"
@@ -728,7 +751,7 @@ def analyze_deal(data):
     
     # Security: Extract and sanitize inputs
     deal_type = sanitize_input(data.get('dealType', 'BTL'), 20)
-    if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP']:
+    if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP', 'R2SA']:
         raise ValueError("Invalid deal type")
     
     # Security: Validate numeric inputs
@@ -770,29 +793,37 @@ def analyze_deal(data):
     
     # Financing - handle different purchase types
     purchase_type = data.get('purchaseType', 'mortgage')
-    deposit_amount = purchase_price * (deposit_pct / 100)
-    loan_amount = purchase_price - deposit_amount
-    
-    # Bridging loan calculations
+    # R2SA is a rent-not-buy strategy — no purchase financing
+    if deal_type == 'R2SA':
+        purchase_type = 'r2sa'
+
     bridging_loan_details = None
-    if purchase_type == 'bridging-loan':
-        # Bridging loan: typically 0.75% per month, 12 months, 1% arrangement, 0.5% exit
-        bridging_monthly_rate = float(data.get('bridgingMonthlyRate', 0.75))  # % per month
+
+    if purchase_type == 'cash':
+        # Cash purchase: no loan, no monthly mortgage
+        deposit_amount = purchase_price
+        loan_amount = 0
+        monthly_mortgage = 0
+        annual_mortgage = 0
+
+    elif purchase_type == 'bridging-loan':
+        deposit_amount = purchase_price * (deposit_pct / 100)
+        loan_amount = purchase_price - deposit_amount
+        # Bridging loan: typically 0.75%/month, 12 months, 1% arrangement, 0.5% exit
+        bridging_monthly_rate = float(data.get('bridgingMonthlyRate', 0.75))
         bridging_term_months = int(data.get('bridgingTermMonths', 12))
-        bridging_arrangement_fee_pct = float(data.get('bridgingArrangementFee', 1.0))  # 1%
-        bridging_exit_fee_pct = float(data.get('bridgingExitFee', 0.5))  # 0.5%
-        
-        # Calculate bridging costs
+        bridging_arrangement_fee_pct = float(data.get('bridgingArrangementFee', 1.0))
+        bridging_exit_fee_pct = float(data.get('bridgingExitFee', 0.5))
+
         monthly_interest = loan_amount * (bridging_monthly_rate / 100)
         total_interest = monthly_interest * bridging_term_months
         arrangement_fee = loan_amount * (bridging_arrangement_fee_pct / 100)
         exit_fee = loan_amount * (bridging_exit_fee_pct / 100)
         total_bridging_cost = total_interest + arrangement_fee + exit_fee
         total_repayment = loan_amount + total_interest + exit_fee
-        
-        # Approximate APR
-        bridging_apr = (bridging_monthly_rate * 12) + ((bridging_arrangement_fee_pct + bridging_exit_fee_pct) / bridging_term_months * 12)
-        
+        bridging_apr = (bridging_monthly_rate * 12) + (
+            (bridging_arrangement_fee_pct + bridging_exit_fee_pct) / bridging_term_months * 12
+        )
         bridging_loan_details = {
             'loan_amount': round(loan_amount, 0),
             'monthly_rate': bridging_monthly_rate,
@@ -805,49 +836,82 @@ def analyze_deal(data):
             'total_repayment': round(total_repayment, 0),
             'apr': round(bridging_apr, 2)
         }
-        
-        # For cashflow: bridging has no monthly payments (rolled up interest)
+        # Interest rolled up — no monthly payments during term
         monthly_mortgage = 0
         annual_mortgage = 0
+
+    elif purchase_type == 'r2sa':
+        # Rent-to-SA: investor rents the property, not buys it
+        deposit_amount = 0
+        loan_amount = 0
+        monthly_mortgage = 0
+        annual_mortgage = 0
+
     else:
-        # Standard mortgage
+        # Standard mortgage (default)
+        deposit_amount = purchase_price * (deposit_pct / 100)
+        loan_amount = purchase_price - deposit_amount
         monthly_mortgage = (loan_amount * (interest_rate / 100)) / 12
         annual_mortgage = monthly_mortgage * 12
-    
-    # BRR/Flip specific calculations
+
+    # BRR/Flip specific
     refurb_costs = float(data.get('refurbCosts', 0)) if deal_type in ['BRR', 'FLIP'] else 0
     arv = float(data.get('arv', 0)) if deal_type in ['BRR', 'FLIP'] else 0
-    
-    # HMO specific
+
+    # HMO specific — room count × avg rate overrides monthly_rent
     room_count = int(data.get('roomCount', 0)) if deal_type == 'HMO' else 0
     avg_room_rate = float(data.get('avgRoomRate', 0)) if deal_type == 'HMO' else 0
-    
     if deal_type == 'HMO' and room_count > 0 and avg_room_rate > 0:
         monthly_rent = room_count * avg_room_rate
-    
-    # Income and expenses
-    annual_rent = monthly_rent * 12
-    management_costs = annual_rent * 0.10
-    void_costs = (monthly_rent / 4.33) * 2  # 2 weeks
-    maintenance_reserve = annual_rent * 0.08
-    insurance = 480
-    
-    # Annual mortgage cost (0 for bridging since interest is rolled up)
-    if purchase_type == 'bridging-loan':
-        annual_mortgage = 0  # Interest rolled up, not paid monthly
-    else:
-        annual_mortgage = monthly_mortgage * 12
-    
-    total_annual_expenses = management_costs + void_costs + maintenance_reserve + insurance + annual_mortgage
-    net_annual_income = annual_rent - total_annual_expenses
-    monthly_cashflow = net_annual_income / 12
-    
-    # Key metrics
-    gross_yield = (annual_rent / purchase_price) * 100 if purchase_price > 0 else 0
-    cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee
-    cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
-    net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
-    
+
+    # R2SA specific — investor rents property and sublets as serviced accommodation
+    r2sa_metrics = {}
+    if deal_type == 'R2SA':
+        sa_revenue = float(data.get('saMonthlySARevenue', 0))
+        sa_setup_costs = float(data.get('saSetupCosts', 5000))
+        monthly_rent_paid = monthly_rent  # rent paid to the landlord
+        # Operating costs: cleaning, utilities, platform fees (~30% of revenue)
+        monthly_op_costs = sa_revenue * 0.30
+        monthly_profit = sa_revenue - monthly_rent_paid - monthly_op_costs
+        annual_profit = monthly_profit * 12
+        r2sa_roi = (annual_profit / sa_setup_costs) * 100 if sa_setup_costs > 0 else 0
+        r2sa_metrics = {
+            'monthly_rent_paid': round(monthly_rent_paid, 0),
+            'sa_monthly_revenue': round(sa_revenue, 0),
+            'monthly_op_costs': round(monthly_op_costs, 0),
+            'monthly_profit': round(monthly_profit, 0),
+            'annual_profit': round(annual_profit, 0),
+            'setup_costs': round(sa_setup_costs, 0),
+            'r2sa_roi': round(r2sa_roi, 1),
+        }
+        # For standard metric calculations, use profit as net income
+        net_annual_income = annual_profit
+        monthly_cashflow = monthly_profit
+        annual_rent = sa_revenue * 12
+        total_annual_expenses = (monthly_rent_paid + monthly_op_costs) * 12
+        gross_yield = 0  # N/A for R2SA (no purchase)
+        cash_invested = sa_setup_costs
+        cash_on_cash = r2sa_roi
+        net_yield = 0
+
+    # Income and expenses (skipped for R2SA which calculates directly above)
+    if deal_type != 'R2SA':
+        annual_rent = monthly_rent * 12
+        management_costs = annual_rent * 0.10
+        void_costs = (monthly_rent / 4.33) * 2  # 2 weeks void
+        maintenance_reserve = annual_rent * 0.08
+        insurance = 480
+        total_annual_expenses = (management_costs + void_costs + maintenance_reserve
+                                 + insurance + annual_mortgage)
+        net_annual_income = annual_rent - total_annual_expenses
+        monthly_cashflow = net_annual_income / 12
+
+        # Key metrics
+        gross_yield = (annual_rent / purchase_price) * 100 if purchase_price > 0 else 0
+        cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee
+        cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
+        net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
+
     # BRR specific metrics
     brr_metrics = {}
     if deal_type == 'BRR' and arv > 0:
@@ -917,6 +981,18 @@ def analyze_deal(data):
             verdict = "PROCEED"
             risk_level = "MEDIUM"
         elif flip_metrics.get('flip_roi', 0) >= 15:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
+    elif deal_type == 'R2SA':
+        mp = r2sa_metrics.get('monthly_profit', 0)
+        roi = r2sa_metrics.get('r2sa_roi', 0)
+        if mp >= 500 and roi >= 50:
+            verdict = "PROCEED"
+            risk_level = "MEDIUM"  # R2SA carries subletting/void risk
+        elif mp >= 200:
             verdict = "REVIEW"
             risk_level = "MEDIUM"
         else:
@@ -1013,6 +1089,7 @@ def analyze_deal(data):
         'weaknesses': weaknesses,
         'brr_metrics': brr_metrics,
         'flip_metrics': flip_metrics,
+        'r2sa_metrics': r2sa_metrics,
         'bridging_loan_details': bridging_loan_details,
         'purchase_type': purchase_type,
         'deal_score': deal_score,
@@ -2130,22 +2207,35 @@ HMO STRATEGY:
 - Room Count: {property_data.get('roomCount', 'N/A')}
 - Avg Room Rate: £{property_data.get('avgRoomRate', 0)}/month
 - Note: Article 4 / licensing requirements may apply — verify locally"""
+    elif deal_type == 'R2SA':
+        r2sa = calculated_metrics.get('r2sa_metrics', {})
+        if r2sa:
+            strategy_context = f"""
+RENT-TO-SA STRATEGY:
+- Monthly Rent to Landlord: £{r2sa.get('monthly_rent_paid', 0):,}
+- Monthly SA Revenue: £{r2sa.get('sa_monthly_revenue', 0):,}
+- Monthly Operating Costs (cleaning/utilities/platform ~30%%): £{r2sa.get('monthly_op_costs', 0):,}
+- Monthly Profit: £{r2sa.get('monthly_profit', 0):,}
+- Setup/Furnishing Costs: £{r2sa.get('setup_costs', 0):,}
+- ROI on Setup Costs: {r2sa.get('r2sa_roi', 0):.1f}%%
+- Note: Investor rents from landlord and sublets as short-term SA (Airbnb/Booking.com). No purchase required."""
 
     # ------------------------------------------------------------------ #
     # Benchmarks for this deal type (to give Claude context)              #
     # ------------------------------------------------------------------ #
     benchmarks = {
-        'BTL':  {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0},
+        'BTL':  {'gross_yield': 6.0,  'cashflow': 200, 'coc': 8.0},
         'HMO':  {'gross_yield': 10.0, 'cashflow': 400, 'coc': 12.0},
-        'BRR':  {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0},
-        'FLIP': {'gross_yield': 0,   'cashflow': 0,   'coc': 15.0},
+        'BRR':  {'gross_yield': 6.0,  'cashflow': 200, 'coc': 8.0},
+        'FLIP': {'gross_yield': 0,    'cashflow': 0,   'coc': 15.0},
+        'R2SA': {'gross_yield': 0,    'cashflow': 500, 'coc': 50.0},
     }.get(deal_type, {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0})
 
     # ------------------------------------------------------------------ #
     # Build the prompt                                                     #
     # ------------------------------------------------------------------ #
     prompt = f"""You are an expert UK property investment analyst specialising in buy-to-let, \
-HMO, BRR and flip strategies. Analyse the deal below and return a JSON object.
+HMO, BRR, flip and rent-to-SA strategies. Analyse the deal below and return a JSON object.
 
 == PROPERTY ==
 Address:        {property_data.get('address', 'N/A')}

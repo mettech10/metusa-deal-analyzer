@@ -187,8 +187,7 @@
         }
         .divider { height: 1px; background: var(--border); margin: 16px 0; grid-column: 1 / -1; }
 
-        .brr-fields { display: none; }
-        .brr-fields.visible { display: contents; }
+        .cond-field { display: none; }
 
         /* Buttons */
         .btn {
@@ -430,12 +429,13 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="dealType">Deal Type</label>
+                    <label for="dealType">Investment Strategy</label>
                     <select id="dealType" name="dealType">
-                        <option value="BTL">Buy-to-Let (BTL)</option>
-                        <option value="BRR">Buy Refurb Refinance (BRR)</option>
-                        <option value="HMO">HMO</option>
-                        <option value="FLIP">Flip / Renovation</option>
+                        <option value="BTL">Buy-to-Let (BTL) — Long-term rental</option>
+                        <option value="HMO">HMO — Room-by-room rental</option>
+                        <option value="BRR">Buy, Refurb &amp; Refinance (BRR)</option>
+                        <option value="FLIP">Flip / Renovation — Buy &amp; sell</option>
+                        <option value="R2SA">Rent-to-SA (R2SA) — Sublet as serviced accommodation</option>
                     </select>
                 </div>
 
@@ -461,26 +461,39 @@
                     </select>
                 </div>
 
+                <!-- Finance Type (hidden for R2SA) -->
+                <div class="form-group" id="financeTypeGroup">
+                    <label for="purchaseType">Finance Type</label>
+                    <select id="purchaseType" name="purchaseType">
+                        <option value="mortgage">Mortgage</option>
+                        <option value="bridging-loan">Bridging Loan</option>
+                        <option value="cash">Cash Purchase</option>
+                    </select>
+                </div>
+
                 <div class="divider"></div>
                 <div class="section-label full">Financials</div>
 
-                <div class="form-group">
+                <!-- Purchase Price (hidden for R2SA) -->
+                <div class="form-group" id="purchasePriceGroup">
                     <label for="purchasePrice">Purchase Price</label>
                     <div class="input-prefix">
                         <span>£</span>
-                        <input type="number" id="purchasePrice" name="purchasePrice" placeholder="185000" required>
+                        <input type="number" id="purchasePrice" name="purchasePrice" placeholder="185000">
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="monthlyRent">Expected Monthly Rent</label>
+                <!-- Monthly Rent (renamed for R2SA) -->
+                <div class="form-group" id="monthlyRentGroup">
+                    <label for="monthlyRent" id="monthlyRentLabel">Expected Monthly Rent</label>
                     <div class="input-prefix">
                         <span>£</span>
                         <input type="number" id="monthlyRent" name="monthlyRent" placeholder="950">
                     </div>
                 </div>
 
-                <div class="form-group">
+                <!-- Deposit (hidden for Cash + R2SA) -->
+                <div class="form-group" id="depositGroup">
                     <label for="deposit">Deposit</label>
                     <div class="input-suffix">
                         <span>%</span>
@@ -488,7 +501,8 @@
                     </div>
                 </div>
 
-                <div class="form-group">
+                <!-- Interest Rate (Mortgage only) -->
+                <div class="form-group" id="interestRateGroup">
                     <label for="interestRate">Interest Rate</label>
                     <div class="input-suffix">
                         <span>%</span>
@@ -496,11 +510,64 @@
                     </div>
                 </div>
 
-                <!-- BRR / FLIP fields -->
-                <div class="divider brr-fields" id="brrDivider"></div>
-                <div class="section-label full brr-fields" id="brrLabel">BRR / Flip Details</div>
+                <!-- ── Bridging Loan Details ────────────────────── -->
+                <div class="divider cond-field" id="bridgingDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="bridgingLabel" style="display:none">Bridging Loan Details</div>
 
-                <div class="form-group brr-fields" id="refurbField">
+                <div class="form-group cond-field" id="bridgingRateGroup" style="display:none">
+                    <label for="bridgingMonthlyRate">Monthly Rate</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingMonthlyRate" name="bridgingMonthlyRate" value="0.75" step="0.05" min="0.1" max="5">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingTermGroup" style="display:none">
+                    <label for="bridgingTermMonths">Loan Term</label>
+                    <div class="input-suffix">
+                        <span>mo</span>
+                        <input type="number" id="bridgingTermMonths" name="bridgingTermMonths" value="12" min="1" max="36">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingArrangeGroup" style="display:none">
+                    <label for="bridgingArrangementFee">Arrangement Fee</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingArrangementFee" name="bridgingArrangementFee" value="1.0" step="0.1" min="0" max="5">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingExitGroup" style="display:none">
+                    <label for="bridgingExitFee">Exit Fee</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingExitFee" name="bridgingExitFee" value="0.5" step="0.1" min="0" max="5">
+                    </div>
+                </div>
+
+                <!-- ── HMO Room Details ────────────────────────── -->
+                <div class="divider cond-field" id="hmoDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="hmoLabel" style="display:none">HMO Room Details</div>
+
+                <div class="form-group cond-field" id="roomCountGroup" style="display:none">
+                    <label for="roomCount">Number of Rooms</label>
+                    <input type="number" id="roomCount" name="roomCount" placeholder="5" min="1" max="20">
+                </div>
+
+                <div class="form-group cond-field" id="avgRoomRateGroup" style="display:none">
+                    <label for="avgRoomRate">Avg Room Rate / month</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="avgRoomRate" name="avgRoomRate" placeholder="450">
+                    </div>
+                </div>
+
+                <!-- ── BRR / Flip Details ──────────────────────── -->
+                <div class="divider cond-field" id="brrDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="brrLabel" style="display:none">BRR / Flip Details</div>
+
+                <div class="form-group cond-field" id="refurbField" style="display:none">
                     <label for="refurbCosts">Refurb Costs</label>
                     <div class="input-prefix">
                         <span>£</span>
@@ -508,11 +575,31 @@
                     </div>
                 </div>
 
-                <div class="form-group brr-fields" id="arvField">
+                <div class="form-group cond-field" id="arvField" style="display:none">
                     <label for="arv">After Repair Value (ARV)</label>
                     <div class="input-prefix">
                         <span>£</span>
                         <input type="number" id="arv" name="arv" placeholder="220000">
+                    </div>
+                </div>
+
+                <!-- ── Rent-to-SA Details ─────────────────────── -->
+                <div class="divider cond-field" id="r2saDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="r2saLabel" style="display:none">Serviced Accommodation Details</div>
+
+                <div class="form-group cond-field" id="saRevenueGroup" style="display:none">
+                    <label for="saMonthlySARevenue">Monthly SA Revenue</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="saMonthlySARevenue" name="saMonthlySARevenue" placeholder="2000">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="saSetupGroup" style="display:none">
+                    <label for="saSetupCosts">Setup / Furnishing Costs</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="saSetupCosts" name="saSetupCosts" placeholder="5000">
                     </div>
                 </div>
 
@@ -606,7 +693,7 @@
     // ── State ──────────────────────────────────────────────────────────────
     let lastFormData = null;
 
-    // ── On page load: auto-extract URL from query string ──────────────────
+    // ── On page load ───────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         const url = params.get('url');
@@ -615,16 +702,71 @@
             loadFromUrl();
         }
 
-        // Show/hide BRR fields when deal type changes
-        document.getElementById('dealType').addEventListener('change', toggleBrrFields);
+        document.getElementById('dealType').addEventListener('change', updateFormFields);
+        document.getElementById('purchaseType').addEventListener('change', updateFormFields);
+        updateFormFields(); // set correct initial state
     });
 
-    function toggleBrrFields() {
-        const dealType = document.getElementById('dealType').value;
-        const show = (dealType === 'BRR' || dealType === 'FLIP');
-        document.querySelectorAll('.brr-fields').forEach(el => {
-            el.classList.toggle('visible', show);
-        });
+    // ── Dynamic field visibility ───────────────────────────────────────────
+    function showEl(id, visible) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+    }
+
+    function updateFormFields() {
+        const dealType     = document.getElementById('dealType').value;
+        const purchaseType = document.getElementById('purchaseType').value;
+
+        const isR2SA     = dealType === 'R2SA';
+        const isHMO      = dealType === 'HMO';
+        const isBRR      = dealType === 'BRR';
+        const isFLIP     = dealType === 'FLIP';
+        const isBridging = purchaseType === 'bridging-loan';
+        const isCash     = purchaseType === 'cash';
+
+        // Purchase price and finance type — hidden for R2SA (no purchase)
+        showEl('purchasePriceGroup', !isR2SA);
+        showEl('financeTypeGroup',   !isR2SA);
+
+        // Monthly rent — hidden for HMO (use room fields) and FLIP (no rental)
+        // Renamed to "Monthly Rent to Landlord" for R2SA
+        showEl('monthlyRentGroup', !isHMO && !isFLIP);
+        document.getElementById('monthlyRentLabel').textContent =
+            isR2SA ? 'Monthly Rent to Landlord' : 'Expected Monthly Rent';
+
+        // Deposit — hidden for cash purchase and R2SA
+        showEl('depositGroup', !isCash && !isR2SA);
+
+        // Interest rate — mortgage only, not for R2SA
+        showEl('interestRateGroup', !isBridging && !isCash && !isR2SA);
+
+        // Bridging loan detail fields
+        const showBridging = isBridging && !isR2SA;
+        showEl('bridgingDivider',   showBridging);
+        showEl('bridgingLabel',     showBridging);
+        showEl('bridgingRateGroup', showBridging);
+        showEl('bridgingTermGroup', showBridging);
+        showEl('bridgingArrangeGroup', showBridging);
+        showEl('bridgingExitGroup', showBridging);
+
+        // HMO room fields
+        showEl('hmoDivider',      isHMO);
+        showEl('hmoLabel',        isHMO);
+        showEl('roomCountGroup',  isHMO);
+        showEl('avgRoomRateGroup',isHMO);
+
+        // BRR / FLIP refurb fields
+        const showBRR = isBRR || isFLIP;
+        showEl('brrDivider',  showBRR);
+        showEl('brrLabel',    showBRR);
+        showEl('refurbField', showBRR);
+        showEl('arvField',    showBRR);
+
+        // R2SA fields
+        showEl('r2saDivider',   isR2SA);
+        showEl('r2saLabel',     isR2SA);
+        showEl('saRevenueGroup',isR2SA);
+        showEl('saSetupGroup',  isR2SA);
     }
 
     // ── URL Scraper ────────────────────────────────────────────────────────
@@ -716,7 +858,13 @@
         const data = {};
         formData.forEach((val, key) => {
             // Convert numeric fields to numbers
-            const numFields = ['purchasePrice','monthlyRent','deposit','interestRate','bedrooms','refurbCosts','arv'];
+            const numFields = [
+                'purchasePrice','monthlyRent','deposit','interestRate','bedrooms',
+                'refurbCosts','arv',
+                'bridgingMonthlyRate','bridgingTermMonths','bridgingArrangementFee','bridgingExitFee',
+                'roomCount','avgRoomRate',
+                'saMonthlySARevenue','saSetupCosts'
+            ];
             if (numFields.includes(key) && val !== '') {
                 data[key] = parseFloat(val);
             } else if (val !== '') {
@@ -778,22 +926,79 @@
 
         // Metrics
         const cashflow = parseFloat(r.monthly_cashflow) || 0;
+        const isR2SA  = r.deal_type === 'R2SA';
+        const isCash  = r.purchase_type === 'cash';
+        const isBridging = r.purchase_type === 'bridging-loan';
         const metricsGrid = document.getElementById('metricsGrid');
-        metricsGrid.innerHTML = [
-            { label: 'Purchase Price', value: '£' + fmt(r.purchase_price) },
-            { label: 'Stamp Duty',     value: '£' + fmt(r.stamp_duty) },
-            { label: 'Total Cash In',  value: '£' + fmt(r.total_purchase_costs) },
-            { label: 'Monthly Rent',   value: '£' + fmt(r.monthly_rent) },
-            { label: 'Monthly Mortgage', value: '£' + fmt(r.monthly_mortgage) },
-            { label: 'Monthly Cashflow', value: '£' + Math.round(cashflow).toLocaleString(), cls: cashflow >= 0 ? 'positive' : 'negative' },
-            { label: 'Gross Yield',    value: fmt(r.gross_yield) + '%' },
-            { label: 'Net Yield',      value: fmt(r.net_yield) + '%' },
-            { label: 'Cash-on-Cash',   value: fmt(r.cash_on_cash) + '%' },
-        ].map(m => `
+
+        let metrics = [];
+        if (isR2SA && r.r2sa_metrics) {
+            const rm = r.r2sa_metrics;
+            metrics = [
+                { label: 'Rent to Landlord',  value: '£' + fmt(rm.monthly_rent_paid) + '/mo' },
+                { label: 'SA Monthly Revenue',value: '£' + fmt(rm.sa_monthly_revenue) + '/mo' },
+                { label: 'Operating Costs',   value: '£' + fmt(rm.monthly_op_costs) + '/mo' },
+                { label: 'Monthly Profit',    value: '£' + fmt(rm.monthly_profit), cls: rm.monthly_profit >= 0 ? 'positive' : 'negative' },
+                { label: 'Annual Profit',     value: '£' + fmt(rm.annual_profit) },
+                { label: 'Setup Costs',       value: '£' + fmt(rm.setup_costs) },
+                { label: 'ROI on Setup',      value: fmt(rm.r2sa_roi) + '%', cls: rm.r2sa_roi >= 50 ? 'positive' : '' },
+            ];
+        } else {
+            metrics = [
+                { label: 'Purchase Price',    value: '£' + fmt(r.purchase_price) },
+                { label: 'Stamp Duty',        value: '£' + fmt(r.stamp_duty) },
+                { label: 'Total Cash In',     value: '£' + fmt(r.total_purchase_costs) },
+                { label: 'Monthly Rent',      value: '£' + fmt(r.monthly_rent) },
+                { label: isBridging ? 'Bridging Cost (total)' : isCash ? 'Finance' : 'Monthly Mortgage',
+                  value: isBridging
+                    ? (r.bridging_loan_details ? '£' + fmt(r.bridging_loan_details.total_cost) : '–')
+                    : isCash ? 'Cash' : '£' + fmt(r.monthly_mortgage) },
+                { label: 'Monthly Cashflow',  value: '£' + Math.round(cashflow).toLocaleString(), cls: cashflow >= 0 ? 'positive' : 'negative' },
+                { label: 'Gross Yield',       value: fmt(r.gross_yield) + '%' },
+                { label: 'Net Yield',         value: fmt(r.net_yield) + '%' },
+                { label: 'Cash-on-Cash',      value: fmt(r.cash_on_cash) + '%' },
+            ];
+        }
+
+        metricsGrid.innerHTML = metrics.map(m => `
             <div class="metric-card">
                 <div class="metric-label">${m.label}</div>
                 <div class="metric-value ${m.cls || ''}">${m.value}</div>
             </div>`).join('');
+
+        // Bridging loan summary card (shown below metrics when applicable)
+        let bridgingEl = document.getElementById('bridgingDetails');
+        if (!bridgingEl) {
+            bridgingEl = document.createElement('div');
+            bridgingEl.id = 'bridgingDetails';
+            bridgingEl.className = 'card';
+            document.getElementById('metricsGrid').closest('.card').after(bridgingEl);
+        }
+        if (isBridging && r.bridging_loan_details) {
+            const bl = r.bridging_loan_details;
+            bridgingEl.style.display = '';
+            bridgingEl.innerHTML = `
+                <div class="card-title">🏦 Bridging Loan Summary</div>
+                <div class="metrics-grid">
+                    ${[
+                        { label: 'Loan Amount',      value: '£' + fmt(bl.loan_amount) },
+                        { label: 'Monthly Rate',     value: bl.monthly_rate + '%' },
+                        { label: 'Term',             value: bl.term_months + ' months' },
+                        { label: 'Monthly Interest', value: '£' + fmt(bl.monthly_interest) },
+                        { label: 'Total Interest',   value: '£' + fmt(bl.total_interest) },
+                        { label: 'Arrangement Fee',  value: '£' + fmt(bl.arrangement_fee) },
+                        { label: 'Exit Fee',         value: '£' + fmt(bl.exit_fee) },
+                        { label: 'Total Cost',       value: '£' + fmt(bl.total_cost), cls: 'negative' },
+                        { label: 'Approx APR',       value: bl.apr + '%' },
+                    ].map(m => `
+                        <div class="metric-card">
+                            <div class="metric-label">${m.label}</div>
+                            <div class="metric-value ${m.cls||''}">${m.value}</div>
+                        </div>`).join('')}
+                </div>`;
+        } else {
+            bridgingEl.style.display = 'none';
+        }
 
         // Strengths
         const strengthsList = document.getElementById('strengthsList');
