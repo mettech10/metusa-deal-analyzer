@@ -26,35 +26,29 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
-# ScrapingBee configuration (set SCRAPINGBEE_API_KEY env var for URL scraping)
-SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY')
-
-
-def scrape_with_scrapingbee(url: str) -> dict:
-    """Scrape property using ScrapingBee API with residential proxies"""
-    if not SCRAPINGBEE_API_KEY:
-        print("[ScrapingBee] No API key configured")
-        return None
-    
-    api_url = 'https://app.scrapingbee.com/api/v1/'
-    params = {
-        'api_key': SCRAPINGBEE_API_KEY,
-        'url': url,
-        'render_js': 'true',
-        'premium_proxy': 'true',
-        'country_code': 'gb',
-        'wait': '2000',
+def scrape_with_jina(url: str) -> dict:
+    """Scrape property using Jina Reader API (free, no API key required).
+    Prepends https://r.jina.ai/ to the target URL and gets back clean markdown.
+    Works for Rightmove, Zoopla, OnTheMarket and other JS-heavy sites.
+    """
+    jina_url = f'https://r.jina.ai/{url}'
+    headers = {
+        'Accept': 'text/plain',
+        'X-Timeout': '30',
+        'X-Return-Format': 'markdown',
+        'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
     }
-    
+
     try:
-        response = requests.get(api_url, params=params, timeout=60)
+        response = requests.get(jina_url, headers=headers, timeout=45)
         if response.status_code != 200:
-            print(f"[ScrapingBee] Error: status {response.status_code}")
+            print(f"[Jina] Error: status {response.status_code}")
             return None
+
+        # Jina returns clean markdown/plain text - not raw HTML
+        text = response.text
         
-        html = response.text
-        
-        # Extract data from HTML
+        # Jina returns clean markdown/text - parse it directly
         data = {
             'address': None,
             'postcode': None,
@@ -63,260 +57,181 @@ def scrape_with_scrapingbee(url: str) -> dict:
             'bedrooms': None,
             'description': None
         }
-        
-        # Price - look for price patterns
+
+        # --- Price ---
         price_patterns = [
-            r'£([\d,]+)',  # Standard £price
-            r'price[":\s]*£?([\d,]+)',  # JSON/structured data
-            r'"price":\s*"?£?([\d,]+)',  # JSON format
+            r'£([\d,]+)',
+            r'price[":\s]*£?([\d,]+)',
         ]
         for pattern in price_patterns:
-            price_match = re.search(pattern, html, re.IGNORECASE)
+            price_match = re.search(pattern, text, re.IGNORECASE)
             if price_match:
                 try:
-                    data['price'] = int(price_match.group(1).replace(',', ''))
-                    break
-                except:
+                    val = int(price_match.group(1).replace(',', ''))
+                    if val > 10000:  # Must be a plausible property price
+                        data['price'] = val
+                        break
+                except Exception:
                     pass
-        
-        # Bedrooms - improved extraction with validation
-        # Try multiple patterns and validate the result
+
+        # --- Bedrooms ---
         bed_candidates = []
-        
-        # Pattern 1: Structured data (most reliable)
-        structured_bed = re.search(r'"bedrooms"[:>"\s]*(\d+)', html, re.IGNORECASE)
-        if structured_bed:
-            val = int(structured_bed.group(1))
-            if 1 <= val <= 20:  # Sanity check
-                bed_candidates.append(('structured', val, 100))
-        
-        # Pattern 2: Near property type indicators
-        bed_near_property = re.search(r'(\d+)\s*bed(?:room)?s?\s+(?:semi-detached|detached|terraced|flat|house|bungalow)', html, re.IGNORECASE)
-        if bed_near_property:
-            val = int(bed_near_property.group(1))
+
+        # Pattern 1: "X bed(room) [type]" - most reliable in clean text
+        bed_near_type = re.search(
+            r'(\d+)\s*bed(?:room)?s?\s+(?:semi-detached|detached|terraced|flat|house|bungalow|apartment)',
+            text, re.IGNORECASE
+        )
+        if bed_near_type:
+            val = int(bed_near_type.group(1))
             if 1 <= val <= 20:
-                bed_candidates.append(('near_property_type', val, 90))
-        
-        # Pattern 3: In hero/title section (early in HTML)
-        early_bed = re.search(r'<title[^>]*>.*?(\d+)\s*bed', html[:5000], re.IGNORECASE)
-        if early_bed:
-            val = int(early_bed.group(1))
+                bed_candidates.append(('near_type', val, 90))
+
+        # Pattern 2: Title line from Jina ("Title: 3 bed...")
+        title_bed = re.search(r'^Title:.*?(\d+)\s*bed', text[:500], re.IGNORECASE | re.MULTILINE)
+        if title_bed:
+            val = int(title_bed.group(1))
             if 1 <= val <= 20:
                 bed_candidates.append(('title', val, 80))
-        
-        # Pattern 4: Standard pattern with context
-        bed_with_context = re.search(r'(\d+)\s*bed(?:room)?s?\s*(?:semi|detached|terraced|flat|house)?', html, re.IGNORECASE)
-        if bed_with_context:
-            val = int(bed_with_context.group(1))
+
+        # Pattern 3: General "X bed" anywhere
+        plain_bed = re.search(r'(\d+)\s*bed(?:room)?s?', text, re.IGNORECASE)
+        if plain_bed:
+            val = int(plain_bed.group(1))
             if 1 <= val <= 20:
-                bed_candidates.append(('standard', val, 50))
-        
-        # Pick the highest confidence bedroom count
+                bed_candidates.append(('plain', val, 50))
+
         if bed_candidates:
             bed_candidates.sort(key=lambda x: x[2], reverse=True)
             data['bedrooms'] = bed_candidates[0][1]
-            print(f"[ScrapingBee] Bedroom candidates: {bed_candidates}")
+            print(f"[Jina] Bedroom candidates: {bed_candidates}")
         else:
             data['bedrooms'] = None
-        
-        # Property type
-        property_types = ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
+
+        # --- Property type ---
+        property_types = ['semi-detached', 'detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
         for ptype in property_types:
-            if re.search(r'\b' + ptype + r'\b', html, re.IGNORECASE):
+            if re.search(r'\b' + ptype + r'\b', text, re.IGNORECASE):
                 data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
-        
-        # Postcode - improved extraction with smart filtering
-        # UK postcode pattern: AA9 9AA or A9 9AA or AA99 9AA etc.
-        # Valid UK postcode areas (first 1-2 letters)
-        VALID_AREAS = {'AB', 'AL', 'B', 'BA', 'BB', 'BD', 'BH', 'BL', 'BN', 'BR', 'BS', 'BT', 'CA', 'CB', 'CF', 'CH', 'CM', 'CO', 'CR', 'CT', 'CV', 'CW', 'DA', 'DD', 'DE', 'DG', 'DH', 'DL', 'DN', 'DT', 'DY', 'E', 'EC', 'EH', 'EN', 'EX', 'FK', 'FY', 'G', 'GL', 'GU', 'HA', 'HD', 'HG', 'HP', 'HR', 'HS', 'HU', 'HX', 'IG', 'IP', 'IV', 'KA', 'KT', 'KW', 'KY', 'L', 'LA', 'LD', 'LE', 'LL', 'LN', 'LS', 'LU', 'M', 'ME', 'MK', 'ML', 'N', 'NE', 'NG', 'NN', 'NP', 'NR', 'NW', 'OL', 'OX', 'PA', 'PE', 'PH', 'PL', 'PO', 'PR', 'RG', 'RH', 'RM', 'S', 'SA', 'SE', 'SG', 'SK', 'SL', 'SM', 'SN', 'SO', 'SP', 'SR', 'SS', 'ST', 'SW', 'SY', 'TA', 'TD', 'TF', 'TN', 'TQ', 'TR', 'TS', 'TW', 'UB', 'W', 'WA', 'WC', 'WD', 'WF', 'WN', 'WR', 'WS', 'WV', 'YO', 'ZE'}
-        
+
+        # --- Postcode ---
+        VALID_AREAS = {
+            'AB', 'AL', 'B', 'BA', 'BB', 'BD', 'BH', 'BL', 'BN', 'BR', 'BS', 'BT',
+            'CA', 'CB', 'CF', 'CH', 'CM', 'CO', 'CR', 'CT', 'CV', 'CW', 'DA', 'DD',
+            'DE', 'DG', 'DH', 'DL', 'DN', 'DT', 'DY', 'E', 'EC', 'EH', 'EN', 'EX',
+            'FK', 'FY', 'G', 'GL', 'GU', 'HA', 'HD', 'HG', 'HP', 'HR', 'HS', 'HU',
+            'HX', 'IG', 'IP', 'IV', 'KA', 'KT', 'KW', 'KY', 'L', 'LA', 'LD', 'LE',
+            'LL', 'LN', 'LS', 'LU', 'M', 'ME', 'MK', 'ML', 'N', 'NE', 'NG', 'NN',
+            'NP', 'NR', 'NW', 'OL', 'OX', 'PA', 'PE', 'PH', 'PL', 'PO', 'PR', 'RG',
+            'RH', 'RM', 'S', 'SA', 'SE', 'SG', 'SK', 'SL', 'SM', 'SN', 'SO', 'SP',
+            'SR', 'SS', 'ST', 'SW', 'SY', 'TA', 'TD', 'TF', 'TN', 'TQ', 'TR', 'TS',
+            'TW', 'UB', 'W', 'WA', 'WC', 'WD', 'WF', 'WN', 'WR', 'WS', 'WV', 'YO', 'ZE'
+        }
+
         postcode_pattern = r'[A-Z]{1,2}\d[A-Z\d]?(?:\s)?\d[A-Z]{2}'
-        all_postcodes = re.findall(postcode_pattern, html.upper())
-        
-        # Clean postcodes - ensure space is present
+        all_postcodes = re.findall(postcode_pattern, text.upper())
+
         def format_postcode(pc):
             pc = pc.strip()
             if ' ' not in pc:
-                # Insert space before last 3 characters
                 pc = pc[:-3] + ' ' + pc[-3:]
             return pc
-        
+
         def is_valid_area(pc):
-            """Check if postcode has a valid UK area code"""
             area = pc.split()[0]
-            # Remove digits to get just the letters
             area_letters = ''.join(c for c in area if c.isalpha())
             return area_letters in VALID_AREAS
-        
-        # Get unique postcodes with their context
+
+        # In clean Jina output the property postcode typically appears early.
+        # Score each candidate by position and context.
         postcode_scores = {}
         for pc in all_postcodes:
             formatted_pc = format_postcode(pc)
-            
-            # Skip if we've seen this postcode
             if formatted_pc in postcode_scores:
                 continue
-            
-            # Validate format and area
             if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
                 continue
-            
-            # Check it's a valid UK area
             if not is_valid_area(formatted_pc):
-                print(f"[ScrapingBee] Skipping invalid area: {formatted_pc}")
                 continue
-            
-            # Skip obviously wrong postcodes (too short area codes like E4, M2)
             area_part = formatted_pc.split()[0]
             if len(area_part) < 2:
                 continue
-                
-            # Find all occurrences and score them
+
             best_score = 0
-            for match in re.finditer(re.escape(pc), html.upper()):
+            for match in re.finditer(re.escape(pc), text.upper()):
                 idx = match.start()
-                context = html[max(0, idx-400):idx+400].lower()
+                context = text[max(0, idx - 300):idx + 300].lower()
                 score = 0
-                
-                # Very high scoring - near property title or hero section (Zoopla/Rightmove)
-                if 'data-test="address-title"' in context or 'property-title' in context:
-                    score += 200
-                if '<h1' in context and ('property' in context or 'bed' in context):
+
+                # In Jina markdown the first ~500 chars usually contain title/address
+                if idx < 500:
                     score += 150
-                if 'dp-address' in context or 'property-address' in context:
-                    score += 140
-                    
-                # High scoring - near price/property indicators
-                if any(word in context for word in ['price', '£', 'for sale', 'guide price', 'asking price']):
-                    score += 100
-                if any(word in context for word in ['property', 'bedroom', 'bed', 'house', 'flat']):
-                    score += 80
-                if any(word in context for word in ['road', 'street', 'avenue', 'lane', 'drive', 'way', 'close']):
+                elif idx < 1500:
                     score += 60
-                if 'postcode' in context or 'post code' in context:
-                    score += 40
-                if 'manchester' in context or 'london' in context or 'birmingham' in context or 'bristol' in context:
-                    score += 30  # Major city context
-                    
-                # Medium scoring - in address context
-                if 'address' in context:
-                    score += 20
-                    
-                # Penalize agent/office contexts
-                if any(word in context for word in ['agent', 'office', 'branch', 'contact us', 'tel:', 'phone', 'call us']):
-                    score -= 150
-                if any(agent in context for agent in ['reeds rains', 'estate agent', 'your move', 'haart', 'connells']):
-                    score -= 100
-                    
-                # Heavy penalty for financial/legal contexts
-                if any(word in context for word in ['vat', 'registration', 'company number', 'vat no']):
-                    score -= 200
-                    
-                # Boost if appears in title or main content area (first 8000 chars)
-                if idx < 8000:
+
+                # Nearby property keywords
+                if any(w in context for w in ['price', '£', 'for sale', 'asking']):
+                    score += 80
+                if any(w in context for w in ['bedroom', 'bed', 'house', 'flat', 'property']):
+                    score += 60
+                if any(w in context for w in ['road', 'street', 'avenue', 'lane', 'drive', 'close']):
                     score += 50
-                if idx < 3000:
-                    score += 30  # Even earlier = main property section
-                    
+                if 'address' in context or 'postcode' in context:
+                    score += 40
+
+                # Penalise agent-office contexts
+                if any(w in context for w in ['agent', 'office', 'branch', 'tel:', 'phone']):
+                    score -= 100
+                if any(w in context for w in ['vat', 'registration', 'company number']):
+                    score -= 150
+
                 best_score = max(best_score, score)
-            
             postcode_scores[formatted_pc] = best_score
-        
-        # Pick the postcode with highest score
+
         if postcode_scores:
-            # Sort by score descending
-            sorted_postcodes = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
-            print(f"[ScrapingBee] Postcode candidates: {sorted_postcodes[:5]}")
-            
-            # Take the highest scoring one with minimum score threshold
-            best_postcode = None
-            best_score = sorted_postcodes[0][1]
-            
-            # Use the top one if it has a decent score
-            if best_score >= 50:
-                best_postcode = sorted_postcodes[0][0]
-            else:
-                # Try to find any with positive score
-                for pc, score in sorted_postcodes:
-                    if score > 0:
-                        best_postcode = pc
-                        break
-                
-                # If still nothing, take the one that appears earliest in the page
-                if not best_postcode and sorted_postcodes:
-                    # Find which appears first
-                    earliest_idx = float('inf')
-                    for pc, _ in sorted_postcodes:
-                        match = re.search(re.escape(pc.replace(' ', '')), html.upper())
-                        if match and match.start() < earliest_idx:
-                            earliest_idx = match.start()
-                            best_postcode = format_postcode(pc)
-            
+            sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
+            print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
+            best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
             data['postcode'] = best_postcode
-            print(f"[ScrapingBee] Selected postcode: {best_postcode} (score: {postcode_scores.get(best_postcode, 'N/A')})")
+            print(f"[Jina] Selected postcode: {best_postcode}")
         else:
             data['postcode'] = None
-            print("[ScrapingBee] No valid postcodes found")
-        
-        # Address extraction - improved
-        # Try multiple sources for address
-        address_sources = []
-        
-        # 1. Try to find address in meta tags or structured data
-        address_match = re.search(r'"address"[:>"\s]*([^"<]+)', html, re.IGNORECASE)
-        if address_match:
-            addr = address_match.group(1).strip()
-            if len(addr) > 10 and any(char.isdigit() for char in addr):
-                address_sources.append(addr)
-        
-        # 2. Look for address in specific divs/spans (common patterns)
-        address_div = re.search(r'data-test=["\']property-title["\'][^>]*>([^<]+)', html, re.IGNORECASE)
-        if address_div:
-            address_sources.append(address_div.group(1).strip())
-        
-        # 3. Extract from title - but clean it up better
-        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-        if title_match:
-            title = title_match.group(1)
-            # Clean up the title
-            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*', '', title, flags=re.IGNORECASE)
-            title = re.sub(r'\s*\d+\s*bed\s*\w+\s*house', '', title, flags=re.IGNORECASE)
+            print("[Jina] No valid postcodes found")
+
+        # --- Address ---
+        # Jina typically starts its output with "Title: <page title>"
+        title_line = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
+        if title_line:
+            title = title_line.group(1).strip()
+            title = re.sub(
+                r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*',
+                '', title, flags=re.IGNORECASE
+            )
             title = title.strip()
             if title and len(title) > 5:
-                address_sources.append(title)
-        
-        # 4. Look for address patterns in the HTML
-        # Common pattern: Street name + location
-        addr_pattern = re.search(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Street|Avenue|Lane|Drive|Way|Close|Crescent|Gardens))[^<]*,\s*([^<,]{5,50})', html)
-        if addr_pattern:
-            street = addr_pattern.group(1)
-            area = addr_pattern.group(2).strip()
-            if street and area:
-                address_sources.append(f"{street}, {area}")
-        
-        # Pick the best address
-        for addr in address_sources:
-            if addr and len(addr) > 5:
-                # Clean up the address
-                addr = re.sub(r'\s+', ' ', addr)
-                addr = re.sub(r'\s*,\s*', ', ', addr)
-                if validate_postcode_str(data.get('postcode', '')):
-                    # If we have a postcode, make sure it's in the address or add it
-                    if data['postcode'] and data['postcode'] not in addr:
-                        addr = f"{addr}, {data['postcode']}"
-                data['address'] = addr.strip()
-                break
-        
-        # If still no address, use a default
+                if data['postcode'] and data['postcode'] not in title:
+                    title = f"{title}, {data['postcode']}"
+                data['address'] = title
+
+        if not data['address']:
+            addr_pattern = re.search(
+                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Street|Avenue|Lane|Drive|Way|Close|Crescent|Gardens))'
+                r'[,\s]+([^,\n]{5,50})',
+                text
+            )
+            if addr_pattern:
+                data['address'] = f"{addr_pattern.group(1)}, {addr_pattern.group(2).strip()}"
+
         if not data['address']:
             data['address'] = "Address not available"
-        
-        print(f"[ScrapingBee] Extracted: price={data['price']}, beds={data['bedrooms']}, postcode={data['postcode']}")
+
+        print(f"[Jina] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+              f"postcode={data['postcode']}, address={str(data['address'])[:60]}")
         return data
-        
+
     except Exception as e:
-        print(f"[ScrapingBee] Exception: {e}")
+        print(f"[Jina] Exception: {e}")
         return None
 
 def validate_postcode_str(postcode):
@@ -1651,25 +1566,18 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
-@app.route('/api/test-scrapingbee')
-def test_scrapingbee():
-    """Test ScrapingBee configuration"""
-    api_key = os.environ.get('SCRAPINGBEE_API_KEY')
-
-    if api_key:
-        key_source = "Environment Variable"
-        key_prefix = api_key[:20]
-        key_length = len(api_key)
-    else:
-        key_source = "Not Configured"
-        key_prefix = None
-        key_length = 0
-    
+@app.route('/api/test-jina')
+def test_jina():
+    """Test Jina Reader connectivity (no API key required)"""
+    try:
+        resp = requests.get('https://r.jina.ai/', timeout=10)
+        reachable = resp.status_code < 500
+    except Exception as e:
+        reachable = False
     return jsonify({
-        'status': 'configured' if SCRAPINGBEE_API_KEY else 'not_configured',
-        'key_source': key_source,
-        'key_prefix': key_prefix + "..." if key_prefix else None,
-        'key_length': key_length,
+        'status': 'reachable' if reachable else 'unreachable',
+        'service': 'Jina Reader (r.jina.ai)',
+        'api_key_required': False,
         'timestamp': datetime.now().isoformat()
     })
 
@@ -1974,19 +1882,24 @@ def extract_url():
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
         
-        # Try ScrapingBee first (for protected sites like Rightmove, Zoopla, OTM)
-        if SCRAPINGBEE_API_KEY:
-            print("[extract-url] Trying ScrapingBee...")
-            extracted_data = scrape_with_scrapingbee(url)
-            if extracted_data and (extracted_data.get('address') or extracted_data.get('price')):
-                print("[extract-url] ScrapingBee succeeded")
-                return jsonify({
-                    'success': True,
-                    'data': extracted_data,
-                    'message': 'Data extracted successfully'
-                })
-            print("[extract-url] ScrapingBee failed, trying fallback...")
-        
+        # Try Jina Reader first (free, no API key - handles Rightmove, Zoopla, OTM)
+        print("[extract-url] Trying Jina Reader...")
+        extracted_data = scrape_with_jina(url)
+        jina_address = extracted_data.get('address') if extracted_data else None
+        jina_has_data = (
+            extracted_data
+            and (extracted_data.get('price') or
+                 (jina_address and jina_address != 'Address not available'))
+        )
+        if jina_has_data:
+            print("[extract-url] Jina Reader succeeded")
+            return jsonify({
+                'success': True,
+                'data': extracted_data,
+                'message': 'Data extracted successfully'
+            })
+        print("[extract-url] Jina Reader failed, trying fallback...")
+
         # Fallback to basic scraper
         print("[extract-url] Using basic scraper...")
         extracted_data = extract_property_from_url(url)
