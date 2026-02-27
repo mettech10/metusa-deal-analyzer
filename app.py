@@ -1917,17 +1917,36 @@ def extract_url():
             jina_future = pool.submit(scrape_with_jina, url)
             basic_future = pool.submit(extract_property_from_url, url)
 
-            extracted_data = None
-            for future in as_completed([jina_future, basic_future], timeout=25):
-                result = future.result()
-                if _has_data(result):
-                    extracted_data = result
-                    source = 'Jina Reader' if future is jina_future else 'basic scraper'
-                    print(f"[extract-url] Succeeded via {source}")
-                    # Cancel the other one (best-effort)
-                    jina_future.cancel()
-                    basic_future.cancel()
-                    break
+            jina_result  = None
+            basic_result = None
+            try:
+                for future in as_completed([jina_future, basic_future], timeout=25):
+                    result = future.result()
+                    if future is jina_future:
+                        jina_result = result
+                        print(f"[extract-url] Jina finished, has_data={_has_data(result)}")
+                    else:
+                        basic_result = result
+                        print(f"[extract-url] Basic scraper finished, has_data={_has_data(result)}")
+            except Exception:
+                pass
+
+            # Merge: start with whichever has data, then overlay Jina fields
+            # because Jina's postcode/address logic is more accurate.
+            if _has_data(jina_result) and _has_data(basic_result):
+                # Both succeeded — use basic as base, override with Jina's values
+                extracted_data = {**basic_result, **{
+                    k: v for k, v in jina_result.items() if v not in (None, '', 'Address not available')
+                }}
+                print("[extract-url] Merged both scrapers (Jina fields take precedence)")
+            elif _has_data(jina_result):
+                extracted_data = jina_result
+                print("[extract-url] Using Jina result only")
+            elif _has_data(basic_result):
+                extracted_data = basic_result
+                print("[extract-url] Using basic scraper result only")
+            else:
+                extracted_data = None
 
         if extracted_data and _has_data(extracted_data):
             return jsonify({
