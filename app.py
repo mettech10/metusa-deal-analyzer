@@ -1917,17 +1917,36 @@ def extract_url():
             jina_future = pool.submit(scrape_with_jina, url)
             basic_future = pool.submit(extract_property_from_url, url)
 
-            extracted_data = None
-            for future in as_completed([jina_future, basic_future], timeout=25):
-                result = future.result()
-                if _has_data(result):
-                    extracted_data = result
-                    source = 'Jina Reader' if future is jina_future else 'basic scraper'
-                    print(f"[extract-url] Succeeded via {source}")
-                    # Cancel the other one (best-effort)
-                    jina_future.cancel()
-                    basic_future.cancel()
-                    break
+            jina_result  = None
+            basic_result = None
+            try:
+                for future in as_completed([jina_future, basic_future], timeout=25):
+                    result = future.result()
+                    if future is jina_future:
+                        jina_result = result
+                        print(f"[extract-url] Jina finished, has_data={_has_data(result)}")
+                    else:
+                        basic_result = result
+                        print(f"[extract-url] Basic scraper finished, has_data={_has_data(result)}")
+            except Exception:
+                pass
+
+            # Merge: start with whichever has data, then overlay Jina fields
+            # because Jina's postcode/address logic is more accurate.
+            if _has_data(jina_result) and _has_data(basic_result):
+                # Both succeeded — use basic as base, override with Jina's values
+                extracted_data = {**basic_result, **{
+                    k: v for k, v in jina_result.items() if v not in (None, '', 'Address not available')
+                }}
+                print("[extract-url] Merged both scrapers (Jina fields take precedence)")
+            elif _has_data(jina_result):
+                extracted_data = jina_result
+                print("[extract-url] Using Jina result only")
+            elif _has_data(basic_result):
+                extracted_data = basic_result
+                print("[extract-url] Using basic scraper result only")
+            else:
+                extracted_data = None
 
         if extracted_data and _has_data(extracted_data):
             return jsonify({
@@ -1953,66 +1972,132 @@ def get_ai_property_analysis(property_data, calculated_metrics, market_data=None
     Get AI-powered property deal analysis using Claude (Anthropic).
     Falls back to a rule-based summary if ANTHROPIC_API_KEY is not set.
     """
-    # ------------------------------------------------------------------ #
-    # Build market data context                                            #
-    # ------------------------------------------------------------------ #
-    market_context = ""
-    if market_data and isinstance(market_data, dict):
-        source = market_data.get('source', 'Unknown')
+    def _n(val, default=0):
+        """Safely coerce API values (which may be strings) to float."""
+        try:
+            return float(val) if val is not None else default
+        except (TypeError, ValueError):
+            return default
 
-        if source == 'PropertyData API':
-            estimated_rent    = market_data.get('estimated_rent')
-            rental_confidence = market_data.get('rental_confidence')
-            price_growth      = market_data.get('price_growth_12m')
-            avg_sold          = market_data.get('avg_sold_price')
-            area_score        = market_data.get('area_score')
-            transport_score   = market_data.get('transport_score')
+    try:
+        # ------------------------------------------------------------------ #
+        # Build market data context                                            #
+        # ------------------------------------------------------------------ #
+        market_context = ""
+        if market_data and isinstance(market_data, dict):
+            source = market_data.get('source', 'Unknown')
 
-            if estimated_rent:
+            if source == 'PropertyData API':
+                estimated_rent    = _n(market_data.get('estimated_rent'))
+                rental_confidence = market_data.get('rental_confidence')
+                rental_range      = market_data.get('rental_range', {})
+                demand_score      = _n(market_data.get('rental_demand_score'))
+                price_growth      = market_data.get('price_growth_12m')
+                avg_sold          = _n(market_data.get('avg_sold_price'))
+                area_score        = _n(market_data.get('area_score'))
+                transport_score   = _n(market_data.get('transport_score'))
+                rent_comps        = market_data.get('rent_comparables', [])
+                sold_comps        = market_data.get('comparable_sales', [])
+                sales_val         = market_data.get('sales_valuation', {})
+
                 market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
-                market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
-                # Flag if the assumed rent is far from market
-                assumed_rent = property_data.get('monthlyRent', 0)
-                if assumed_rent and estimated_rent:
-                    diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
-                    if abs(diff_pct) > 15:
-                        market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate"
-            if price_growth is not None:
-                market_context += f"\n- 12-Month Price Growth: {price_growth:.1f}%"
-            if avg_sold:
-                market_context += f"\n- Average Sold Price: £{avg_sold:,.0f}"
-                pp = property_data.get('purchasePrice', 0)
-                if pp and avg_sold:
-                    vs_avg = ((pp - avg_sold) / avg_sold) * 100
-                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
-            if area_score:
-                market_context += f"\n- Area Quality Score: {area_score}/10"
-            if transport_score:
-                market_context += f"\n- Transport Links Score: {transport_score}/10"
 
-        elif source == 'Land Registry':
-            avg_price    = market_data.get('average_price')
-            trend        = market_data.get('price_trend', {})
-            recent_sales = market_data.get('recent_sales', [])
+                # Rental valuation
+                if estimated_rent:
+                    market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
+                    if rental_range:
+                        low_w  = _n(rental_range.get('low_weekly'))
+                        high_w = _n(rental_range.get('high_weekly'))
+                        if low_w and high_w:
+                            market_context += f" | Range: £{round(low_w*52/12):,}-£{round(high_w*52/12):,}/mo"
+                    if demand_score:
+                        market_context += f"\n- Rental Demand Score: {demand_score}/10"
+                    assumed_rent = _n(property_data.get('monthlyRent'))
+                    if assumed_rent and estimated_rent:
+                        diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
+                        if abs(diff_pct) > 15:
+                            market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate — verify with local agents"
 
-            if avg_price:
-                market_context += f"\nMARKET DATA (Land Registry - Government Sold Prices):"
-                market_context += f"\n- Average Sold Price (12 months): £{avg_price:,.0f}"
-                pp = property_data.get('purchasePrice', 0)
-                if pp and avg_price:
-                    vs_avg = ((pp - avg_price) / avg_price) * 100
-                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
-            if trend:
-                market_context += f"\n- Price Trend: {trend.get('trend', 'stable')} ({trend.get('change_percent', 0):.1f}% change)"
-            if recent_sales:
-                market_context += "\n- Recent Comparable Sales:"
-                for i, sale in enumerate(recent_sales[:3], 1):
-                    market_context += f"\n  {i}. £{sale['price']:,} on {sale['date'][:10]} - {sale.get('street', 'N/A')}"
-        else:
-            market_context = "\nMARKET DATA: Limited data available for this postcode"
+                # Sales valuation (real house value)
+                if sales_val and sales_val.get('estimate'):
+                    sv_est  = _n(sales_val['estimate'])
+                    sv_conf = sales_val.get('confidence', 'N/A')
+                    if sv_est:
+                        market_context += f"\n- PropertyData Sales Valuation: £{sv_est:,.0f} (Confidence: {sv_conf})"
+                        pp = _n(property_data.get('purchasePrice'))
+                        if pp and sv_est:
+                            vs_val = ((pp - sv_est) / sv_est) * 100
+                            tag = "BELOW" if vs_val < 0 else "ABOVE"
+                            market_context += f" → purchase price is {abs(vs_val):.1f}% {tag} estimated value"
 
-    if not market_context:
-        market_context = "\nMARKET DATA: No external market data available — rely on local knowledge"
+                # Price growth + average sold
+                if price_growth is not None:
+                    market_context += f"\n- 12-Month Price Growth: {_n(price_growth):.1f}%"
+                if avg_sold:
+                    market_context += f"\n- Average Sold Price: £{avg_sold:,.0f}"
+                    pp = _n(property_data.get('purchasePrice'))
+                    if pp and avg_sold:
+                        vs_avg = ((pp - avg_sold) / avg_sold) * 100
+                        market_context += f" (purchase price is {vs_avg:+.1f}% vs average sold)"
+
+                # Area scores
+                if area_score:
+                    market_context += f"\n- Area Quality Score: {area_score}/10"
+                if transport_score:
+                    market_context += f"\n- Transport Links Score: {transport_score}/10"
+
+                # Real rent comparables
+                if rent_comps:
+                    market_context += f"\n- Rental Comparables ({len(rent_comps)} nearby lettings used for estimate):"
+                    for i, rc in enumerate(rent_comps[:5], 1):
+                        mr   = _n(rc.get('monthly_rent'))
+                        addr = rc.get('address', 'Nearby property')
+                        date = rc.get('date', 'N/A')
+                        dist = rc.get('distance_miles')
+                        line = f"\n  {i}. {addr}: £{mr:,.0f}/mo" if mr else f"\n  {i}. {addr}"
+                        if dist:
+                            line += f" ({_n(dist):.1f} miles away)"
+                        if date and date != 'N/A':
+                            line += f" — {date}"
+                        market_context += line
+
+                # Real sold comparables
+                if sold_comps:
+                    market_context += f"\n- Sold Comparables ({len(sold_comps)} recent sales):"
+                    for i, sc in enumerate(sold_comps[:5], 1):
+                        market_context += (
+                            f"\n  {i}. {sc.get('address', 'Nearby property')}: "
+                            f"£{_n(sc.get('price', 0)):,.0f} — {sc.get('type', 'N/A')} "
+                            f"({sc.get('bedrooms', '?')} bed) on {sc.get('date', 'N/A')}"
+                        )
+
+            elif source == 'Land Registry':
+                avg_price    = _n(market_data.get('average_price'))
+                trend        = market_data.get('price_trend', {})
+                recent_sales = market_data.get('recent_sales', [])
+
+                if avg_price:
+                    market_context += f"\nMARKET DATA (Land Registry - Government Sold Prices):"
+                    market_context += f"\n- Average Sold Price (12 months): £{avg_price:,.0f}"
+                    pp = _n(property_data.get('purchasePrice'))
+                    if pp and avg_price:
+                        vs_avg = ((pp - avg_price) / avg_price) * 100
+                        market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
+                if trend:
+                    market_context += f"\n- Price Trend: {trend.get('trend', 'stable')} ({_n(trend.get('change_percent')):.1f}% change)"
+                if recent_sales:
+                    market_context += "\n- Recent Comparable Sales:"
+                    for i, sale in enumerate(recent_sales[:3], 1):
+                        market_context += f"\n  {i}. £{_n(sale.get('price')):,.0f} on {str(sale.get('date', ''))[:10]} - {sale.get('street', 'N/A')}"
+            else:
+                market_context = "\nMARKET DATA: Limited data available for this postcode"
+
+        if not market_context:
+            market_context = "\nMARKET DATA: No external market data available — rely on local knowledge"
+
+    except Exception as _ctx_err:
+        app.logger.warning(f"[AI] Market context build failed ({_ctx_err}), proceeding without it")
+        market_context = "\nMARKET DATA: Could not format market data — review calculated metrics above"
 
     # ------------------------------------------------------------------ #
     # Strategy-specific context                                            #
@@ -2104,8 +2189,9 @@ JSON schema:
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
             message = client.messages.create(
-                model="claude-sonnet-4-6",
+                model=model_id,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -2314,121 +2400,65 @@ def ai_analyze():
         
         # Step 3: Get AI insights (with market data)
         ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
-        
-        # Get sales valuation
-        sales_valuation = None
-        if property_data.is_configured() and postcode:
-            try:
-                valuation = property_data.get_sales_valuation(postcode, bedrooms)
-                if 'estimate' in valuation:
-                    sales_valuation = {
-                        'estimate': valuation['estimate'].get('sale_price'),
-                        'confidence': valuation.get('confidence'),
-                        'range': valuation.get('range', {})
-                    }
-            except Exception as e:
-                app.logger.warning(f'Could not get sales valuation: {e}')
-        
-        # Generate comparable data sections (workaround for limited PropertyData API)
-        # SOLD COMPARABLES - Use Land Registry or estimates
+
+        # ------------------------------------------------------------------ #
+        # SOLD COMPARABLES                                                     #
+        # Priority: PropertyData real sales → Land Registry → empty           #
+        # ------------------------------------------------------------------ #
         sold_comparables = market_data.get('comparable_sales', [])
         if not sold_comparables and market_data.get('recent_sales'):
             sold_comparables = [
                 {
-                    'address': f"{s.get('street', 'Similar Property')}, {postcode}",
+                    'address': f"{s.get('street', 'Similar property')}, {postcode}",
                     'price': s.get('price', 0),
                     'bedrooms': bedrooms,
-                    'date': s.get('date', 'Recent'),
-                    'type': data.get('property_type', 'House').title()
+                    'date': s.get('date', 'N/A'),
+                    'type': data.get('property_type', 'House').title(),
+                    'source': 'Land Registry'
                 }
                 for s in market_data['recent_sales'][:5]
+                if s.get('price')
             ]
-        # Fallback: generate estimated comparables based on purchase price
-        if not sold_comparables:
-            avg_price = float(str(calculated_metrics.get('purchase_price', 200000)).replace(',', ''))
-            sold_comparables = [
-                {
-                    'address': f"Similar 3-bed property, {postcode}",
-                    'price': int(avg_price * 0.95),
-                    'bedrooms': bedrooms,
-                    'date': 'Recent sale',
-                    'type': 'Semi-Detached',
-                    'note': 'Estimated comparable'
-                },
-                {
-                    'address': f"Similar 3-bed property, {postcode}",
-                    'price': int(avg_price * 1.02),
-                    'bedrooms': bedrooms,
-                    'date': 'Recent sale',
-                    'type': 'Semi-Detached',
-                    'note': 'Estimated comparable'
-                },
-                {
-                    'address': f"Similar 2-bed property, {postcode}",
-                    'price': int(avg_price * 0.85),
-                    'bedrooms': max(1, bedrooms - 1),
-                    'date': 'Recent sale',
-                    'type': 'Terraced',
-                    'note': 'Estimated comparable (smaller)'
-                }
-            ]
-        
-        # RENT COMPARABLES - Use estimated rent or PropertyData
-        monthly_rent = int(data.get('monthlyRent', 0))
-        rent_comparables = []
-        if market_data.get('estimated_rent'):
-            market_rent = market_data['estimated_rent']
+
+        # ------------------------------------------------------------------ #
+        # RENT COMPARABLES                                                     #
+        # Priority: PropertyData real lettings → market estimate → empty      #
+        # ------------------------------------------------------------------ #
+        rent_comparables = market_data.get('rent_comparables', [])
+        if not rent_comparables and market_data.get('estimated_rent'):
+            # We have a market estimate but no individual comparables
             rent_comparables = [
                 {
-                    'address': f"3-bed property, {postcode}",
-                    'monthly_rent': market_rent,
+                    'address': f"{bedrooms}-bed property, {postcode}",
+                    'monthly_rent': market_data['estimated_rent'],
                     'bedrooms': bedrooms,
-                    'type': 'Similar property',
-                    'source': 'PropertyData estimate'
+                    'source': 'PropertyData market estimate',
+                    'confidence': market_data.get('rental_confidence', 'N/A')
                 }
             ]
-        elif monthly_rent > 0:
-            # Generate comparables around the expected rent
-            rent_comparables = [
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': int(monthly_rent * 0.95),
-                    'bedrooms': bedrooms,
-                    'type': 'Terraced',
-                    'source': 'Estimated comparable'
-                },
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': monthly_rent,
-                    'bedrooms': bedrooms,
-                    'type': 'Semi-Detached',
-                    'source': 'Target property estimate'
-                },
-                {
-                    'address': f"3-bed house, {postcode}",
-                    'monthly_rent': int(monthly_rent * 1.05),
-                    'bedrooms': bedrooms,
-                    'type': 'Detached',
-                    'source': 'Estimated comparable'
+
+        # ------------------------------------------------------------------ #
+        # HOUSE VALUATION                                                      #
+        # Priority: PropertyData valuation → Land Registry avg → asking price #
+        # ------------------------------------------------------------------ #
+        house_valuation = market_data.get('sales_valuation')
+        if not house_valuation:
+            avg_sold = market_data.get('avg_sold_price') or market_data.get('average_price')
+            if avg_sold:
+                house_valuation = {
+                    'estimate': int(avg_sold),
+                    'confidence': 'Low',
+                    'source': 'Land Registry area average',
+                    'note': 'Based on recent sold prices in postcode area — not property-specific.'
                 }
-            ]
-        
-        # HOUSE VALUATION - Use sales valuation, Land Registry, or estimate
-        house_valuation = sales_valuation or {}
-        if not house_valuation.get('estimate'):
-            purchase_price = int(data.get('purchasePrice', 0))
-            # Generate estimate based on purchase price with typical negotiation range
-            house_valuation = {
-                'estimate': purchase_price,
-                'confidence': 'Medium (based on asking price)',
-                'range': {
-                    'low': int(purchase_price * 0.95),
-                    'high': int(purchase_price * 1.05)
-                },
-                'source': 'Market estimate',
-                'note': 'Based on current listing price. Professional valuation recommended.'
-            }
-        
+            else:
+                house_valuation = {
+                    'estimate': int(data.get('purchasePrice', 0)),
+                    'confidence': 'Low',
+                    'source': 'Asking price only',
+                    'note': 'No external valuation available. Commission a RICS survey for an accurate figure.'
+                }
+
         # Combine results
         results = {
             **calculated_metrics,
@@ -2437,16 +2467,10 @@ def ai_analyze():
             'ai_risks': ai_insights['risks'],
             'ai_area': ai_insights['area'],
             'ai_next_steps': ai_insights['next_steps'],
-            # Add comparable data sections
             'sold_comparables': sold_comparables,
             'rent_comparables': rent_comparables,
             'house_valuation': house_valuation,
-            # Legacy fields
-            'comparable_sales': market_data.get('comparable_sales', []),
-            'comparable_listings': market_data.get('comparable_listings', []),
             'avg_sold_price': market_data.get('avg_sold_price'),
-            'avg_asking_price': market_data.get('avg_asking_price'),
-            'sales_valuation': sales_valuation,
             'market_source': market_data.get('source', 'None')
         }
         

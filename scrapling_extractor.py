@@ -75,50 +75,60 @@ class PropertyExtractor:
     
     def _extract_postcode(self, html: str, text: str, url: str) -> Optional[str]:
         """Extract postcode using multiple strategies"""
-        # Strategy 1: Look for standard UK postcode patterns
-        patterns = [
-            r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})',  # Standard format
-            r'([A-Z]{1,2}\d{1,2}\s?\d?[A-Z]{2})',   # Relaxed format
-            r'"postcode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',  # JSON
-            r'"postalCode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',  # Schema.org
-        ]
-        
-        all_postcodes = []
-        for pattern in patterns:
-            found = re.findall(pattern, html, re.IGNORECASE)
-            all_postcodes.extend(found)
-        
-        # Validate and dedupe
-        valid = []
-        for pc in set(all_postcodes):
-            pc_clean = re.sub(r'\s+', '', pc).upper()
-            # Basic UK postcode validation
-            if len(pc_clean) >= 5 and len(pc_clean) <= 7:
-                if pc_clean[0].isalpha() and pc_clean[0] not in 'QVXZ':
-                    valid.append(pc.strip().upper())
-        
-        if not valid:
-            return None
-        
-        # Strategy 2: Try to match with address/title area
+        postcode_re = r'[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}'
+
+        # Strategy 1: HTML <title> tag — most reliable because it IS the listing address.
+        # Rightmove/Zoopla titles look like:
+        #   "3 bed semi for sale in Orme Avenue, Alkrington, Manchester M24 1JZ | Rightmove"
         title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
         if title_match:
-            title = title_match.group(1)
-            area_match = re.search(r'([A-Z]{1,2}\d{1,2})', title)
-            if area_match:
-                area_code = area_match.group(1)
-                for pc in valid:
-                    if pc.replace(' ', '').startswith(area_code):
-                        return pc
-        
-        # Strategy 3: Look for patterns near "postcode" or address words
-        for keyword in ['postcode', 'address', 'location']:
-            nearby = re.findall(rf'{keyword}.*?([A-Z]{{1,2}}\d[A-Z\d]?\s?\d[A-Z]{{2}})', html, re.IGNORECASE)
-            if nearby:
-                return nearby[0].strip().upper()
-        
-        # Return first valid as fallback
-        return valid[0] if valid else None
+            title_pc = re.findall(postcode_re, title_match.group(1).upper())
+            if title_pc:
+                pc = title_pc[0].strip()
+                if ' ' not in pc:
+                    pc = pc[:-3] + ' ' + pc[-3:]
+                return pc
+
+        # Strategy 2: JSON / schema.org structured data (also property-specific)
+        for json_pattern in [
+            r'"postcode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',
+            r'"postalCode":\s*"([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})"',
+        ]:
+            m = re.search(json_pattern, html, re.IGNORECASE)
+            if m:
+                pc = m.group(1).strip().upper()
+                if ' ' not in pc:
+                    pc = pc[:-3] + ' ' + pc[-3:]
+                return pc
+
+        # Strategy 3: Collect all candidates from page and score by context
+        # Penalise any postcode that appears near agent/branch/contact words
+        AGENT_WORDS = {'estate agent', 'branch', 'contact us', 'tel:', 'our office',
+                       'agent', 'call us', 'vat no', 'company number', 'registered'}
+        all_pcs = re.findall(postcode_re, html.upper())
+        seen = {}
+        for raw_pc in all_pcs:
+            pc = raw_pc.strip()
+            if ' ' not in pc:
+                pc = pc[:-3] + ' ' + pc[-3:]
+            if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', pc):
+                continue
+            if pc in seen:
+                continue
+            # Score this occurrence
+            for m in re.finditer(re.escape(raw_pc), html.upper()):
+                ctx = html[max(0, m.start() - 300): m.start() + 300].lower()
+                score = 0
+                if any(w in ctx for w in AGENT_WORDS):
+                    score -= 200
+                seen[pc] = max(seen.get(pc, -9999), score)
+
+        if seen:
+            best = max(seen, key=lambda k: seen[k])
+            if seen[best] >= 0:
+                return best
+
+        return None
     
     def extract_property(self, url: str) -> Dict:
         """Extract all property data from URL"""

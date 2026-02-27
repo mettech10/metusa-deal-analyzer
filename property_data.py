@@ -264,12 +264,40 @@ def get_market_context(postcode: str, bedrooms: int) -> Dict:
         'bedrooms': bedrooms
     }
     
-    # Extract rental estimate
+    # Extract rental estimate + actual rent comparables
     if 'estimate' in rental:
         context['estimated_rent'] = rental['estimate'].get('monthly')
         context['rental_confidence'] = rental.get('confidence')
         context['rental_range'] = rental.get('range', {})
-    
+        context['rental_demand_score'] = rental.get('demand_score')
+        context['rental_sample_size'] = rental.get('sample_size')
+        context['rental_market_trend'] = rental.get('market_trend')
+
+    # Real rent comparables (actual listings used to build the estimate)
+    if 'comparables' in rental:
+        context['rent_comparables'] = [
+            {
+                'address': c.get('address', 'Nearby property'),
+                'monthly_rent': round(c['rent'] * 52 / 12) if c.get('rent') else None,
+                'weekly_rent': c.get('rent'),
+                'date': c.get('date', 'N/A'),
+                'distance_miles': c.get('distance'),
+            }
+            for c in rental['comparables'][:8]
+            if c.get('rent')
+        ]
+
+    # Sales valuation (real estimated market value of the property)
+    sales_val_raw = property_data.get_sales_valuation(postcode, bedrooms)
+    if 'estimate' in sales_val_raw:
+        est = sales_val_raw['estimate']
+        context['sales_valuation'] = {
+            'estimate': est.get('sale_price') if isinstance(est, dict) else est,
+            'confidence': sales_val_raw.get('confidence'),
+            'range': sales_val_raw.get('range', {}),
+            'source': 'PropertyData API',
+        }
+
     # Extract market trends
     if 'data' in trends:
         context['price_growth_12m'] = trends['data'].get('growth_12m')
