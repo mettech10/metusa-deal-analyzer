@@ -143,61 +143,81 @@ def scrape_with_jina(url: str) -> dict:
             area_letters = ''.join(c for c in area if c.isalpha())
             return area_letters in VALID_AREAS
 
-        # In clean Jina output the property postcode typically appears early.
-        # Score each candidate by position and context.
-        postcode_scores = {}
-        for pc in all_postcodes:
-            formatted_pc = format_postcode(pc)
-            if formatted_pc in postcode_scores:
-                continue
-            if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
-                continue
-            if not is_valid_area(formatted_pc):
-                continue
-            area_part = formatted_pc.split()[0]
-            if len(area_part) < 2:
-                continue
+        # --- Postcode: title line first, then scored fallback ---
+        # Strategy 1: extract directly from Jina's "Title:" line.
+        # Rightmove/Zoopla titles look like:
+        #   "3 bed semi for sale - Orme Avenue, Alkrington, Manchester M24 1JZ | Rightmove"
+        # This is the most reliable source because it IS the listing address.
+        title_postcode = None
+        title_search = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
+        if title_search:
+            title_text = title_search.group(1)
+            title_pcs = re.findall(postcode_pattern, title_text.upper())
+            for pc in title_pcs:
+                fp = format_postcode(pc)
+                if (re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', fp)
+                        and is_valid_area(fp)
+                        and len(fp.split()[0]) >= 2):
+                    title_postcode = fp
+                    break
 
-            best_score = 0
-            for match in re.finditer(re.escape(pc), text.upper()):
-                idx = match.start()
-                context = text[max(0, idx - 300):idx + 300].lower()
-                score = 0
-
-                # In Jina markdown the first ~500 chars usually contain title/address
-                if idx < 500:
-                    score += 150
-                elif idx < 1500:
-                    score += 60
-
-                # Nearby property keywords
-                if any(w in context for w in ['price', '£', 'for sale', 'asking']):
-                    score += 80
-                if any(w in context for w in ['bedroom', 'bed', 'house', 'flat', 'property']):
-                    score += 60
-                if any(w in context for w in ['road', 'street', 'avenue', 'lane', 'drive', 'close']):
-                    score += 50
-                if 'address' in context or 'postcode' in context:
-                    score += 40
-
-                # Penalise agent-office contexts
-                if any(w in context for w in ['agent', 'office', 'branch', 'tel:', 'phone']):
-                    score -= 100
-                if any(w in context for w in ['vat', 'registration', 'company number']):
-                    score -= 150
-
-                best_score = max(best_score, score)
-            postcode_scores[formatted_pc] = best_score
-
-        if postcode_scores:
-            sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
-            print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
-            best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
-            data['postcode'] = best_postcode
-            print(f"[Jina] Selected postcode: {best_postcode}")
+        if title_postcode:
+            data['postcode'] = title_postcode
+            print(f"[Jina] Postcode from title: {title_postcode}")
         else:
-            data['postcode'] = None
-            print("[Jina] No valid postcodes found")
+            # Strategy 2: score all candidates; heavily penalise agent/contact context.
+            postcode_scores = {}
+            for pc in all_postcodes:
+                formatted_pc = format_postcode(pc)
+                if formatted_pc in postcode_scores:
+                    continue
+                if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
+                    continue
+                if not is_valid_area(formatted_pc):
+                    continue
+                if len(formatted_pc.split()[0]) < 2:
+                    continue
+
+                best_score = 0
+                for match in re.finditer(re.escape(pc), text.upper()):
+                    idx = match.start()
+                    context = text[max(0, idx - 300):idx + 300].lower()
+                    score = 0
+
+                    # Reward proximity to listing content
+                    if idx < 1500:
+                        score += 60
+
+                    if any(w in context for w in ['price', '£', 'for sale', 'asking']):
+                        score += 80
+                    if any(w in context for w in ['bedroom', 'bed', 'house', 'flat', 'property']):
+                        score += 60
+                    if any(w in context for w in ['road', 'street', 'avenue', 'lane', 'drive', 'close']):
+                        score += 50
+                    if 'address' in context or 'postcode' in context:
+                        score += 40
+
+                    # Strongly penalise agent/branch/contact sections
+                    if any(w in context for w in ['estate agent', 'branch', 'contact us',
+                                                   'tel:', 'phone', 'call us', 'our office']):
+                        score -= 200
+                    if any(w in context for w in ['agent', 'office']):
+                        score -= 100
+                    if any(w in context for w in ['vat', 'registration', 'company number']):
+                        score -= 200
+
+                    best_score = max(best_score, score)
+                postcode_scores[formatted_pc] = best_score
+
+            if postcode_scores:
+                sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
+                print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
+                best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
+                data['postcode'] = best_postcode
+                print(f"[Jina] Selected postcode (scored): {best_postcode}")
+            else:
+                data['postcode'] = None
+                print("[Jina] No valid postcodes found")
 
         # --- Address ---
         # Jina typically starts its output with "Title: <page title>"
