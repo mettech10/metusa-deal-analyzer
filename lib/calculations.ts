@@ -208,6 +208,42 @@ function calculateProjection(
  * Run full analysis calculations
  */
 export function calculateAll(data: PropertyFormData): CalculationResults {
+  // ── R2SA: rent the property from a landlord, sublet as serviced accommodation ──
+  if (data.investmentType === "r2sa") {
+    const saRevenue   = data.saMonthlySARevenue || 0
+    const rentPaid    = data.monthlyRent         // rent paid to the landlord
+    const setupCosts  = data.saSetupCosts || 5000
+    // Operating costs: cleaning, utilities, platform fees (~30% of SA revenue)
+    const monthlyOpCosts  = saRevenue * 0.30
+    const monthlyExpenses = Math.round((rentPaid + monthlyOpCosts) * 100) / 100
+    const monthlyCashFlow = Math.round((saRevenue - monthlyExpenses) * 100) / 100
+    const annualCashFlow  = Math.round(monthlyCashFlow * 12 * 100) / 100
+    const cashOnCashReturn =
+      setupCosts > 0 ? Math.round((annualCashFlow / setupCosts) * 10000) / 100 : 0
+
+    return {
+      sdltAmount: 0,
+      sdltBreakdown: [],
+      totalPurchaseCost: 0,
+      totalCapitalRequired: setupCosts,
+      depositAmount: 0,
+      mortgageAmount: 0,
+      monthlyMortgagePayment: 0,
+      annualMortgageCost: 0,
+      bridgingLoanDetails: undefined,
+      grossYield: 0,
+      netYield: 0,
+      monthlyIncome: Math.round(saRevenue * 100) / 100,
+      monthlyExpenses,
+      monthlyCashFlow,
+      annualCashFlow,
+      cashOnCashReturn,
+      annualRunningCosts: Math.round(monthlyExpenses * 12 * 100) / 100,
+      monthlyRunningCosts: monthlyExpenses,
+      fiveYearProjection: [],
+    }
+  }
+
   const { total: sdltAmount, breakdown: sdltBreakdown } = calculateSDLT(
     data.purchasePrice,
     data.isAdditionalProperty

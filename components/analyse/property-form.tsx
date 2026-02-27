@@ -20,7 +20,7 @@ import type { PropertyFormData } from "@/lib/types"
 const schema = z.object({
   address: z.string().min(1, "Address is required"),
   postcode: z.string().min(1, "Postcode is required"),
-  purchasePrice: z.coerce.number().min(1, "Enter a purchase price"),
+  purchasePrice: z.coerce.number().min(0),
   propertyType: z.enum(["house", "flat", "commercial"]),
   investmentType: z.enum(["btl", "brr", "hmo", "flip", "r2sa", "development"]),
   sqm: z.coerce.number().min(0).optional(),
@@ -34,6 +34,19 @@ const schema = z.object({
   depositPercentage: z.coerce.number().min(0).max(100),
   interestRate: z.coerce.number().min(0).max(20),
   mortgageTerm: z.coerce.number().min(1).max(40),
+  // Bridging loan fields
+  bridgingMonthlyRate: z.coerce.number().min(0).max(5).optional(),
+  bridgingTermMonths: z.coerce.number().min(1).max(36).optional(),
+  bridgingArrangementFee: z.coerce.number().min(0).max(5).optional(),
+  bridgingExitFee: z.coerce.number().min(0).max(5).optional(),
+  // BRR / Flip
+  arv: z.coerce.number().min(0).optional(),
+  // HMO
+  roomCount: z.coerce.number().min(0).max(20).optional(),
+  avgRoomRate: z.coerce.number().min(0).optional(),
+  // R2SA
+  saMonthlySARevenue: z.coerce.number().min(0).optional(),
+  saSetupCosts: z.coerce.number().min(0).optional(),
   monthlyRent: z.coerce.number().min(0),
   annualRentIncrease: z.coerce.number().min(0).max(20),
   voidWeeks: z.coerce.number().min(0).max(52),
@@ -93,6 +106,15 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     interestRate: 5.5,
     mortgageTerm: 25,
     mortgageType: "interest-only",
+    bridgingMonthlyRate: 0.75,
+    bridgingTermMonths: 12,
+    bridgingArrangementFee: 1.0,
+    bridgingExitFee: 0.5,
+    arv: 0,
+    roomCount: 0,
+    avgRoomRate: 0,
+    saMonthlySARevenue: 0,
+    saSetupCosts: 5000,
     monthlyRent: 0,
     annualRentIncrease: 2,
     voidWeeks: 2,
@@ -115,6 +137,14 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
   })
 
   const purchaseType = watch("purchaseType")
+  const investmentType = watch("investmentType")
+
+  const isR2SA     = investmentType === "r2sa"
+  const isHMO      = investmentType === "hmo"
+  const isBRR      = investmentType === "brr"
+  const isFLIP     = investmentType === "flip"
+  const isBridging = purchaseType === "bridging-loan"
+  const isCash     = purchaseType === "cash"
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-8">
@@ -133,11 +163,9 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
         </div>
       )}
 
-      {/* Property Details */}
+      {/* ── Property Details ─────────────────────────────────────────── */}
       <div className="flex flex-col gap-4">
-        <h3 className="text-base font-semibold text-foreground">
-          Property Details
-        </h3>
+        <h3 className="text-base font-semibold text-foreground">Property Details</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <FormField label="Property Address" error={errors.address?.message}>
@@ -148,27 +176,44 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
             </FormField>
           </div>
           <FormField label="Postcode" error={errors.postcode?.message}>
-            <Input
-              placeholder="e.g. SW1A 2AA"
-              {...register("postcode")}
+            <Input placeholder="e.g. SW1A 2AA" {...register("postcode")} />
+          </FormField>
+          {/* Investment Strategy */}
+          <FormField label="Investment Strategy">
+            <Controller
+              control={control}
+              name="investmentType"
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="btl">Buy-to-Let (BTL) — Long-term rental</SelectItem>
+                    <SelectItem value="hmo">HMO — Room-by-room rental</SelectItem>
+                    <SelectItem value="brr">Buy, Refurb &amp; Refinance (BRR)</SelectItem>
+                    <SelectItem value="flip">Flip / Renovation — Buy &amp; sell</SelectItem>
+                    <SelectItem value="r2sa">Rent-to-SA (R2SA) — Sublet as SA</SelectItem>
+                    <SelectItem value="development">Development</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             />
           </FormField>
-          <FormField
-            label="Purchase Price"
-            error={errors.purchasePrice?.message}
-          >
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                placeholder="250000"
-                {...register("purchasePrice")}
-              />
-            </div>
-          </FormField>
+          {/* Purchase Price — hidden for R2SA (no purchase) */}
+          {!isR2SA && (
+            <FormField label="Purchase Price" error={errors.purchasePrice?.message}>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="250000"
+                  {...register("purchasePrice")}
+                />
+              </div>
+            </FormField>
+          )}
           <FormField label="Property Type">
             <Controller
               control={control}
@@ -187,27 +232,6 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
               )}
             />
           </FormField>
-          <FormField label="Investment Type">
-            <Controller
-              control={control}
-              name="investmentType"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="btl">BTL</SelectItem>
-                    <SelectItem value="brr">BRR</SelectItem>
-                    <SelectItem value="hmo">HMO</SelectItem>
-                    <SelectItem value="flip">Flip</SelectItem>
-                    <SelectItem value="r2sa">R2SA</SelectItem>
-                    <SelectItem value="development">Development</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </FormField>
           <FormField label="Sqm" hint="Property size in square meters (optional)">
             <div className="relative">
               <Input
@@ -216,9 +240,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                 placeholder="85"
                 {...register("sqm")}
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                m²
-              </span>
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">m²</span>
             </div>
           </FormField>
           <FormField label="Bedrooms">
@@ -246,91 +268,84 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
         </div>
       </div>
 
-      {/* Purchase Costs */}
-      <div className="flex flex-col gap-4">
-        <h3 className="text-base font-semibold text-foreground">
-          Purchase Costs
-        </h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2 flex items-center gap-3">
-            <Controller
-              control={control}
-              name="isAdditionalProperty"
-              render={({ field }) => (
-                <Switch
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                  id="additional"
-                />
-              )}
-            />
-            <Label htmlFor="additional" className="text-sm text-foreground cursor-pointer">
-              Additional property (5% SDLT surcharge)
-            </Label>
+      {/* ── Purchase Costs (hidden for R2SA — no purchase) ───────────── */}
+      {!isR2SA && (
+        <div className="flex flex-col gap-4">
+          <h3 className="text-base font-semibold text-foreground">Purchase Costs</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2 flex items-center gap-3">
+              <Controller
+                control={control}
+                name="isAdditionalProperty"
+                render={({ field }) => (
+                  <Switch checked={field.value} onCheckedChange={field.onChange} id="additional" />
+                )}
+              />
+              <Label htmlFor="additional" className="text-sm text-foreground cursor-pointer">
+                Additional property (5% SDLT surcharge)
+              </Label>
+            </div>
+            <FormField label="Refurbishment Budget" hint="Leave 0 if none">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("refurbishmentBudget")} />
+              </div>
+            </FormField>
+            <FormField label="Legal Fees">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("legalFees")} />
+              </div>
+            </FormField>
+            <FormField label="Survey Costs">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("surveyCosts")} />
+              </div>
+            </FormField>
+            {/* ARV — shown for BRR and Flip */}
+            {(isBRR || isFLIP) && (
+              <FormField label="After Repair Value (ARV)" hint="Expected value after renovation">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                  <Input
+                    type="number"
+                    className="pl-7"
+                    placeholder="220000"
+                    {...register("arv")}
+                  />
+                </div>
+              </FormField>
+            )}
           </div>
-          <FormField label="Refurbishment Budget" hint="Leave 0 if none">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("refurbishmentBudget")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Legal Fees">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("legalFees")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Survey Costs">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("surveyCosts")}
-              />
-            </div>
-          </FormField>
         </div>
-      </div>
+      )}
 
-      {/* Financing */}
-      <div className="flex flex-col gap-4">
-        <h3 className="text-base font-semibold text-foreground">Financing</h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FormField label="Purchase Type">
-            <Controller
-              control={control}
-              name="purchaseType"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mortgage">Mortgage</SelectItem>
-                    <SelectItem value="bridging-loan">Bridging Loan</SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </FormField>
-          {purchaseType !== "cash" && (
-            <>
+      {/* ── Financing (hidden for R2SA) ───────────────────────────────── */}
+      {!isR2SA && (
+        <div className="flex flex-col gap-4">
+          <h3 className="text-base font-semibold text-foreground">Financing</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField label="Purchase Type">
+              <Controller
+                control={control}
+                name="purchaseType"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mortgage">Mortgage</SelectItem>
+                      <SelectItem value="bridging-loan">Bridging Loan</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </FormField>
+            {/* Deposit — shown for mortgage and bridging (not cash) */}
+            {!isCash && (
               <FormField label="Deposit" hint="% of purchase price">
                 <div className="relative">
                   <Input
@@ -339,150 +354,224 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                     className="pr-7"
                     {...register("depositPercentage")}
                   />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                    %
-                  </span>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                 </div>
               </FormField>
-              <FormField label="Interest Rate">
-                <div className="relative">
-                  <Input
-                    type="number"
-                    step="0.1"
-                    className="pr-7"
-                    {...register("interestRate")}
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                    %
-                  </span>
-                </div>
-              </FormField>
-              <FormField label="Mortgage Term" hint="In years">
-                <Input type="number" {...register("mortgageTerm")} />
-              </FormField>
-            </>
-          )}
+            )}
+            {/* Mortgage-specific fields */}
+            {!isCash && !isBridging && (
+              <>
+                <FormField label="Interest Rate">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      className="pr-7"
+                      {...register("interestRate")}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                </FormField>
+                <FormField label="Mortgage Term" hint="In years">
+                  <Input type="number" {...register("mortgageTerm")} />
+                </FormField>
+              </>
+            )}
+            {/* Bridging Loan Detail Fields */}
+            {isBridging && (
+              <>
+                <FormField label="Monthly Rate" hint="% per month (e.g. 0.75)">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.05"
+                      className="pr-7"
+                      {...register("bridgingMonthlyRate")}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                </FormField>
+                <FormField label="Loan Term" hint="Months (e.g. 12)">
+                  <Input type="number" {...register("bridgingTermMonths")} />
+                </FormField>
+                <FormField label="Arrangement Fee" hint="% of loan">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      className="pr-7"
+                      {...register("bridgingArrangementFee")}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                </FormField>
+                <FormField label="Exit Fee" hint="% of loan">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.1"
+                      className="pr-7"
+                      {...register("bridgingExitFee")}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                </FormField>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Rental Income */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
+      {/* ── HMO Room Details ──────────────────────────────────────────── */}
+      {isHMO && (
+        <div className="flex flex-col gap-4">
+          <h3 className="text-base font-semibold text-foreground">HMO Room Details</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField label="Number of Rooms">
+              <Input type="number" placeholder="5" {...register("roomCount")} />
+            </FormField>
+            <FormField label="Avg Room Rate" hint="Monthly rent per room">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="450"
+                  {...register("avgRoomRate")}
+                />
+              </div>
+            </FormField>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rental Income (hidden for HMO — room×rate; hidden for Flip — sell strategy) */}
+      {!isHMO && !isFLIP && (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-foreground">
+              {isR2SA ? "Rental Details" : "Rental Income"}
+            </h3>
+            {prefilled && !isR2SA && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600">
+                <Info className="size-3" />
+                Required
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField
+              label={isR2SA ? "Monthly Rent to Landlord" : "Expected Monthly Rent"}
+              error={errors.monthlyRent?.message}
+            >
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="1200"
+                  {...register("monthlyRent")}
+                />
+              </div>
+            </FormField>
+            {!isR2SA && (
+              <>
+                <FormField label="Annual Rent Increase" hint="Estimated %">
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      step="0.5"
+                      className="pr-7"
+                      {...register("annualRentIncrease")}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                  </div>
+                </FormField>
+                <FormField label="Void Period" hint="Weeks per year without tenants">
+                  <Input type="number" {...register("voidWeeks")} />
+                </FormField>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── R2SA — Serviced Accommodation Details ───────────────────── */}
+      {isR2SA && (
+        <div className="flex flex-col gap-4">
           <h3 className="text-base font-semibold text-foreground">
-            Rental Income
+            Serviced Accommodation Details
           </h3>
-          {prefilled && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600">
-              <Info className="size-3" />
-              Required
-            </span>
-          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField label="Monthly SA Revenue" hint="Expected gross revenue from bookings">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="2000"
+                  {...register("saMonthlySARevenue")}
+                />
+              </div>
+            </FormField>
+            <FormField label="Setup / Furnishing Costs" hint="One-off cost to furnish the property">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="5000"
+                  {...register("saSetupCosts")}
+                />
+              </div>
+            </FormField>
+          </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FormField
-            label="Expected Monthly Rent"
-            error={errors.monthlyRent?.message}
-          >
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                placeholder="1200"
-                {...register("monthlyRent")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Annual Rent Increase" hint="Estimated %">
-            <div className="relative">
-              <Input
-                type="number"
-                step="0.5"
-                className="pr-7"
-                {...register("annualRentIncrease")}
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                %
-              </span>
-            </div>
-          </FormField>
-          <FormField label="Void Period" hint="Weeks per year without tenants">
-            <Input type="number" {...register("voidWeeks")} />
-          </FormField>
-        </div>
-      </div>
+      )}
 
-      {/* Running Costs */}
-      <div className="flex flex-col gap-4">
-        <h3 className="text-base font-semibold text-foreground">
-          Running Costs
-        </h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <FormField label="Management Fee" hint="% of rent">
-            <div className="relative">
-              <Input
-                type="number"
-                step="0.5"
-                className="pr-7"
-                {...register("managementFeePercent")}
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                %
-              </span>
-            </div>
-          </FormField>
-          <FormField label="Insurance (Annual)">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("insurance")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Maintenance (Annual)">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("maintenance")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Ground Rent (Annual)">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("groundRent")}
-              />
-            </div>
-          </FormField>
-          <FormField label="Bills (Monthly)">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                {"£"}
-              </span>
-              <Input
-                type="number"
-                className="pl-7"
-                {...register("bills")}
-              />
-            </div>
-          </FormField>
+      {/* ── Running Costs (hidden for R2SA — ops costs estimated at 30% of SA revenue) */}
+      {!isR2SA && (
+        <div className="flex flex-col gap-4">
+          <h3 className="text-base font-semibold text-foreground">Running Costs</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField label="Management Fee" hint="% of rent">
+              <div className="relative">
+                <Input
+                  type="number"
+                  step="0.5"
+                  className="pr-7"
+                  {...register("managementFeePercent")}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+              </div>
+            </FormField>
+            <FormField label="Insurance (Annual)">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("insurance")} />
+              </div>
+            </FormField>
+            <FormField label="Maintenance (Annual)">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("maintenance")} />
+              </div>
+            </FormField>
+            <FormField label="Ground Rent (Annual)">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("groundRent")} />
+              </div>
+            </FormField>
+            <FormField label="Bills (Monthly)">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input type="number" className="pl-7" {...register("bills")} />
+              </div>
+            </FormField>
+          </div>
         </div>
-      </div>
+      )}
 
       <Button type="submit" size="xl" className="w-full" disabled={isLoading}>
         {isLoading ? (
