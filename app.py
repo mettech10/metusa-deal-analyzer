@@ -143,61 +143,81 @@ def scrape_with_jina(url: str) -> dict:
             area_letters = ''.join(c for c in area if c.isalpha())
             return area_letters in VALID_AREAS
 
-        # In clean Jina output the property postcode typically appears early.
-        # Score each candidate by position and context.
-        postcode_scores = {}
-        for pc in all_postcodes:
-            formatted_pc = format_postcode(pc)
-            if formatted_pc in postcode_scores:
-                continue
-            if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
-                continue
-            if not is_valid_area(formatted_pc):
-                continue
-            area_part = formatted_pc.split()[0]
-            if len(area_part) < 2:
-                continue
+        # --- Postcode: title line first, then scored fallback ---
+        # Strategy 1: extract directly from Jina's "Title:" line.
+        # Rightmove/Zoopla titles look like:
+        #   "3 bed semi for sale - Orme Avenue, Alkrington, Manchester M24 1JZ | Rightmove"
+        # This is the most reliable source because it IS the listing address.
+        title_postcode = None
+        title_search = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
+        if title_search:
+            title_text = title_search.group(1)
+            title_pcs = re.findall(postcode_pattern, title_text.upper())
+            for pc in title_pcs:
+                fp = format_postcode(pc)
+                if (re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', fp)
+                        and is_valid_area(fp)
+                        and len(fp.split()[0]) >= 2):
+                    title_postcode = fp
+                    break
 
-            best_score = 0
-            for match in re.finditer(re.escape(pc), text.upper()):
-                idx = match.start()
-                context = text[max(0, idx - 300):idx + 300].lower()
-                score = 0
-
-                # In Jina markdown the first ~500 chars usually contain title/address
-                if idx < 500:
-                    score += 150
-                elif idx < 1500:
-                    score += 60
-
-                # Nearby property keywords
-                if any(w in context for w in ['price', '£', 'for sale', 'asking']):
-                    score += 80
-                if any(w in context for w in ['bedroom', 'bed', 'house', 'flat', 'property']):
-                    score += 60
-                if any(w in context for w in ['road', 'street', 'avenue', 'lane', 'drive', 'close']):
-                    score += 50
-                if 'address' in context or 'postcode' in context:
-                    score += 40
-
-                # Penalise agent-office contexts
-                if any(w in context for w in ['agent', 'office', 'branch', 'tel:', 'phone']):
-                    score -= 100
-                if any(w in context for w in ['vat', 'registration', 'company number']):
-                    score -= 150
-
-                best_score = max(best_score, score)
-            postcode_scores[formatted_pc] = best_score
-
-        if postcode_scores:
-            sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
-            print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
-            best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
-            data['postcode'] = best_postcode
-            print(f"[Jina] Selected postcode: {best_postcode}")
+        if title_postcode:
+            data['postcode'] = title_postcode
+            print(f"[Jina] Postcode from title: {title_postcode}")
         else:
-            data['postcode'] = None
-            print("[Jina] No valid postcodes found")
+            # Strategy 2: score all candidates; heavily penalise agent/contact context.
+            postcode_scores = {}
+            for pc in all_postcodes:
+                formatted_pc = format_postcode(pc)
+                if formatted_pc in postcode_scores:
+                    continue
+                if not re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}$', formatted_pc):
+                    continue
+                if not is_valid_area(formatted_pc):
+                    continue
+                if len(formatted_pc.split()[0]) < 2:
+                    continue
+
+                best_score = 0
+                for match in re.finditer(re.escape(pc), text.upper()):
+                    idx = match.start()
+                    context = text[max(0, idx - 300):idx + 300].lower()
+                    score = 0
+
+                    # Reward proximity to listing content
+                    if idx < 1500:
+                        score += 60
+
+                    if any(w in context for w in ['price', '£', 'for sale', 'asking']):
+                        score += 80
+                    if any(w in context for w in ['bedroom', 'bed', 'house', 'flat', 'property']):
+                        score += 60
+                    if any(w in context for w in ['road', 'street', 'avenue', 'lane', 'drive', 'close']):
+                        score += 50
+                    if 'address' in context or 'postcode' in context:
+                        score += 40
+
+                    # Strongly penalise agent/branch/contact sections
+                    if any(w in context for w in ['estate agent', 'branch', 'contact us',
+                                                   'tel:', 'phone', 'call us', 'our office']):
+                        score -= 200
+                    if any(w in context for w in ['agent', 'office']):
+                        score -= 100
+                    if any(w in context for w in ['vat', 'registration', 'company number']):
+                        score -= 200
+
+                    best_score = max(best_score, score)
+                postcode_scores[formatted_pc] = best_score
+
+            if postcode_scores:
+                sorted_pcs = sorted(postcode_scores.items(), key=lambda x: x[1], reverse=True)
+                print(f"[Jina] Postcode candidates: {sorted_pcs[:5]}")
+                best_postcode = sorted_pcs[0][0] if sorted_pcs[0][1] >= 0 else None
+                data['postcode'] = best_postcode
+                print(f"[Jina] Selected postcode (scored): {best_postcode}")
+            else:
+                data['postcode'] = None
+                print("[Jina] No valid postcodes found")
 
         # --- Address ---
         # Jina typically starts its output with "Title: <page title>"
@@ -1930,155 +1950,281 @@ def extract_url():
 
 def get_ai_property_analysis(property_data, calculated_metrics, market_data=None):
     """
-    Get AI-powered analysis from OpenClaw
-    This sends the data to the AI for enhanced insights
+    Get AI-powered property deal analysis using Claude (Anthropic).
+    Falls back to a rule-based summary if ANTHROPIC_API_KEY is not set.
     """
-    try:
-        # Build market data context (PropertyData or Land Registry)
-        market_context = ""
-        if market_data and isinstance(market_data, dict):
-            source = market_data.get('source', 'Unknown')
-            
-            if source == 'PropertyData API':
-                # PropertyData format
-                estimated_rent = market_data.get('estimated_rent')
-                rental_confidence = market_data.get('rental_confidence')
-                price_growth = market_data.get('price_growth_12m')
-                avg_sold = market_data.get('avg_sold_price')
-                area_score = market_data.get('area_score')
-                transport_score = market_data.get('transport_score')
-                
-                if estimated_rent:
-                    market_context += f"""
-MARKET DATA (PropertyData API - Professional Grade):
-- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"""
-                
-                if price_growth is not None:
-                    market_context += f"""
-- 12-Month Price Growth: {price_growth:.1f}%"""
-                
-                if avg_sold:
-                    market_context += f"""
-- Average Sold Price: £{avg_sold:,.0f}"""
-                
-                if area_score:
-                    market_context += f"""
-- Area Quality Score: {area_score}/10"""
-                
-                if transport_score:
-                    market_context += f"""
-- Transport Links Score: {transport_score}/10"""
-            
-            elif source == 'Land Registry':
-                # Land Registry format
-                avg_price = market_data.get('average_price')
-                trend = market_data.get('price_trend', {})
-                recent_sales = market_data.get('recent_sales', [])
-                
-                if avg_price:
-                    market_context += f"""
-MARKET DATA (Land Registry - Free Government Data):
-- Average Sold Price (12 months): £{avg_price:,.0f}"""
-                
-                if trend:
-                    market_context += f"""
-- Price Trend: {trend.get('trend', 'stable')} ({trend.get('change_percent', 0):.1f}% change)"""
-                
-                if recent_sales:
-                    market_context += f"""
-- Recent Comparable Sales:"""
-                    for i, sale in enumerate(recent_sales[:3], 1):
-                        market_context += f"""
-  {i}. £{sale['price']:,} on {sale['date'][:10]} - {sale.get('street', 'N/A')}"""
-            
-            else:
-                market_context = "MARKET DATA: Limited data available for this postcode"
-        
-        if not market_context:
-            market_context = "MARKET DATA: No external market data available"
-        
-        # Build comprehensive prompt for AI
-        prompt = f"""Analyze this UK property investment deal and provide detailed insights:
+    # ------------------------------------------------------------------ #
+    # Build market data context                                            #
+    # ------------------------------------------------------------------ #
+    market_context = ""
+    if market_data and isinstance(market_data, dict):
+        source = market_data.get('source', 'Unknown')
 
-PROPERTY DETAILS:
-- Address: {property_data.get('address', 'N/A')}
-- Postcode: {property_data.get('postcode', 'N/A')}
-- Deal Type: {property_data.get('dealType', 'BTL')}
-- Purchase Price: £{property_data.get('purchasePrice', 0):,}
-- Expected Monthly Rent: £{property_data.get('monthlyRent', 0)}
+        if source == 'PropertyData API':
+            estimated_rent    = market_data.get('estimated_rent')
+            rental_confidence = market_data.get('rental_confidence')
+            price_growth      = market_data.get('price_growth_12m')
+            avg_sold          = market_data.get('avg_sold_price')
+            area_score        = market_data.get('area_score')
+            transport_score   = market_data.get('transport_score')
 
-FINANCIAL METRICS:
-- Gross Yield: {calculated_metrics.get('gross_yield', 0)}%
-- Net Yield: {calculated_metrics.get('net_yield', 0)}%
-- Monthly Cashflow: £{calculated_metrics.get('monthly_cashflow', 0)}
-- Cash-on-Cash Return: {calculated_metrics.get('cash_on_cash', 0)}%
-- Annual Net Income: £{calculated_metrics.get('net_annual_income', 0)}
-- Deal Score: {calculated_metrics.get('deal_score', 0)}/100
-- Investment Verdict: {calculated_metrics.get('verdict', 'REVIEW')}
+            if estimated_rent:
+                market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
+                market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
+                # Flag if the assumed rent is far from market
+                assumed_rent = property_data.get('monthlyRent', 0)
+                if assumed_rent and estimated_rent:
+                    diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
+                    if abs(diff_pct) > 15:
+                        market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate"
+            if price_growth is not None:
+                market_context += f"\n- 12-Month Price Growth: {price_growth:.1f}%"
+            if avg_sold:
+                market_context += f"\n- Average Sold Price: £{avg_sold:,.0f}"
+                pp = property_data.get('purchasePrice', 0)
+                if pp and avg_sold:
+                    vs_avg = ((pp - avg_sold) / avg_sold) * 100
+                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
+            if area_score:
+                market_context += f"\n- Area Quality Score: {area_score}/10"
+            if transport_score:
+                market_context += f"\n- Transport Links Score: {transport_score}/10"
 
+        elif source == 'Land Registry':
+            avg_price    = market_data.get('average_price')
+            trend        = market_data.get('price_trend', {})
+            recent_sales = market_data.get('recent_sales', [])
+
+            if avg_price:
+                market_context += f"\nMARKET DATA (Land Registry - Government Sold Prices):"
+                market_context += f"\n- Average Sold Price (12 months): £{avg_price:,.0f}"
+                pp = property_data.get('purchasePrice', 0)
+                if pp and avg_price:
+                    vs_avg = ((pp - avg_price) / avg_price) * 100
+                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
+            if trend:
+                market_context += f"\n- Price Trend: {trend.get('trend', 'stable')} ({trend.get('change_percent', 0):.1f}% change)"
+            if recent_sales:
+                market_context += "\n- Recent Comparable Sales:"
+                for i, sale in enumerate(recent_sales[:3], 1):
+                    market_context += f"\n  {i}. £{sale['price']:,} on {sale['date'][:10]} - {sale.get('street', 'N/A')}"
+        else:
+            market_context = "\nMARKET DATA: Limited data available for this postcode"
+
+    if not market_context:
+        market_context = "\nMARKET DATA: No external market data available — rely on local knowledge"
+
+    # ------------------------------------------------------------------ #
+    # Strategy-specific context                                            #
+    # ------------------------------------------------------------------ #
+    deal_type = property_data.get('dealType', 'BTL')
+    strategy_context = ""
+    if deal_type == 'BRR':
+        brr = calculated_metrics.get('brr_metrics', {})
+        if brr:
+            strategy_context = f"""
+BRR STRATEGY METRICS:
+- Refurb Cost: £{brr.get('refurb_cost', 0):,}
+- After Repair Value (ARV): £{brr.get('arv', 0):,}
+- Money Left In: £{brr.get('money_left_in', 0):,}
+- BRR ROI: {brr.get('brr_roi', 0):.1f}%
+- Equity Released: £{brr.get('equity_released', 0):,}"""
+    elif deal_type == 'FLIP':
+        flip = calculated_metrics.get('flip_metrics', {})
+        if flip:
+            strategy_context = f"""
+FLIP STRATEGY METRICS:
+- Refurb Cost: £{flip.get('refurb_cost', 0):,}
+- After Repair Value (ARV): £{flip.get('arv', 0):,}
+- Projected Profit: £{flip.get('flip_profit', 0):,}
+- Flip ROI: {flip.get('flip_roi', 0):.1f}%"""
+    elif deal_type == 'HMO':
+        strategy_context = f"""
+HMO STRATEGY:
+- Room Count: {property_data.get('roomCount', 'N/A')}
+- Avg Room Rate: £{property_data.get('avgRoomRate', 0)}/month
+- Note: Article 4 / licensing requirements may apply — verify locally"""
+
+    # ------------------------------------------------------------------ #
+    # Benchmarks for this deal type (to give Claude context)              #
+    # ------------------------------------------------------------------ #
+    benchmarks = {
+        'BTL':  {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0},
+        'HMO':  {'gross_yield': 10.0, 'cashflow': 400, 'coc': 12.0},
+        'BRR':  {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0},
+        'FLIP': {'gross_yield': 0,   'cashflow': 0,   'coc': 15.0},
+    }.get(deal_type, {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0})
+
+    # ------------------------------------------------------------------ #
+    # Build the prompt                                                     #
+    # ------------------------------------------------------------------ #
+    prompt = f"""You are an expert UK property investment analyst specialising in buy-to-let, \
+HMO, BRR and flip strategies. Analyse the deal below and return a JSON object.
+
+== PROPERTY ==
+Address:        {property_data.get('address', 'N/A')}
+Postcode:       {property_data.get('postcode', 'N/A')}
+Type:           {property_data.get('property_type', 'N/A')}
+Bedrooms:       {property_data.get('bedrooms', 'N/A')}
+Strategy:       {deal_type}
+Purchase Price: £{property_data.get('purchasePrice', 0):,}
+Monthly Rent:   £{property_data.get('monthlyRent', 0):,}
+
+== CALCULATED METRICS ==
+Gross Yield:        {calculated_metrics.get('gross_yield', 0):.2f}%  (benchmark ≥ {benchmarks['gross_yield']}%)
+Net Yield:          {calculated_metrics.get('net_yield', 0):.2f}%
+Monthly Cashflow:   £{calculated_metrics.get('monthly_cashflow', 0):,.0f}  (benchmark ≥ £{benchmarks['cashflow']}/mo)
+Cash-on-Cash:       {calculated_metrics.get('cash_on_cash', 0):.2f}%  (benchmark ≥ {benchmarks['coc']}%)
+Annual Net Income:  £{calculated_metrics.get('net_annual_income', 0):,.0f}
+Monthly Mortgage:   £{calculated_metrics.get('monthly_mortgage', 0):,.0f}
+Deal Score:         {calculated_metrics.get('deal_score', 0)}/100
+System Verdict:     {calculated_metrics.get('verdict', 'REVIEW')}
+{strategy_context}
 {market_context}
 
-Please provide:
+== INSTRUCTIONS ==
+Return ONLY a valid JSON object — no markdown, no code fences, no extra text.
+Be specific: reference actual figures, the specific postcode/area, and the strategy.
+Do NOT use generic filler. If a metric is weak, say so plainly.
 
-1. INVESTMENT VERDICT (2-3 sentences): Summarize whether this is a good deal and why
-
-2. KEY STRENGTHS (3-4 bullet points with HTML <br> tags): What makes this deal attractive
-
-3. KEY RISKS (3-4 bullet points with HTML <br> tags): What could go wrong or needs investigation
-
-4. AREA ASSESSMENT (2-3 sentences): Quick assessment of the postcode area for rental demand
-
-5. RECOMMENDED NEXT STEPS (4-5 numbered items with HTML <br> tags): Actionable steps
-
-Format your response as JSON:
+JSON schema:
 {{
-    "verdict": "...",
-    "strengths": "...",
-    "risks": "...",
-    "area": "...",
-    "next_steps": "..."
+  "verdict": "<2-3 sentences: clear overall assessment referencing key figures>",
+  "strengths": "<bullet list using • and <br> separating each point — 3-4 specific strengths>",
+  "risks": "<bullet list using • and <br> separating each point — 3-4 specific, deal-relevant risks>",
+  "area": "<2-3 sentences: specific to the postcode — rental demand, tenant profile, comparable areas, growth prospects>",
+  "next_steps": "<numbered list 1-5 with <br> between items — actionable, deal-specific steps>"
 }}"""
 
-        # For now, return mock AI response (integrate with OpenClaw API later)
-        # This simulates what the AI would return
-        verdict = calculated_metrics.get('verdict', 'REVIEW')
-        score = calculated_metrics.get('deal_score', 50)
-        
-        if verdict == 'PROCEED':
-            ai_response = {
-                "verdict": f"This property represents a strong investment opportunity with a deal score of {score}/100. The gross yield of {calculated_metrics.get('gross_yield', 0)}% exceeds market averages, and the monthly cashflow of £{calculated_metrics.get('monthly_cashflow', 0)} provides a healthy buffer for expenses and void periods. The fundamentals support a PROCEED recommendation.",
-                "strengths": "• Strong gross yield above 6% target, indicating good rental demand<br>• Positive monthly cashflow provides financial buffer<br>• Healthy cash-on-cash return above 8%<br>• Property appears priced fairly for the area",
-                "risks": "• Market conditions could affect future capital growth<br>• Void periods may be longer than estimated<br>• Maintenance costs could exceed 8% assumption<br>• Interest rate increases would impact cashflow",
-                "area": f"The {property_data.get('postcode', 'area')} postcode shows good rental demand with reasonable yields. Transport links and local amenities support tenant interest.",
-                "next_steps": "1. Verify rental comparables with local agents<br>2. Arrange property viewing and inspection<br>3. Get RICS survey (£400-600)<br>4. Confirm mortgage availability<br>5. Instruct solicitor for preliminary checks"
-            }
-        elif verdict == 'REVIEW':
-            ai_response = {
-                "verdict": f"This deal requires further investigation with a score of {score}/100. While some metrics are acceptable, borderline cashflow or yield suggests caution. Consider negotiating the price or exploring alternative strategies.",
-                "strengths": "• Some metrics meet investment criteria<br>• Potential for value add through refurbishment<br>• Area may have growth potential<br>• Property type suits rental market",
-                "risks": "• Cashflow below £200 target reduces safety margin<br>• Yield may not justify the risk<br>• Higher void risk due to area or property condition<br>• Exit strategy concerns if market slows",
-                "area": f"The {property_data.get('postcode', 'area')} area shows mixed signals. Research comparable rents and recent sales carefully.",
-                "next_steps": "1. Research comparable sales and rents thoroughly<br>2. Investigate why metrics are below target<br>3. Consider negotiating purchase price down<br>4. Explore BRR or HMO strategy alternatives<br>5. Get professional opinion on achievable rent"
-            }
-        else:
-            ai_response = {
-                "verdict": f"This deal scores {score}/100 and falls below investment criteria. Poor yield, negative cashflow, or high risk factors suggest avoiding this property. Better opportunities likely exist elsewhere.",
-                "strengths": "• Property exists in investable area<br>• May have unique features<br>• Could suit different strategy",
-                "risks": "• Yield significantly below 6% target<br>• Cashflow insufficient or negative<br>• High risk of capital loss<br>• Better deals available elsewhere",
-                "area": f"The {property_data.get('postcode', 'area')} area may have better opportunities. Continue searching.",
-                "next_steps": "1. Avoid this deal - numbers don't work<br>2. Continue searching for better opportunities<br>3. Adjust search criteria if needed<br>4. Consider different areas with higher yields"
-            }
-        
-        return ai_response
-        
-    except Exception as e:
-        app.logger.error(f'AI analysis error: {str(e)}')
+    # ------------------------------------------------------------------ #
+    # Call Claude if API key is available                                  #
+    # ------------------------------------------------------------------ #
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if api_key:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = message.content[0].text.strip()
+            # Strip any accidental markdown fences
+            if raw.startswith('```'):
+                raw = re.sub(r'^```[a-z]*\n?', '', raw)
+                raw = re.sub(r'\n?```$', '', raw)
+            ai_response = json.loads(raw)
+            app.logger.info(f"[AI] Claude analysis successful for {property_data.get('postcode', '?')}")
+            return ai_response
+        except json.JSONDecodeError as e:
+            app.logger.error(f"[AI] Claude returned non-JSON: {e}")
+        except Exception as e:
+            app.logger.error(f"[AI] Claude API error: {e}")
+    else:
+        app.logger.warning("[AI] ANTHROPIC_API_KEY not set — using rule-based fallback")
+
+    # ------------------------------------------------------------------ #
+    # Rule-based fallback (no API key / API error)                        #
+    # ------------------------------------------------------------------ #
+    verdict    = calculated_metrics.get('verdict', 'REVIEW')
+    score      = calculated_metrics.get('deal_score', 50)
+    gross      = calculated_metrics.get('gross_yield', 0)
+    cashflow   = calculated_metrics.get('monthly_cashflow', 0)
+    coc        = calculated_metrics.get('cash_on_cash', 0)
+    postcode   = property_data.get('postcode', 'this area')
+
+    if verdict == 'PROCEED':
         return {
-            "verdict": "AI analysis temporarily unavailable. Please review the calculated metrics.",
-            "strengths": "• Please review the financial metrics<br>• Consider local market knowledge",
-            "risks": "• Always verify figures independently<br>• Get professional advice",
-            "area": "Area assessment unavailable",
-            "next_steps": "1. Verify all calculations<br>2. Research the area independently<br>3. Consult local property experts"
+            "verdict": (
+                f"Strong deal scoring {score}/100. The gross yield of {gross:.1f}% beats the "
+                f"{benchmarks['gross_yield']}% benchmark and monthly cashflow of £{cashflow:,.0f} "
+                f"exceeds the £{benchmarks['cashflow']} target, supporting a PROCEED recommendation."
+            ),
+            "strengths": (
+                f"• Gross yield of {gross:.1f}% above the {benchmarks['gross_yield']}% benchmark<br>"
+                f"• Monthly cashflow of £{cashflow:,.0f} provides a financial buffer<br>"
+                f"• Cash-on-cash return of {coc:.1f}% indicates efficient capital deployment<br>"
+                f"• Deal score of {score}/100 meets investment criteria"
+            ),
+            "risks": (
+                "• Void periods and unexpected maintenance could erode cashflow<br>"
+                "• Mortgage rate rises will compress net yield — stress-test at 6%+<br>"
+                "• Verify advertised rent against local comparables before committing<br>"
+                "• Ensure EPC rating C+ to comply with upcoming regulations"
+            ),
+            "area": (
+                f"{postcode} shows sufficient rental demand to support the assumed rent. "
+                "Verify tenant demand with local letting agents and check comparable listings."
+            ),
+            "next_steps": (
+                "1. Confirm achievable rent with 2-3 local letting agents<br>"
+                "2. Arrange a viewing and independent RICS survey (£400-600)<br>"
+                "3. Obtain mortgage Decision in Principle at current rates<br>"
+                "4. Instruct a solicitor for preliminary searches<br>"
+                "5. Negotiate purchase price to improve yield further"
+            )
+        }
+    elif verdict == 'REVIEW':
+        return {
+            "verdict": (
+                f"Borderline deal scoring {score}/100. The yield of {gross:.1f}% and cashflow of "
+                f"£{cashflow:,.0f}/month are below target benchmarks — further due diligence or "
+                f"price negotiation is required before proceeding."
+            ),
+            "strengths": (
+                "• Property may have value-add potential through refurbishment or strategy change<br>"
+                "• Some metrics are close to benchmark — small price reduction could make it work<br>"
+                f"• {postcode} may offer longer-term capital growth<br>"
+                "• Could work as HMO or BRR if current BTL figures are marginal"
+            ),
+            "risks": (
+                f"• Gross yield of {gross:.1f}% is below the {benchmarks['gross_yield']}% minimum<br>"
+                f"• Monthly cashflow of £{cashflow:,.0f} leaves little buffer for voids or repairs<br>"
+                "• Overpaying vs comparable sales would worsen position<br>"
+                "• Strategy may need to change (e.g. HMO) to make numbers work"
+            ),
+            "area": (
+                f"{postcode} warrants careful research — confirm rental demand and "
+                "recent comparable sales before assuming the projected rent is achievable."
+            ),
+            "next_steps": (
+                "1. Research 5+ comparable rentals and 5+ recent sold prices in the postcode<br>"
+                "2. Attempt to negotiate purchase price down by 5-10%<br>"
+                "3. Model the deal as HMO or BRR to check if alternative strategies work<br>"
+                "4. Get a local letting agent's written opinion on achievable rent<br>"
+                "5. Only proceed if renegotiation brings score above 65/100"
+            )
+        }
+    else:
+        return {
+            "verdict": (
+                f"Weak deal scoring {score}/100. Gross yield of {gross:.1f}% and cashflow of "
+                f"£{cashflow:,.0f}/month are materially below target — this deal does not meet "
+                "minimum investment criteria and should be avoided."
+            ),
+            "strengths": (
+                "• Physical asset provides some security<br>"
+                "• May suit a different buyer profile (e.g. owner-occupier)<br>"
+                "• Could be revisited if purchase price drops significantly"
+            ),
+            "risks": (
+                f"• Gross yield of {gross:.1f}% is well below the {benchmarks['gross_yield']}% target<br>"
+                f"• Cashflow of £{cashflow:,.0f}/month is insufficient — risk of negative cashflow<br>"
+                "• Capital at risk if market softens<br>"
+                "• Opportunity cost: better deals exist in comparable areas"
+            ),
+            "area": (
+                f"{postcode} may have good fundamentals but this specific deal is mispriced. "
+                "Continue searching the same area for better-value stock."
+            ),
+            "next_steps": (
+                "1. Do not proceed with this deal at the current asking price<br>"
+                "2. Calculate the maximum price that delivers a 6%+ gross yield<br>"
+                "3. Either submit a significantly lower offer or walk away<br>"
+                "4. Set Rightmove/Zoopla alerts for similar properties at lower prices<br>"
+                "5. Review your target area or criteria if all deals are scoring this low"
+            )
         }
 
 @app.route('/ai-analyze', methods=['POST'])
