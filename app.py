@@ -1972,119 +1972,132 @@ def get_ai_property_analysis(property_data, calculated_metrics, market_data=None
     Get AI-powered property deal analysis using Claude (Anthropic).
     Falls back to a rule-based summary if ANTHROPIC_API_KEY is not set.
     """
-    # ------------------------------------------------------------------ #
-    # Build market data context                                            #
-    # ------------------------------------------------------------------ #
-    market_context = ""
-    if market_data and isinstance(market_data, dict):
-        source = market_data.get('source', 'Unknown')
+    def _n(val, default=0):
+        """Safely coerce API values (which may be strings) to float."""
+        try:
+            return float(val) if val is not None else default
+        except (TypeError, ValueError):
+            return default
 
-        if source == 'PropertyData API':
-            estimated_rent    = market_data.get('estimated_rent')
-            rental_confidence = market_data.get('rental_confidence')
-            rental_range      = market_data.get('rental_range', {})
-            demand_score      = market_data.get('rental_demand_score')
-            price_growth      = market_data.get('price_growth_12m')
-            avg_sold          = market_data.get('avg_sold_price')
-            area_score        = market_data.get('area_score')
-            transport_score   = market_data.get('transport_score')
-            rent_comps        = market_data.get('rent_comparables', [])
-            sold_comps        = market_data.get('comparable_sales', [])
-            sales_val         = market_data.get('sales_valuation', {})
+    try:
+        # ------------------------------------------------------------------ #
+        # Build market data context                                            #
+        # ------------------------------------------------------------------ #
+        market_context = ""
+        if market_data and isinstance(market_data, dict):
+            source = market_data.get('source', 'Unknown')
 
-            market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
+            if source == 'PropertyData API':
+                estimated_rent    = _n(market_data.get('estimated_rent'))
+                rental_confidence = market_data.get('rental_confidence')
+                rental_range      = market_data.get('rental_range', {})
+                demand_score      = _n(market_data.get('rental_demand_score'))
+                price_growth      = market_data.get('price_growth_12m')
+                avg_sold          = _n(market_data.get('avg_sold_price'))
+                area_score        = _n(market_data.get('area_score'))
+                transport_score   = _n(market_data.get('transport_score'))
+                rent_comps        = market_data.get('rent_comparables', [])
+                sold_comps        = market_data.get('comparable_sales', [])
+                sales_val         = market_data.get('sales_valuation', {})
 
-            # Rental valuation
-            if estimated_rent:
-                market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
-                if rental_range:
-                    low_w  = rental_range.get('low_weekly', 0)
-                    high_w = rental_range.get('high_weekly', 0)
-                    if low_w and high_w:
-                        market_context += f" | Range: £{round(low_w*52/12):,}-£{round(high_w*52/12):,}/mo"
-                if demand_score:
-                    market_context += f"\n- Rental Demand Score: {demand_score}/10"
-                assumed_rent = property_data.get('monthlyRent', 0)
-                if assumed_rent and estimated_rent:
-                    diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
-                    if abs(diff_pct) > 15:
-                        market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate — verify with local agents"
+                market_context += f"\nMARKET DATA (PropertyData API - Professional Grade):"
 
-            # Sales valuation (real house value)
-            if sales_val and sales_val.get('estimate'):
-                sv_est = sales_val['estimate']
-                sv_conf = sales_val.get('confidence', 'N/A')
-                market_context += f"\n- PropertyData Sales Valuation: £{sv_est:,.0f} (Confidence: {sv_conf})"
-                pp = property_data.get('purchasePrice', 0)
-                if pp and sv_est:
-                    vs_val = ((pp - sv_est) / sv_est) * 100
-                    tag = "BELOW" if vs_val < 0 else "ABOVE"
-                    market_context += f" → purchase price is {abs(vs_val):.1f}% {tag} estimated value"
+                # Rental valuation
+                if estimated_rent:
+                    market_context += f"\n- Estimated Market Rent: £{estimated_rent:,.0f}/month (Confidence: {rental_confidence})"
+                    if rental_range:
+                        low_w  = _n(rental_range.get('low_weekly'))
+                        high_w = _n(rental_range.get('high_weekly'))
+                        if low_w and high_w:
+                            market_context += f" | Range: £{round(low_w*52/12):,}-£{round(high_w*52/12):,}/mo"
+                    if demand_score:
+                        market_context += f"\n- Rental Demand Score: {demand_score}/10"
+                    assumed_rent = _n(property_data.get('monthlyRent'))
+                    if assumed_rent and estimated_rent:
+                        diff_pct = ((assumed_rent - estimated_rent) / estimated_rent) * 100
+                        if abs(diff_pct) > 15:
+                            market_context += f"\n  ⚠ Assumed rent is {diff_pct:+.0f}% vs market estimate — verify with local agents"
 
-            # Price growth + average sold
-            if price_growth is not None:
-                market_context += f"\n- 12-Month Price Growth: {price_growth:.1f}%"
-            if avg_sold:
-                market_context += f"\n- Average Sold Price: £{avg_sold:,.0f}"
-                pp = property_data.get('purchasePrice', 0)
-                if pp and avg_sold:
-                    vs_avg = ((pp - avg_sold) / avg_sold) * 100
-                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average sold)"
+                # Sales valuation (real house value)
+                if sales_val and sales_val.get('estimate'):
+                    sv_est  = _n(sales_val['estimate'])
+                    sv_conf = sales_val.get('confidence', 'N/A')
+                    if sv_est:
+                        market_context += f"\n- PropertyData Sales Valuation: £{sv_est:,.0f} (Confidence: {sv_conf})"
+                        pp = _n(property_data.get('purchasePrice'))
+                        if pp and sv_est:
+                            vs_val = ((pp - sv_est) / sv_est) * 100
+                            tag = "BELOW" if vs_val < 0 else "ABOVE"
+                            market_context += f" → purchase price is {abs(vs_val):.1f}% {tag} estimated value"
 
-            # Area scores
-            if area_score:
-                market_context += f"\n- Area Quality Score: {area_score}/10"
-            if transport_score:
-                market_context += f"\n- Transport Links Score: {transport_score}/10"
+                # Price growth + average sold
+                if price_growth is not None:
+                    market_context += f"\n- 12-Month Price Growth: {_n(price_growth):.1f}%"
+                if avg_sold:
+                    market_context += f"\n- Average Sold Price: £{avg_sold:,.0f}"
+                    pp = _n(property_data.get('purchasePrice'))
+                    if pp and avg_sold:
+                        vs_avg = ((pp - avg_sold) / avg_sold) * 100
+                        market_context += f" (purchase price is {vs_avg:+.1f}% vs average sold)"
 
-            # Real rent comparables
-            if rent_comps:
-                market_context += f"\n- Rental Comparables ({len(rent_comps)} nearby lettings used for estimate):"
-                for i, rc in enumerate(rent_comps[:5], 1):
-                    mr = rc.get('monthly_rent')
-                    addr = rc.get('address', 'Nearby property')
-                    date = rc.get('date', 'N/A')
-                    dist = rc.get('distance_miles')
-                    line = f"\n  {i}. {addr}: £{mr:,}/mo" if mr else f"\n  {i}. {addr}"
-                    if dist:
-                        line += f" ({dist:.1f} miles away)"
-                    if date and date != 'N/A':
-                        line += f" — {date}"
-                    market_context += line
+                # Area scores
+                if area_score:
+                    market_context += f"\n- Area Quality Score: {area_score}/10"
+                if transport_score:
+                    market_context += f"\n- Transport Links Score: {transport_score}/10"
 
-            # Real sold comparables
-            if sold_comps:
-                market_context += f"\n- Sold Comparables ({len(sold_comps)} recent sales):"
-                for i, sc in enumerate(sold_comps[:5], 1):
-                    market_context += (
-                        f"\n  {i}. {sc.get('address', 'Nearby property')}: "
-                        f"£{sc.get('price', 0):,} — {sc.get('type', 'N/A')} "
-                        f"({sc.get('bedrooms', '?')} bed) on {sc.get('date', 'N/A')}"
-                    )
+                # Real rent comparables
+                if rent_comps:
+                    market_context += f"\n- Rental Comparables ({len(rent_comps)} nearby lettings used for estimate):"
+                    for i, rc in enumerate(rent_comps[:5], 1):
+                        mr   = _n(rc.get('monthly_rent'))
+                        addr = rc.get('address', 'Nearby property')
+                        date = rc.get('date', 'N/A')
+                        dist = rc.get('distance_miles')
+                        line = f"\n  {i}. {addr}: £{mr:,.0f}/mo" if mr else f"\n  {i}. {addr}"
+                        if dist:
+                            line += f" ({_n(dist):.1f} miles away)"
+                        if date and date != 'N/A':
+                            line += f" — {date}"
+                        market_context += line
 
-        elif source == 'Land Registry':
-            avg_price    = market_data.get('average_price')
-            trend        = market_data.get('price_trend', {})
-            recent_sales = market_data.get('recent_sales', [])
+                # Real sold comparables
+                if sold_comps:
+                    market_context += f"\n- Sold Comparables ({len(sold_comps)} recent sales):"
+                    for i, sc in enumerate(sold_comps[:5], 1):
+                        market_context += (
+                            f"\n  {i}. {sc.get('address', 'Nearby property')}: "
+                            f"£{_n(sc.get('price', 0)):,.0f} — {sc.get('type', 'N/A')} "
+                            f"({sc.get('bedrooms', '?')} bed) on {sc.get('date', 'N/A')}"
+                        )
 
-            if avg_price:
-                market_context += f"\nMARKET DATA (Land Registry - Government Sold Prices):"
-                market_context += f"\n- Average Sold Price (12 months): £{avg_price:,.0f}"
-                pp = property_data.get('purchasePrice', 0)
-                if pp and avg_price:
-                    vs_avg = ((pp - avg_price) / avg_price) * 100
-                    market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
-            if trend:
-                market_context += f"\n- Price Trend: {trend.get('trend', 'stable')} ({trend.get('change_percent', 0):.1f}% change)"
-            if recent_sales:
-                market_context += "\n- Recent Comparable Sales:"
-                for i, sale in enumerate(recent_sales[:3], 1):
-                    market_context += f"\n  {i}. £{sale['price']:,} on {sale['date'][:10]} - {sale.get('street', 'N/A')}"
-        else:
-            market_context = "\nMARKET DATA: Limited data available for this postcode"
+            elif source == 'Land Registry':
+                avg_price    = _n(market_data.get('average_price'))
+                trend        = market_data.get('price_trend', {})
+                recent_sales = market_data.get('recent_sales', [])
 
-    if not market_context:
-        market_context = "\nMARKET DATA: No external market data available — rely on local knowledge"
+                if avg_price:
+                    market_context += f"\nMARKET DATA (Land Registry - Government Sold Prices):"
+                    market_context += f"\n- Average Sold Price (12 months): £{avg_price:,.0f}"
+                    pp = _n(property_data.get('purchasePrice'))
+                    if pp and avg_price:
+                        vs_avg = ((pp - avg_price) / avg_price) * 100
+                        market_context += f" (purchase price is {vs_avg:+.1f}% vs average)"
+                if trend:
+                    market_context += f"\n- Price Trend: {trend.get('trend', 'stable')} ({_n(trend.get('change_percent')):.1f}% change)"
+                if recent_sales:
+                    market_context += "\n- Recent Comparable Sales:"
+                    for i, sale in enumerate(recent_sales[:3], 1):
+                        market_context += f"\n  {i}. £{_n(sale.get('price')):,.0f} on {str(sale.get('date', ''))[:10]} - {sale.get('street', 'N/A')}"
+            else:
+                market_context = "\nMARKET DATA: Limited data available for this postcode"
+
+        if not market_context:
+            market_context = "\nMARKET DATA: No external market data available — rely on local knowledge"
+
+    except Exception as _ctx_err:
+        app.logger.warning(f"[AI] Market context build failed ({_ctx_err}), proceeding without it")
+        market_context = "\nMARKET DATA: Could not format market data — review calculated metrics above"
 
     # ------------------------------------------------------------------ #
     # Strategy-specific context                                            #
