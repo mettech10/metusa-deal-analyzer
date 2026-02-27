@@ -35,6 +35,8 @@ def scrape_with_jina(url: str) -> dict:
     headers = {
         'Accept': 'text/plain',
         'X-Timeout': '30',
+        'X-Return-Format': 'markdown',
+        'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
     }
 
     try:
@@ -1883,7 +1885,13 @@ def extract_url():
         # Try Jina Reader first (free, no API key - handles Rightmove, Zoopla, OTM)
         print("[extract-url] Trying Jina Reader...")
         extracted_data = scrape_with_jina(url)
-        if extracted_data and (extracted_data.get('address') or extracted_data.get('price')):
+        jina_address = extracted_data.get('address') if extracted_data else None
+        jina_has_data = (
+            extracted_data
+            and (extracted_data.get('price') or
+                 (jina_address and jina_address != 'Address not available'))
+        )
+        if jina_has_data:
             print("[extract-url] Jina Reader succeeded")
             return jsonify({
                 'success': True,
