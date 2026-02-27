@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyze Deal | Metusa Deal Analyzer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #1B1F3B;
+            --primary-light: #2d3561;
+            --accent: #D4AF37;
+            --accent-light: #f0d878;
+            --text: #1a1a2e;
+            --text-light: #64748b;
+            --bg: #f8fafc;
+            --bg-white: #ffffff;
+            --border: #e2e8f0;
+            --green: #16a34a;
+            --amber: #d97706;
+            --red: #dc2626;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Navbar */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 40px;
+            background: var(--primary);
+            color: white;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: white;
+            text-decoration: none;
+        }
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--accent);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+        .back-link {
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: white; }
+
+        /* Layout */
+        .page-wrapper {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+
+        /* Card */
+        .card {
+            background: var(--bg-white);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 28px 32px;
+            margin-bottom: 20px;
+        }
+        .card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* URL Loader */
+        .url-row {
+            display: flex;
+            gap: 10px;
+        }
+        .url-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            color: var(--text);
+        }
+        .url-input:focus { border-color: var(--accent); }
+        .url-status {
+            font-size: 0.85rem;
+            margin-top: 8px;
+            min-height: 20px;
+        }
+        .url-status.loading { color: var(--text-light); }
+        .url-status.success { color: var(--green); }
+        .url-status.error { color: var(--red); }
+
+        /* Form */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .form-group.full { grid-column: 1 / -1; }
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+        input[type="text"],
+        input[type="number"],
+        select {
+            padding: 11px 14px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            color: var(--text);
+            background: var(--bg-white);
+        }
+        input:focus, select:focus { border-color: var(--accent); }
+        .input-prefix {
+            position: relative;
+        }
+        .input-prefix span {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+            font-weight: 600;
+            pointer-events: none;
+        }
+        .input-prefix input { padding-left: 26px; }
+        .input-suffix {
+            position: relative;
+        }
+        .input-suffix span {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+            font-weight: 600;
+            pointer-events: none;
+        }
+        .input-suffix input { padding-right: 28px; }
+
+        .section-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-light);
+            margin-bottom: 12px;
+            margin-top: 4px;
+        }
+        .divider { height: 1px; background: var(--border); margin: 16px 0; grid-column: 1 / -1; }
+
+        .brr-fields { display: none; }
+        .brr-fields.visible { display: contents; }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border: none;
+            font-family: inherit;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-accent {
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            color: var(--primary);
+        }
+        .btn-accent:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(212,175,55,0.35); }
+        .btn-accent:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(27,31,59,0.3); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-outline {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--border);
+        }
+        .btn-outline:hover { border-color: var(--primary); }
+        .btn-lg { padding: 15px 32px; font-size: 1rem; width: 100%; justify-content: center; margin-top: 8px; }
+
+        /* Results */
+        #results { display: none; }
+        .results-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 4px;
+        }
+        .verdict-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 22px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+        .verdict-PROCEED { background: #dcfce7; color: #15803d; }
+        .verdict-REVIEW  { background: #fef3c7; color: #b45309; }
+        .verdict-AVOID   { background: #fee2e2; color: #b91c1c; }
+
+        .score-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: white;
+            flex-shrink: 0;
+        }
+        .score-circle small { font-size: 0.6rem; font-weight: 600; opacity: 0.85; }
+        .score-high  { background: linear-gradient(135deg, #16a34a, #22c55e); }
+        .score-mid   { background: linear-gradient(135deg, #d97706, #f59e0b); }
+        .score-low   { background: linear-gradient(135deg, #dc2626, #ef4444); }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+        }
+        .metric-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+        }
+        .metric-label {
+            font-size: 0.78rem;
+            color: var(--text-light);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+        .metric-value.positive { color: var(--green); }
+        .metric-value.negative { color: var(--red); }
+
+        .ai-section { margin-bottom: 16px; }
+        .ai-section-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-light);
+            margin-bottom: 8px;
+        }
+        .ai-text {
+            font-size: 0.95rem;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .points-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .points-list li {
+            font-size: 0.9rem;
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: var(--bg);
+            border-left: 3px solid var(--border);
+        }
+        .points-list.strength li { border-left-color: var(--green); }
+        .points-list.risk li { border-left-color: var(--red); }
+
+        .projection-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        .projection-table th {
+            text-align: left;
+            padding: 8px 12px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--border);
+        }
+        .projection-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--bg);
+            color: var(--text);
+        }
+        .projection-table tr:last-child td { border-bottom: none; }
+        .projection-table tr:nth-child(even) td { background: var(--bg); }
+
+        .pdf-btn-row { display: flex; justify-content: flex-end; margin-top: 16px; }
+
+        /* Loading overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(27,31,59,0.7);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .loading-overlay.active { display: flex; }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { color: white; font-weight: 600; font-size: 1rem; }
+
+        @media (max-width: 640px) {
+            .form-grid { grid-template-columns: 1fr; }
+            .form-group.full { grid-column: 1; }
+            .metrics-grid { grid-template-columns: 1fr 1fr; }
+            .navbar { padding: 14px 20px; }
+            .page-wrapper { padding: 20px 14px 40px; }
+            .card { padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <a href="/" class="logo">
+        <div class="logo-icon">🏠</div>
+        Metusa
+    </a>
+    <a href="/" class="back-link">← Back to home</a>
+</nav>
+
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <p class="loading-text" id="loadingText">Analyzing deal...</p>
+</div>
+
+<div class="page-wrapper">
+
+    <!-- URL Loader -->
+    <div class="card">
+        <div class="card-title">🔗 Load from Rightmove / Zoopla / OnTheMarket</div>
+        <div class="url-row">
+            <input type="url" class="url-input" id="propertyUrl"
+                   placeholder="https://www.rightmove.co.uk/properties/...">
+            <button class="btn btn-accent" onclick="loadFromUrl()">Load Details</button>
+        </div>
+        <div class="url-status" id="urlStatus"></div>
+    </div>
+
+    <!-- Deal Form -->
+    <div class="card">
+        <div class="card-title">📋 Deal Details</div>
+        <form id="dealForm">
+            <div class="form-grid">
+
+                <div class="section-label full">Property</div>
+
+                <div class="form-group full">
+                    <label for="address">Address</label>
+                    <input type="text" id="address" name="address" placeholder="42 Oakfield Avenue, Manchester">
+                </div>
+
+                <div class="form-group">
+                    <label for="postcode">Postcode</label>
+                    <input type="text" id="postcode" name="postcode" placeholder="M14 6LT">
+                </div>
+
+                <div class="form-group">
+                    <label for="dealType">Deal Type</label>
+                    <select id="dealType" name="dealType">
+                        <option value="BTL">Buy-to-Let (BTL)</option>
+                        <option value="BRR">Buy Refurb Refinance (BRR)</option>
+                        <option value="HMO">HMO</option>
+                        <option value="FLIP">Flip / Renovation</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="bedrooms">Bedrooms</label>
+                    <select id="bedrooms" name="bedrooms">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3" selected>3</option>
+                        <option value="4">4</option>
+                        <option value="5">5+</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="property_type">Property Type</label>
+                    <select id="property_type" name="property_type">
+                        <option value="terraced">Terraced</option>
+                        <option value="semi-detached">Semi-Detached</option>
+                        <option value="detached">Detached</option>
+                        <option value="flat">Flat / Apartment</option>
+                        <option value="bungalow">Bungalow</option>
+                    </select>
+                </div>
+
+                <div class="divider"></div>
+                <div class="section-label full">Financials</div>
+
+                <div class="form-group">
+                    <label for="purchasePrice">Purchase Price</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="purchasePrice" name="purchasePrice" placeholder="185000" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="monthlyRent">Expected Monthly Rent</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="monthlyRent" name="monthlyRent" placeholder="950">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="deposit">Deposit</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="deposit" name="deposit" value="25" min="0" max="100">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="interestRate">Interest Rate</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="interestRate" name="interestRate" value="5.5" step="0.1">
+                    </div>
+                </div>
+
+                <!-- BRR / FLIP fields -->
+                <div class="divider brr-fields" id="brrDivider"></div>
+                <div class="section-label full brr-fields" id="brrLabel">BRR / Flip Details</div>
+
+                <div class="form-group brr-fields" id="refurbField">
+                    <label for="refurbCosts">Refurb Costs</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="refurbCosts" name="refurbCosts" placeholder="12000">
+                    </div>
+                </div>
+
+                <div class="form-group brr-fields" id="arvField">
+                    <label for="arv">After Repair Value (ARV)</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="arv" name="arv" placeholder="220000">
+                    </div>
+                </div>
+
+            </div><!-- /.form-grid -->
+
+            <button type="submit" class="btn btn-primary btn-lg" id="analyzeBtn">
+                📊 Analyze This Deal
+            </button>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div id="results">
+
+        <!-- Verdict + Score -->
+        <div class="card">
+            <div class="results-header">
+                <div>
+                    <div style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-light);margin-bottom:8px">Investment Verdict</div>
+                    <div id="verdictBadge" class="verdict-badge"></div>
+                    <div id="riskLevel" style="font-size:0.85rem;color:var(--text-light);margin-top:8px"></div>
+                </div>
+                <div style="text-align:center">
+                    <div id="scoreCircle" class="score-circle score-mid"></div>
+                    <div id="scoreLabel" style="font-size:0.8rem;color:var(--text-light);margin-top:6px;font-weight:600"></div>
+                </div>
+            </div>
+            <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                <div id="aiVerdict" class="ai-text"></div>
+            </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="card">
+            <div class="card-title">📊 Key Metrics</div>
+            <div class="metrics-grid" id="metricsGrid"></div>
+        </div>
+
+        <!-- AI Strengths & Risks -->
+        <div class="card">
+            <div class="card-title">🔍 Deal Analysis</div>
+            <div class="form-grid">
+                <div>
+                    <div class="ai-section-title">✅ Strengths</div>
+                    <ul class="points-list strength" id="strengthsList"></ul>
+                </div>
+                <div>
+                    <div class="ai-section-title">⚠️ Risks</div>
+                    <ul class="points-list risk" id="risksList"></ul>
+                </div>
+            </div>
+            <div style="margin-top:20px">
+                <div class="ai-section-title">📍 Area Assessment</div>
+                <div id="areaText" class="ai-text"></div>
+            </div>
+        </div>
+
+        <!-- Next Steps -->
+        <div class="card">
+            <div class="card-title">🎯 Recommended Next Steps</div>
+            <ul class="points-list" id="nextStepsList"></ul>
+        </div>
+
+        <!-- 5-Year Projection -->
+        <div class="card" id="projectionCard" style="display:none">
+            <div class="card-title">📈 5-Year Projection</div>
+            <table class="projection-table" id="projectionTable">
+                <thead>
+                    <tr>
+                        <th>Year</th>
+                        <th>Annual Rent</th>
+                        <th>Net Income</th>
+                        <th>Property Value</th>
+                        <th>Equity</th>
+                    </tr>
+                </thead>
+                <tbody id="projectionBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Download -->
+        <div class="pdf-btn-row">
+            <button class="btn btn-outline" onclick="downloadPDF()">📄 Download PDF Report</button>
+        </div>
+
+    </div><!-- /#results -->
+
+</div><!-- /.page-wrapper -->
+
+<script>
+    // ── State ──────────────────────────────────────────────────────────────
+    let lastFormData = null;
+
+    // ── On page load: auto-extract URL from query string ──────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+        const params = new URLSearchParams(window.location.search);
+        const url = params.get('url');
+        if (url) {
+            document.getElementById('propertyUrl').value = url;
+            loadFromUrl();
+        }
+
+        // Show/hide BRR fields when deal type changes
+        document.getElementById('dealType').addEventListener('change', toggleBrrFields);
+    });
+
+    function toggleBrrFields() {
+        const dealType = document.getElementById('dealType').value;
+        const show = (dealType === 'BRR' || dealType === 'FLIP');
+        document.querySelectorAll('.brr-fields').forEach(el => {
+            el.classList.toggle('visible', show);
+        });
+    }
+
+    // ── URL Scraper ────────────────────────────────────────────────────────
+    async function loadFromUrl() {
+        const url = document.getElementById('propertyUrl').value.trim();
+        const status = document.getElementById('urlStatus');
+
+        if (!url) {
+            status.textContent = 'Please paste a property URL first.';
+            status.className = 'url-status error';
+            return;
+        }
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            status.textContent = 'Please enter a full URL starting with https://';
+            status.className = 'url-status error';
+            return;
+        }
+
+        status.textContent = 'Fetching property details...';
+        status.className = 'url-status loading';
+
+        try {
+            const resp = await fetch('/extract-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const json = await resp.json();
+
+            if (json.success && json.data) {
+                const d = json.data;
+                let filled = 0;
+
+                if (d.address) { document.getElementById('address').value = d.address; filled++; }
+                if (d.postcode) { document.getElementById('postcode').value = d.postcode; filled++; }
+                if (d.price)    { document.getElementById('purchasePrice').value = d.price; filled++; }
+                if (d.bedrooms) {
+                    const sel = document.getElementById('bedrooms');
+                    const val = String(Math.min(d.bedrooms, 5));
+                    // If bedrooms > 5, use '5'
+                    sel.value = (d.bedrooms >= 5) ? '5' : val;
+                    filled++;
+                }
+                if (d.property_type) {
+                    const sel = document.getElementById('property_type');
+                    const pt = d.property_type.toLowerCase().replace(/\s+/g, '-');
+                    // Map common values
+                    const map = {
+                        'semi-detached': 'semi-detached',
+                        'semi': 'semi-detached',
+                        'detached': 'detached',
+                        'terraced': 'terraced',
+                        'flat': 'flat',
+                        'apartment': 'flat',
+                        'bungalow': 'bungalow'
+                    };
+                    if (map[pt]) { sel.value = map[pt]; filled++; }
+                }
+
+                status.textContent = `✓ Loaded ${filled} fields from listing. Please review and fill in any missing details.`;
+                status.className = 'url-status success';
+            } else {
+                status.textContent = json.message || 'Could not extract details. Please enter manually.';
+                status.className = 'url-status error';
+            }
+        } catch (err) {
+            status.textContent = 'Network error – please enter details manually.';
+            status.className = 'url-status error';
+        }
+    }
+
+    // ── Also trigger on Enter in URL input ────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('propertyUrl').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); loadFromUrl(); }
+        });
+    });
+
+    // ── Form Submit ────────────────────────────────────────────────────────
+    document.getElementById('dealForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('analyzeBtn');
+        btn.disabled = true;
+        btn.textContent = 'Analyzing...';
+        showLoading('Analyzing your deal...');
+
+        const formData = new FormData(this);
+        const data = {};
+        formData.forEach((val, key) => {
+            // Convert numeric fields to numbers
+            const numFields = ['purchasePrice','monthlyRent','deposit','interestRate','bedrooms','refurbCosts','arv'];
+            if (numFields.includes(key) && val !== '') {
+                data[key] = parseFloat(val);
+            } else if (val !== '') {
+                data[key] = val;
+            }
+        });
+
+        lastFormData = data;
+
+        try {
+            const resp = await fetch('/ai-analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const json = await resp.json();
+
+            if (json.success) {
+                renderResults(json.results);
+            } else {
+                alert('Analysis failed: ' + (json.message || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Network error. Please try again.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '📊 Analyze This Deal';
+            hideLoading();
+        }
+    });
+
+    // ── Render Results ─────────────────────────────────────────────────────
+    function renderResults(r) {
+        const resultsEl = document.getElementById('results');
+        resultsEl.style.display = 'block';
+
+        // Scroll to results
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+
+        // Verdict badge
+        const verdict = r.verdict || 'REVIEW';
+        const verdictIcons = { PROCEED: '✅', REVIEW: '⚠️', AVOID: '❌' };
+        const verdictBadge = document.getElementById('verdictBadge');
+        verdictBadge.textContent = `${verdictIcons[verdict] || ''} ${verdict}`;
+        verdictBadge.className = `verdict-badge verdict-${verdict}`;
+
+        // Risk level
+        document.getElementById('riskLevel').textContent = `Risk: ${r.risk_level || 'Medium'}`;
+
+        // Deal score
+        const score = r.deal_score || 0;
+        const scoreCircle = document.getElementById('scoreCircle');
+        scoreCircle.innerHTML = `${score}<small>/100</small>`;
+        scoreCircle.className = 'score-circle ' + (score >= 70 ? 'score-high' : score >= 45 ? 'score-mid' : 'score-low');
+        document.getElementById('scoreLabel').textContent = r.deal_score_label || '';
+
+        // AI verdict text
+        document.getElementById('aiVerdict').textContent = r.ai_verdict || '';
+
+        // Metrics
+        const cashflow = parseFloat(r.monthly_cashflow) || 0;
+        const metricsGrid = document.getElementById('metricsGrid');
+        metricsGrid.innerHTML = [
+            { label: 'Purchase Price', value: '£' + fmt(r.purchase_price) },
+            { label: 'Stamp Duty',     value: '£' + fmt(r.stamp_duty) },
+            { label: 'Total Cash In',  value: '£' + fmt(r.total_purchase_costs) },
+            { label: 'Monthly Rent',   value: '£' + fmt(r.monthly_rent) },
+            { label: 'Monthly Mortgage', value: '£' + fmt(r.monthly_mortgage) },
+            { label: 'Monthly Cashflow', value: '£' + Math.round(cashflow).toLocaleString(), cls: cashflow >= 0 ? 'positive' : 'negative' },
+            { label: 'Gross Yield',    value: fmt(r.gross_yield) + '%' },
+            { label: 'Net Yield',      value: fmt(r.net_yield) + '%' },
+            { label: 'Cash-on-Cash',   value: fmt(r.cash_on_cash) + '%' },
+        ].map(m => `
+            <div class="metric-card">
+                <div class="metric-label">${m.label}</div>
+                <div class="metric-value ${m.cls || ''}">${m.value}</div>
+            </div>`).join('');
+
+        // Strengths
+        const strengthsList = document.getElementById('strengthsList');
+        const allStrengths = parsePoints(r.ai_strengths).concat(r.strengths || []);
+        strengthsList.innerHTML = allStrengths.map(s => `<li>${s}</li>`).join('') || '<li>No specific strengths identified</li>';
+
+        // Risks
+        const risksList = document.getElementById('risksList');
+        const allRisks = parsePoints(r.ai_risks).concat(r.weaknesses || []);
+        risksList.innerHTML = allRisks.map(s => `<li>${s}</li>`).join('') || '<li>No specific risks identified</li>';
+
+        // Area
+        document.getElementById('areaText').textContent = r.ai_area || '';
+
+        // Next steps
+        const nextStepsList = document.getElementById('nextStepsList');
+        const steps = parsePoints(r.ai_next_steps).concat(r.next_steps || []);
+        const uniqueSteps = [...new Set(steps)].slice(0, 8);
+        nextStepsList.innerHTML = uniqueSteps.map(s => `<li>${s}</li>`).join('') || '<li>Review the analysis above</li>';
+
+        // 5-year projection
+        const proj = r.five_year_projection;
+        if (proj && Array.isArray(proj) && proj.length > 0) {
+            document.getElementById('projectionCard').style.display = 'block';
+            document.getElementById('projectionBody').innerHTML = proj.map(y => `
+                <tr>
+                    <td><strong>Year ${y.year}</strong></td>
+                    <td>£${(y.annual_rent || 0).toLocaleString()}</td>
+                    <td>£${(y.net_income || 0).toLocaleString()}</td>
+                    <td>£${(y.property_value || 0).toLocaleString()}</td>
+                    <td>£${(y.equity || 0).toLocaleString()}</td>
+                </tr>`).join('');
+        }
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function fmt(val) {
+        if (val === null || val === undefined || val === '') return '–';
+        // val may already be a formatted string "185,000" or a number
+        const n = parseFloat(String(val).replace(/,/g, ''));
+        if (isNaN(n)) return String(val);
+        return n.toLocaleString('en-GB');
+    }
+
+    function parsePoints(text) {
+        if (!text) return [];
+        // Split on <br>, •, numbered list, or newlines
+        return text
+            .split(/<br\s*\/?>/i)
+            .join('\n')
+            .split(/\n/)
+            .map(s => s.replace(/^[•\-\d]+[\.\)]\s*/, '').trim())
+            .filter(s => s.length > 2);
+    }
+
+    // ── PDF Download ───────────────────────────────────────────────────────
+    async function downloadPDF() {
+        if (!lastFormData) return;
+        showLoading('Generating PDF...');
+        try {
+            const resp = await fetch('/download-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lastFormData)
+            });
+            if (resp.ok) {
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'deal-analysis.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+            } else {
+                alert('PDF generation failed. This feature requires wkhtmltopdf to be installed on the server.');
+            }
+        } catch (err) {
+            alert('PDF download failed. Please try again.');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // ── Loading overlay ────────────────────────────────────────────────────
+    function showLoading(msg) {
+        document.getElementById('loadingText').textContent = msg || 'Loading...';
+        document.getElementById('loadingOverlay').classList.add('active');
+    }
+    function hideLoading() {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+</script>
+</body>
+</html>

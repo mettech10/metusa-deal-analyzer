@@ -27,7 +27,7 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 from scrapling_extractor import extract_property_from_url  # For most sites
 
 # ScrapingBee configuration (set SCRAPINGBEE_API_KEY env var for URL scraping)
-SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY') or 'FLJ5HUFLWZTW46GNZDDXRD93VM3ONK6BO3YYEKRR9L77O1NA5BYNUVFTYXV3J9BJ056ZWF50ZRY1DNDA'
+SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY')
 
 
 def scrape_with_scrapingbee(url: str) -> dict:
@@ -123,7 +123,7 @@ def scrape_with_scrapingbee(url: str) -> dict:
         property_types = ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
         for ptype in property_types:
             if re.search(r'\b' + ptype + r'\b', html, re.IGNORECASE):
-                data['property_type'] = ptype.title()
+                data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
         
         # Postcode - improved extraction with smart filtering
@@ -355,9 +355,17 @@ app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 # Security: Configure CORS properly (restrict in production)
+_allowed_origins = ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]
+# Allow additional origins via env var (comma-separated) - use for Vercel deployment URL
+_extra_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if _extra_origins:
+    _allowed_origins.extend([o.strip() for o in _extra_origins.split(',') if o.strip()])
 CORS(app, resources={
-    r"/analyze": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]},
-    r"/download-pdf": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]}
+    r"/analyze":                         {"origins": _allowed_origins},
+    r"/ai-analyze":                      {"origins": _allowed_origins},
+    r"/extract-url":                     {"origins": _allowed_origins},
+    r"/download-pdf":                    {"origins": _allowed_origins},
+    r"/api/*":                           {"origins": _allowed_origins},
 })
 
 # Security: Rate limiting to prevent abuse
@@ -385,13 +393,15 @@ def calculate_stamp_duty(price, second_property=True):
     """
     # Thresholds (as of 2024)
     if not second_property:
-        # Standard residential rates
-        if price <= 250000:
-            return 0  # Nil rate band
+        # Standard residential rates (England, effective from Oct 2022)
+        if price <= 125000:
+            return 0
+        elif price <= 250000:
+            return (price - 125000) * 0.02
         elif price <= 925000:
-            return (price - 250000) * 0.05
+            return 2500 + ((price - 250000) * 0.05)
         elif price <= 1500000:
-            return 33750 + ((price - 925000) * 0.10)
+            return 36250 + ((price - 925000) * 0.10)
         else:
             return 93750 + ((price - 1500000) * 0.12)
     else:
@@ -1533,6 +1543,11 @@ def index():
     """Serve the main page"""
     return render_template('index.html')
 
+@app.route('/analyze', methods=['GET'])
+def analyze_page():
+    """Serve the deal analysis page"""
+    return render_template('analyze.html')
+
 @app.route('/analyze', methods=['POST'])
 @limiter.limit("10 per minute")  # Security: Rate limit analysis requests
 def analyze():
@@ -1640,17 +1655,11 @@ def health_check():
 def test_scrapingbee():
     """Test ScrapingBee configuration"""
     api_key = os.environ.get('SCRAPINGBEE_API_KEY')
-    hardcoded_key = 'FLJ5HUFLWZTW46GNZDDXRD93VM3ONK6BO3YYEKRR9L77O1NA5BYNUVFTYXV3J9BJ056ZWF50ZRY1DNDA'
-    
-    # Determine which key is being used
+
     if api_key:
         key_source = "Environment Variable"
         key_prefix = api_key[:20]
         key_length = len(api_key)
-    elif SCRAPINGBEE_API_KEY == hardcoded_key:
-        key_source = "Hardcoded Fallback"
-        key_prefix = SCRAPINGBEE_API_KEY[:20]
-        key_length = len(SCRAPINGBEE_API_KEY)
     else:
         key_source = "Not Configured"
         key_prefix = None
@@ -2272,7 +2281,7 @@ def ai_analyze():
             ]
         # Fallback: generate estimated comparables based on purchase price
         if not sold_comparables:
-            avg_price = calculated_metrics.get('purchase_price', 200000)
+            avg_price = float(str(calculated_metrics.get('purchase_price', 200000)).replace(',', ''))
             sold_comparables = [
                 {
                     'address': f"Similar 3-bed property, {postcode}",
@@ -2475,77 +2484,83 @@ def get_price_trend():
             'message': 'Error calculating price trend. Please try again.'
         }), 500
 
+def _estimate_rent_from_land_registry(postcode, bedrooms):
+    """Estimate monthly rent using Land Registry average price as a proxy.
+    Uses a ~5% gross yield assumption (industry benchmark for UK BTL).
+    Returns a dict compatible with the PropertyData API response shape."""
+    try:
+        avg_price = land_registry.get_average_price(postcode, months=18)
+        if avg_price and avg_price > 0:
+            # 5% gross yield / 12 months — standard UK BTL benchmark
+            estimated = round(avg_price * 0.05 / 12)
+            # Adjust by bedroom count relative to 3-bed baseline
+            bed_multiplier = {1: 0.65, 2: 0.82, 3: 1.0, 4: 1.22, 5: 1.45}
+            mult = bed_multiplier.get(bedrooms, 1.0)
+            estimated = round(estimated * mult / 50) * 50  # round to nearest £50
+            return {
+                'estimated_monthly_rent': estimated,
+                'confidence': 'Low',
+                'market_rents': [
+                    round(estimated * 0.92 / 50) * 50,
+                    estimated,
+                    round(estimated * 1.08 / 50) * 50,
+                ],
+                'data_source': 'Land Registry estimate (PropertyData API not configured)',
+            }
+    except Exception as e:
+        app.logger.warning(f'[rental-fallback] Land Registry estimate failed: {e}')
+    return None
+
+
 @app.route('/api/propertydata/rental-valuation', methods=['POST'])
 @limiter.limit("10 per minute")
 def get_propertydata_rental():
-    """Get rental valuation from PropertyData API (premium)"""
+    """Get rental valuation from PropertyData API (premium) with Land Registry fallback"""
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
     try:
-        if not property_data.is_configured():
-            return jsonify({
-                'success': False,
-                'message': 'PropertyData API not configured. Set PROPERTY_DATA_API_KEY environment variable.',
-                'upgrade_url': 'https://propertydata.co.uk/api'
-            }), 503
-        
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
         data = request.get_json()
         postcode = data.get('postcode', '').strip().upper()
         bedrooms = int(data.get('bedrooms', 3))
-        
+
         if not postcode:
             return jsonify({'success': False, 'message': 'Postcode is required'}), 400
-        
+
         if not validate_postcode(postcode):
             return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
-        
-        # Debug: Log API key info (masked)
-        key_length = len(property_data.api_key) if hasattr(property_data, 'api_key') else 0
-        key_prefix = property_data.api_key[:10] if key_length > 0 else 'NONE'
-        app.logger.info(f"[PropertyData] Key prefix: {key_prefix}..., Length: {key_length}")
-        app.logger.info(f"[PropertyData] Postcode: {postcode}, Bedrooms: {bedrooms}")
-        
-        # Check if key seems wrong
-        if key_length < 20:
-            return jsonify({
-                'success': False,
-                'message': f'API key appears invalid (length: {key_length}). Check PROPERTY_DATA_API_KEY environment variable.',
-                'debug': {
-                    'key_length': key_length,
-                    'key_prefix': key_prefix,
-                    'env_var_set': bool(os.environ.get('PROPERTY_DATA_API_KEY'))
-                }
-            }), 500
-        
-        # Get rental valuation from PropertyData
-        result = property_data.get_rental_valuation(postcode, bedrooms)
-        
-        app.logger.info(f"[PropertyData] Result: {result}")
-        
-        if 'error' in result:
-            return jsonify({
-                'success': False,
-                'message': result['error'],
-                'debug': {
-                    'key_length': len(property_data.api_key),
-                    'postcode': postcode,
-                    'bedrooms': bedrooms
-                }
-            }), 500
-        
-        return jsonify({
-            'success': True,
-            'data': result,
-            'source': 'PropertyData API'
-        })
-        
-    except Exception as e:
-        app.logger.error(f'PropertyData rental valuation error: {str(e)}')
+
+        # --- Primary: PropertyData API ---
+        if property_data.is_configured():
+            key_length = len(property_data.api_key) if hasattr(property_data, 'api_key') else 0
+            app.logger.info(f"[PropertyData] Postcode: {postcode}, Bedrooms: {bedrooms}")
+
+            if key_length >= 20:
+                result = property_data.get_rental_valuation(postcode, bedrooms)
+                app.logger.info(f"[PropertyData] Result: {result}")
+
+                if 'error' not in result:
+                    return jsonify({'success': True, 'data': result, 'source': 'PropertyData API'})
+
+                app.logger.warning(f"[PropertyData] Error in result, falling back: {result.get('error')}")
+            else:
+                app.logger.warning(f"[PropertyData] Key too short ({key_length}), falling back")
+
+        # --- Fallback: Land Registry estimate ---
+        app.logger.info(f"[rental-valuation] PropertyData unavailable, using Land Registry fallback for {postcode}")
+        estimate = _estimate_rent_from_land_registry(postcode, bedrooms)
+        if estimate:
+            return jsonify({'success': True, 'data': estimate, 'source': 'Land Registry estimate'})
+
         return jsonify({
             'success': False,
-            'message': 'Error fetching rental valuation. Please try again.'
-        }), 500
+            'message': 'Rental valuation unavailable. Set PROPERTY_DATA_API_KEY for accurate data.',
+            'upgrade_url': 'https://propertydata.co.uk/api'
+        }), 503
+
+    except Exception as e:
+        app.logger.error(f'PropertyData rental valuation error: {str(e)}')
+        return jsonify({'success': False, 'message': 'Error fetching rental valuation. Please try again.'}), 500
 
 @app.route('/api/propertydata/market-context', methods=['POST'])
 @limiter.limit("10 per minute")

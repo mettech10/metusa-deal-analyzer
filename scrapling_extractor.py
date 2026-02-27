@@ -65,11 +65,6 @@ class PropertyExtractor:
                 print("[Scraper] Blocked or CAPTCHA detected")
                 return None
             
-            # Check if we got a valid property page or a 404/redirect
-            if 'property' not in response.url.lower() and 'properties' not in response.url.lower():
-                print(f"[Scraper] Redirected away from property: {response.url}")
-                return None
-                
             return response.text
         except requests.exceptions.Timeout:
             print("[Scraper] Request timed out")
