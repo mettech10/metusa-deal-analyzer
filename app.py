@@ -123,7 +123,7 @@ def scrape_with_scrapingbee(url: str) -> dict:
         property_types = ['detached', 'semi-detached', 'semi', 'terraced', 'flat', 'bungalow', 'apartment']
         for ptype in property_types:
             if re.search(r'\b' + ptype + r'\b', html, re.IGNORECASE):
-                data['property_type'] = ptype.title()
+                data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
         
         # Postcode - improved extraction with smart filtering
@@ -355,9 +355,12 @@ app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 # Security: Configure CORS properly (restrict in production)
+_allowed_origins = ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]
 CORS(app, resources={
-    r"/analyze": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]},
-    r"/download-pdf": {"origins": ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]}
+    r"/analyze":     {"origins": _allowed_origins},
+    r"/ai-analyze":  {"origins": _allowed_origins},
+    r"/extract-url": {"origins": _allowed_origins},
+    r"/download-pdf":{"origins": _allowed_origins},
 })
 
 # Security: Rate limiting to prevent abuse
@@ -385,13 +388,15 @@ def calculate_stamp_duty(price, second_property=True):
     """
     # Thresholds (as of 2024)
     if not second_property:
-        # Standard residential rates
-        if price <= 250000:
-            return 0  # Nil rate band
+        # Standard residential rates (England, effective from Oct 2022)
+        if price <= 125000:
+            return 0
+        elif price <= 250000:
+            return (price - 125000) * 0.02
         elif price <= 925000:
-            return (price - 250000) * 0.05
+            return 2500 + ((price - 250000) * 0.05)
         elif price <= 1500000:
-            return 33750 + ((price - 925000) * 0.10)
+            return 36250 + ((price - 925000) * 0.10)
         else:
             return 93750 + ((price - 1500000) * 0.12)
     else:
@@ -1533,6 +1538,11 @@ def index():
     """Serve the main page"""
     return render_template('index.html')
 
+@app.route('/analyze', methods=['GET'])
+def analyze_page():
+    """Serve the deal analysis page"""
+    return render_template('analyze.html')
+
 @app.route('/analyze', methods=['POST'])
 @limiter.limit("10 per minute")  # Security: Rate limit analysis requests
 def analyze():
@@ -2272,7 +2282,7 @@ def ai_analyze():
             ]
         # Fallback: generate estimated comparables based on purchase price
         if not sold_comparables:
-            avg_price = calculated_metrics.get('purchase_price', 200000)
+            avg_price = float(str(calculated_metrics.get('purchase_price', 200000)).replace(',', ''))
             sold_comparables = [
                 {
                     'address': f"Similar 3-bed property, {postcode}",
