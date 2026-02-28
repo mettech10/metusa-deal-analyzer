@@ -51,15 +51,33 @@ function formatAnalysisResults(r: Record<string, any>): string {
   
   // ARTICLE 4 SECTION
   if (r.article_4) {
-    formatted += `⚖️  ARTICLE 4\n`
+    formatted += `⚖️  ARTICLE 4 & PLANNING\n`
     formatted += `─`.repeat(55) + `\n`
     if (r.article_4.is_article_4) {
-      formatted += `  🔴 THIS AREA IS UNDER ARTICLE 4\n`
+      formatted += `  🔴 ARTICLE 4 DIRECTION IN FORCE\n`
       formatted += `  ${r.article_4.note || ''}\n`
-      formatted += `  ${r.article_4.advice || ''}\n`
+      formatted += `  ${r.article_4.advice || 'Planning permission required for HMO conversion.'}\n`
+    } else if (r.article_4.known === false) {
+      formatted += `  🟡 ARTICLE 4 STATUS UNCONFIRMED\n`
+      formatted += `  ${r.article_4.note || 'Not in our database — verify with local council.'}\n`
+      formatted += `  ${r.article_4.advice || 'Check with local planning authority before any HMO conversion.'}\n`
     } else {
-      formatted += `  🟢 THIS AREA IS NOT UNDER ARTICLE 4\n`
-      formatted += `  ${r.article_4.advice || 'No restrictions - permitted development applies'}\n`
+      formatted += `  🟢 NO ARTICLE 4 RESTRICTIONS\n`
+      formatted += `  ${r.article_4.advice || 'Permitted Development applies — no planning permission needed for HMO (up to 6 people).'}\n`
+    }
+    // HMO licensing guidance (shown when strategy is HMO)
+    if (r.article_4.hmo_guidance) {
+      formatted += `\n  💡 HMO GUIDANCE:\n`
+      r.article_4.hmo_guidance.split('. ').filter((s: string) => s.trim()).forEach((line: string) => {
+        formatted += `    → ${line.trim()}${line.trim().endsWith('.') ? '' : '.'}\n`
+      })
+    }
+    // Social housing alternative (shown when Article 4 and HMO strategy)
+    if (r.article_4.social_housing_suggestion) {
+      formatted += `\n  🏠 ALTERNATIVE — SOCIAL/SUPPORTED HOUSING (C3→C3b):\n`
+      r.article_4.social_housing_suggestion.split('. ').filter((s: string) => s.trim()).forEach((line: string) => {
+        formatted += `    → ${line.trim()}${line.trim().endsWith('.') ? '' : '.'}\n`
+      })
     }
     formatted += `\n`
   }
