@@ -1,7 +1,23 @@
+"use client"
+
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Check } from "lucide-react"
+import { openCheckout } from "@/lib/paddle"
+
+// ── Configure your Paddle price IDs ────────────────────────────────────
+// Paddle Dashboard → Catalogue → Prices → copy the price ID (e.g. pri_xxx)
+// Add to .env.local:
+//   NEXT_PUBLIC_PADDLE_PRICE_PAY_PER_DEAL=pri_xxxxxxxxxxxxxxxx
+//   NEXT_PUBLIC_PADDLE_PRICE_PRO=pri_xxxxxxxxxxxxxxxx
+//   NEXT_PUBLIC_PADDLE_PRICE_UNLIMITED=pri_xxxxxxxxxxxxxxxx
+
+const PRICE_IDS = {
+  payPerDeal: process.env.NEXT_PUBLIC_PADDLE_PRICE_PAY_PER_DEAL ?? "",
+  pro:        process.env.NEXT_PUBLIC_PADDLE_PRICE_PRO ?? "",
+  unlimited:  process.env.NEXT_PUBLIC_PADDLE_PRICE_UNLIMITED ?? "",
+}
 
 const plans = [
   {
@@ -17,6 +33,8 @@ const plans = [
     ],
     cta: "Get Started Free",
     highlighted: false,
+    priceId: null,
+    href: "/analyse",
   },
   {
     name: "Pay Per Deal",
@@ -30,8 +48,10 @@ const plans = [
       "Cash flow projections",
       "PDF report export",
     ],
-    cta: "Start Analysing",
+    cta: "Buy a Credit",
     highlighted: false,
+    priceId: PRICE_IDS.payPerDeal,
+    href: null,
   },
   {
     name: "Pro",
@@ -48,6 +68,8 @@ const plans = [
     ],
     cta: "Go Pro",
     highlighted: true,
+    priceId: PRICE_IDS.pro,
+    href: null,
   },
   {
     name: "Unlimited",
@@ -62,10 +84,51 @@ const plans = [
       "Dedicated account manager",
       "White-label reports",
     ],
-    cta: "Contact Sales",
+    cta: "Go Unlimited",
     highlighted: false,
+    priceId: PRICE_IDS.unlimited,
+    href: null,
   },
 ]
+
+function PlanButton({ plan }: { plan: (typeof plans)[number] }) {
+  // Free plan — just navigate
+  if (plan.href) {
+    return (
+      <Button
+        asChild
+        variant={plan.highlighted ? "default" : "outline"}
+        className="w-full"
+      >
+        <Link href={plan.href}>{plan.cta}</Link>
+      </Button>
+    )
+  }
+
+  // Paid plan — open Paddle checkout overlay
+  return (
+    <Button
+      variant={plan.highlighted ? "default" : "outline"}
+      className="w-full"
+      onClick={() => {
+        if (!plan.priceId) {
+          console.warn(
+            `[Paddle] Price ID not yet configured for "${plan.name}". ` +
+            `Add it to .env.local as NEXT_PUBLIC_PADDLE_PRICE_XXX`
+          )
+          alert(
+            `Payment for "${plan.name}" is not yet activated.\n` +
+            `Add your Paddle price ID to .env.local to enable checkout.`
+          )
+          return
+        }
+        openCheckout(plan.priceId)
+      }}
+    >
+      {plan.cta}
+    </Button>
+  )
+}
 
 export function Pricing() {
   return (
@@ -117,16 +180,15 @@ export function Pricing() {
                 ))}
               </ul>
 
-              <Button
-                asChild
-                variant={plan.highlighted ? "default" : "outline"}
-                className="w-full"
-              >
-                <Link href="/analyse">{plan.cta}</Link>
-              </Button>
+              <PlanButton plan={plan} />
             </div>
           ))}
         </div>
+
+        <p className="mt-8 text-center text-xs text-muted-foreground">
+          Payments processed securely by{" "}
+          <span className="font-medium text-foreground">Paddle</span>. Cancel anytime.
+        </p>
       </div>
     </section>
   )
