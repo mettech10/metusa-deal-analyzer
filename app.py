@@ -55,7 +55,8 @@ def scrape_with_jina(url: str) -> dict:
             'price': None,
             'property_type': None,
             'bedrooms': None,
-            'description': None
+            'description': None,
+            'sqm': None,
         }
 
         # --- Price ---
@@ -114,6 +115,25 @@ def scrape_with_jina(url: str) -> dict:
             if re.search(r'\b' + ptype + r'\b', text, re.IGNORECASE):
                 data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
+
+        # --- Floor area (sqm) ---
+        # Rightmove/Zoopla show size as "85 sq m", "85m²", "915 sq ft", etc.
+        sqm_val = None
+        sqm_patterns_list = [
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', False),   # Already metres
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', True),     # Feet → convert
+        ]
+        for pat, is_sqft in sqm_patterns_list:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                val = float(m.group(1))
+                if is_sqft:
+                    val = val / 10.764  # sq ft → sq m
+                if 10 <= val <= 2000:   # Sanity check
+                    sqm_val = round(val, 1)
+                    break
+        data['sqm'] = sqm_val
+        print(f"[Jina] Floor area: {sqm_val} sqm")
 
         # --- Postcode ---
         VALID_AREAS = {
@@ -271,7 +291,7 @@ def scrape_with_jina(url: str) -> dict:
             data['address'] = "Address not available"
 
         print(f"[Jina] Extracted: price={data['price']}, beds={data['bedrooms']}, "
-              f"postcode={data['postcode']}, address={str(data['address'])[:60]}")
+              f"sqm={data['sqm']}, postcode={data['postcode']}, address={str(data['address'])[:60]}")
         return data
 
     except Exception as e:
