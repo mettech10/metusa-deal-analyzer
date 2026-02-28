@@ -1,0 +1,557 @@
+From 997782d32fc2185706c277a8bf178c4ac5e354a3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 28 Feb 2026 14:52:52 +0000
+Subject: [PATCH] feat: structured 4-page PDF report + fix sqm prefill
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PDF now generates a professional Deal Connect-style report with 4 pages:
+
+Page 1 — Deal Summary
+- AI deal score ring (SVG, green/amber/red) + verdict label
+- Headline Details grid: type, beds, sqm, condition, strategy
+- Headline Deal Figures: purchase price, stamp duty, legals,
+  refurb, total money in, monthly cashflow, annual cashflow,
+  gross yield, net yield, cash-on-cash ROI, income, expenses
+
+Page 2 — Deal Analyser (Financial Breakdown)
+- Purchase costs table: price, deposit, mortgage, SDLT,
+  legals, survey, refurb, total capital required
+- BRR-specific section: ARV, new mortgage, money pulled out,
+  money left in, equity created (when strategy is BRR)
+- HMO room details table (when strategy is HMO)
+- Monthly P&L table with void allowance, mortgage, management
+  fee, insurance, maintenance, ground rent, bills
+- Returns table: gross/net yield, cash-on-cash, interest rate
+- SDLT band breakdown table
+
+Page 3 — Property Details & Refurb
+- Full property info table: address, postcode, type, beds,
+  sqm, condition, strategy, purchase type, SDLT surcharge flag
+- Refurb estimate table: light/medium/heavy + budgeted amount
+- 5-year investment projection table (property value, equity,
+  annual CF, cumulative CF, total return)
+
+Page 4 — AI Analysis
+- Strengths, risks, next steps extracted into separate blocks
+- Full raw AI analysis text in monospace
+
+Also fix: sqm from URL scrape now correctly passed into form
+prefill so size field auto-populates after scraping a listing.
+
+https://claude.ai/code/session_01WYRuFL36VPp66p8p86K5sq
+---
+ app/analyse/page.tsx | 471 +++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 389 insertions(+), 82 deletions(-)
+
+diff --git a/app/analyse/page.tsx b/app/analyse/page.tsx
+index fe3bcd7..ed0f08b 100644
+--- a/app/analyse/page.tsx
++++ b/app/analyse/page.tsx
+@@ -417,6 +417,7 @@ export default function AnalysePage() {
+           purchasePrice: Number(scraped.purchasePrice) || 0,
+           propertyType: scraped.propertyType || "house",
+           bedrooms: Number(scraped.bedrooms) || 3,
++          ...(scraped.sqm ? { sqm: Number(scraped.sqm) } : {}),
+         }
+ 
+         // Transition to manual form with pre-filled data
+@@ -452,106 +453,412 @@ export default function AnalysePage() {
+   const handleSavePDF = () => {
+     if (!aiText && !formData) return
+ 
+-    const address  = formData?.address  || "Unknown Address"
+-    const postcode = formData?.postcode || ""
+-    const date     = new Date().toLocaleDateString("en-GB", {
+-      day: "numeric", month: "long", year: "numeric",
+-    })
++    const fd = formData
++    const res = results
++    const address = fd?.address || "Unknown Address"
++    const postcode = fd?.postcode || ""
++    const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+ 
+-    // Build a rich text report from the already-formatted aiText
+-    const reportBody = aiText
+-      ? aiText
+-          .replace(/&/g, "&amp;")
+-          .replace(/</g, "&lt;")
+-          .replace(/>/g, "&gt;")
+-      : "Analysis data not available."
++    // Helper formatters
++    const £ = (n: number) => `£${Math.round(n).toLocaleString("en-GB")}`
++    const pct = (n: number) => `${n.toFixed(2)}%`
++    const na = (v: unknown) => (v !== undefined && v !== null && v !== 0 && v !== "" ? String(v) : "—")
+ 
+-    const html = `<!DOCTYPE html>
+-<html lang="en">
+-<head>
+-  <meta charset="UTF-8" />
+-  <title>Property Report — ${address}</title>
+-  <style>
+-    * { margin: 0; padding: 0; box-sizing: border-box; }
+-    body {
+-      font-family: 'Courier New', monospace;
+-      font-size: 11px;
+-      line-height: 1.55;
+-      color: #111;
+-      background: #fff;
+-      padding: 28px 32px;
+-    }
+-    .report-header {
+-      border-bottom: 2px solid #111;
+-      padding-bottom: 12px;
+-      margin-bottom: 20px;
+-    }
+-    .report-header h1 {
+-      font-size: 18px;
+-      font-weight: bold;
+-      letter-spacing: 0.5px;
+-    }
+-    .report-header .sub {
+-      font-size: 11px;
+-      color: #555;
+-      margin-top: 4px;
+-    }
+-    .report-header .badge {
+-      display: inline-block;
+-      background: #111;
+-      color: #fff;
+-      font-size: 9px;
+-      letter-spacing: 1px;
+-      padding: 2px 8px;
+-      border-radius: 3px;
+-      margin-top: 6px;
+-      text-transform: uppercase;
++    // Strategy label
++    const strategyLabels: Record<string, string> = {
++      btl: "Buy-to-Let (BTL)", brr: "Buy Refurbish Refinance (BRR)",
++      hmo: "HMO", flip: "Flip", r2sa: "Rent-to-SA (R2SA)", development: "Development",
+     }
+-    pre {
+-      white-space: pre-wrap;
+-      word-break: break-word;
+-      font-family: 'Courier New', monospace;
+-      font-size: 11px;
+-      line-height: 1.55;
++    const conditionLabels: Record<string, string> = {
++      excellent: "Excellent", good: "Good", fair: "Fair", "needs-work": "Needs Work",
+     }
+-    .footer {
+-      margin-top: 24px;
+-      padding-top: 10px;
+-      border-top: 1px solid #ccc;
+-      font-size: 9px;
+-      color: #888;
+-      text-align: center;
+-    }
+-    @media print {
+-      body { padding: 10px 16px; }
++    const strategy = strategyLabels[fd?.investmentType || "btl"] || "BTL"
++    const condition = conditionLabels[fd?.condition || "good"] || "Good"
++    const propType = (fd?.propertyType || "house").charAt(0).toUpperCase() + (fd?.propertyType || "house").slice(1)
++
++    // Extract AI score from aiText
++    const scoreMatch = aiText.match(/SCORE:\s*(\d+)/i) || aiText.match(/Deal Score:\s*(\d+)/i)
++    const score = scoreMatch ? parseInt(scoreMatch[1]) : null
++    const scoreColor = score !== null ? (score >= 75 ? "#16a34a" : score >= 50 ? "#0ea5e9" : score >= 25 ? "#f59e0b" : "#dc2626") : "#999"
++    const scoreLabel = score !== null ? (score >= 80 ? "Excellent Deal" : score >= 65 ? "Good Deal" : score >= 50 ? "Fair Deal" : score >= 35 ? "Below Average" : "Poor Deal") : ""
++
++    // Extract AI text sections for summary/strengths/risks
++    const extractSection = (label: string) => {
++      const rx = new RegExp(`${label}[:\\s]+([\\s\\S]*?)(?=\\n[\\n✅⚠️📋🔨📈🏠🎯]|$)`, "i")
++      const m = aiText.match(rx)
++      return m ? m[1].trim().replace(/^\s*[-•→]\s*/gm, "• ").substring(0, 600) : ""
+     }
+-  </style>
++    const aiSummary = extractSection("SUMMARY|DEAL SUMMARY|OVERVIEW")
++    const aiStrengths = extractSection("STRENGTH")
++    const aiRisks = extractSection("RISK")
++    const aiNextSteps = extractSection("NEXT STEP")
++
++    // Refurb estimates from aiText
++    const lightMatch = aiText.match(/Light[^:]*:\s*£([\d,]+)/)
++    const mediumMatch = aiText.match(/Medium[^:]*:\s*£([\d,]+)/)
++    const heavyMatch = aiText.match(/Heavy[^:]*:\s*£([\d,]+)/)
++
++    // 5-year projection table rows
++    const projRows = res?.fiveYearProjection?.map(y =>
++      `<tr>
++        <td>Year ${y.year}</td>
++        <td>${£(y.propertyValue)}</td>
++        <td>${£(y.equity)}</td>
++        <td>${£(y.annualCashFlow)}</td>
++        <td>${£(y.cumulativeCashFlow)}</td>
++        <td>${£(y.totalReturn)}</td>
++      </tr>`
++    ).join("") || ""
++
++    // SDLT breakdown rows
++    const sdltRows = res?.sdltBreakdown?.map(b =>
++      `<tr><td>${b.band}</td><td>${£(b.tax)}</td></tr>`
++    ).join("") || ""
++
++    // Score ring SVG (inline)
++    const scoreRingSvg = score !== null ? `
++      <div style="position:relative;width:110px;height:110px;margin:0 auto 8px;">
++        <svg width="110" height="110" style="transform:rotate(-90deg)">
++          <circle cx="55" cy="55" r="46" fill="none" stroke="#e5e7eb" stroke-width="10"/>
++          <circle cx="55" cy="55" r="46" fill="none" stroke="${scoreColor}" stroke-width="10"
++            stroke-linecap="round"
++            stroke-dasharray="${(score / 100) * 2 * Math.PI * 46} ${2 * Math.PI * 46}"/>
++        </svg>
++        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;">
++          <span style="font-size:22px;font-weight:700;color:${scoreColor}">${score}%</span>
++          <span style="font-size:9px;color:#999">/100</span>
++        </div>
++      </div>
++      <div style="text-align:center;font-size:11px;font-weight:600;color:${scoreColor};margin-bottom:4px">${scoreLabel}</div>
++    ` : ""
++
++    const html = `<!DOCTYPE html>
++<html lang="en">
++<head>
++<meta charset="UTF-8"/>
++<title>Deal Report — ${address}</title>
++<style>
++  *{margin:0;padding:0;box-sizing:border-box}
++  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a1a2e;background:#fff}
++  .page{padding:28px 32px;min-height:297mm}
++  .page+.page{page-break-before:always}
++  /* ── HEADER ── */
++  .rpt-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a2e;padding-bottom:12px;margin-bottom:18px}
++  .rpt-title{font-size:20px;font-weight:700;letter-spacing:.3px}
++  .rpt-sub{font-size:10px;color:#555;margin-top:3px}
++  .rpt-badge{background:#1a1a2e;color:#fff;font-size:8px;letter-spacing:1px;padding:2px 8px;border-radius:2px;text-transform:uppercase;margin-top:6px;display:inline-block}
++  /* ── SECTION TITLES ── */
++  .sec-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1a1a2e;border-left:4px solid #4f46e5;padding-left:8px;margin:18px 0 10px}
++  /* ── PROPERTY DETAIL GRID ── */
++  .detail-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
++  .detail-item{background:#f8f8fc;border:1px solid #e8e8f0;border-radius:4px;padding:8px 10px}
++  .detail-label{font-size:9px;text-transform:uppercase;color:#888;letter-spacing:.5px;margin-bottom:2px}
++  .detail-value{font-size:13px;font-weight:700;color:#1a1a2e}
++  /* ── HEADLINE FIGURES ── */
++  .figures-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
++  .fig-card{border:1px solid #e8e8f0;border-radius:6px;padding:10px;text-align:center;background:#fff}
++  .fig-card.accent{background:#4f46e5;color:#fff;border-color:#4f46e5}
++  .fig-card.green{background:#16a34a;color:#fff;border-color:#16a34a}
++  .fig-card.amber{background:#f59e0b;color:#fff;border-color:#f59e0b}
++  .fig-label{font-size:8px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;opacity:.75}
++  .fig-value{font-size:16px;font-weight:700}
++  .fig-card.accent .fig-label,.fig-card.green .fig-label,.fig-card.amber .fig-label{opacity:.85}
++  /* ── TABLE ── */
++  table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px}
++  th{background:#1a1a2e;color:#fff;padding:5px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.4px}
++  td{padding:5px 8px;border-bottom:1px solid #f0f0f0}
++  tr:nth-child(even) td{background:#f9f9fb}
++  .td-right{text-align:right;font-weight:600}
++  /* ── TWO-COL LAYOUT ── */
++  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
++  /* ── AI TEXT ── */
++  .ai-block{background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px;margin-bottom:12px}
++  .ai-block-title{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#4f46e5;font-weight:700;margin-bottom:6px}
++  .ai-text{font-size:10px;line-height:1.6;color:#333;white-space:pre-wrap}
++  /* ── SCORE SECTION ── */
++  .score-banner{display:flex;align-items:center;gap:20px;background:#f8f8fc;border:1px solid #e8e8f0;border-radius:8px;padding:14px 16px;margin-bottom:14px}
++  /* ── FOOTER ── */
++  .rpt-footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-size:8px;color:#aaa;text-align:center}
++  @media print{.page{padding:16px 20px}.page+.page{page-break-before:always}}
++</style>
+ </head>
+ <body>
+-  <div class="report-header">
+-    <h1>Property Investment Report</h1>
+-    <div class="sub">${address}${postcode ? " · " + postcode : ""}</div>
+-    <div class="sub">Generated: ${date}</div>
+-    <span class="badge">Metalyzi · AI Deal Analyser</span>
++
++<!-- ════════════════════════════════════════════════════════
++     PAGE 1 · DEAL SUMMARY
++     ════════════════════════════════════════════════════════ -->
++<div class="page">
++  <div class="rpt-header">
++    <div>
++      <div class="rpt-title">Property Investment Report</div>
++      <div class="rpt-sub">${address}${postcode ? " · " + postcode : ""}</div>
++      <div class="rpt-sub">Generated: ${date}</div>
++      <span class="rpt-badge">Metalyzi · AI Deal Analyser</span>
++    </div>
++    <div style="text-align:right">
++      <div style="font-size:9px;color:#888;margin-bottom:4px">Strategy</div>
++      <div style="font-size:13px;font-weight:700;color:#4f46e5">${strategy}</div>
++    </div>
++  </div>
++
++  <!-- Score banner -->
++  ${score !== null ? `
++  <div class="score-banner">
++    ${scoreRingSvg}
++    <div>
++      <div style="font-size:16px;font-weight:700;color:${scoreColor}">${scoreLabel}</div>
++      <div style="font-size:10px;color:#555;margin-top:4px">AI Deal Score: ${score}/100</div>
++      ${aiSummary ? `<div style="font-size:10px;color:#333;margin-top:8px;max-width:480px;line-height:1.5">${aiSummary.substring(0, 280)}</div>` : ""}
++    </div>
++  </div>` : ""}
++
++  <!-- Property details -->
++  <div class="sec-title">Headline Details</div>
++  <div class="detail-grid">
++    <div class="detail-item"><div class="detail-label">Property Type</div><div class="detail-value">${propType}</div></div>
++    <div class="detail-item"><div class="detail-label">Bedrooms</div><div class="detail-value">${na(fd?.bedrooms)} bed</div></div>
++    <div class="detail-item"><div class="detail-label">Internal Area</div><div class="detail-value">${fd?.sqm ? fd.sqm + " m²" : "—"}</div></div>
++    <div class="detail-item"><div class="detail-label">Condition</div><div class="detail-value">${condition}</div></div>
++    <div class="detail-item"><div class="detail-label">Strategy</div><div class="detail-value">${strategy}</div></div>
++    <div class="detail-item"><div class="detail-label">Purchase Type</div><div class="detail-value">${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</div></div>
++  </div>
++
++  <!-- Headline figures -->
++  <div class="sec-title">Headline Deal Figures</div>
++  <div class="figures-grid">
++    <div class="fig-card accent"><div class="fig-label">Purchase Price</div><div class="fig-value">${£(fd?.purchasePrice || 0)}</div></div>
++    <div class="fig-card"><div class="fig-label">Stamp Duty</div><div class="fig-value">${£(res?.sdltAmount || 0)}</div></div>
++    <div class="fig-card"><div class="fig-label">Legal &amp; Survey</div><div class="fig-value">${£((fd?.legalFees || 0) + (fd?.surveyCosts || 0))}</div></div>
++    <div class="fig-card"><div class="fig-label">Refurb Budget</div><div class="fig-value">${£(fd?.refurbishmentBudget || 0)}</div></div>
++    <div class="fig-card accent"><div class="fig-label">Total Money In</div><div class="fig-value">${£(res?.totalCapitalRequired || 0)}</div></div>
++    <div class="fig-card ${(res?.monthlyCashFlow || 0) >= 0 ? "green" : ""}"><div class="fig-label">Monthly Cashflow</div><div class="fig-value">${£(res?.monthlyCashFlow || 0)}</div></div>
++    <div class="fig-card green"><div class="fig-label">Annual Cashflow</div><div class="fig-value">${£(res?.annualCashFlow || 0)}</div></div>
++    <div class="fig-card ${(res?.grossYield || 0) >= 6 ? "green" : "amber"}"><div class="fig-label">Gross Yield</div><div class="fig-value">${pct(res?.grossYield || 0)}</div></div>
++    <div class="fig-card"><div class="fig-label">Net Yield</div><div class="fig-value">${pct(res?.netYield || 0)}</div></div>
++    <div class="fig-card ${(res?.cashOnCashReturn || 0) >= 10 ? "green" : ""}"><div class="fig-label">Cash-on-Cash ROI</div><div class="fig-value">${pct(res?.cashOnCashReturn || 0)}</div></div>
++    <div class="fig-card"><div class="fig-label">Monthly Income</div><div class="fig-value">${£(res?.monthlyIncome || 0)}</div></div>
++    <div class="fig-card"><div class="fig-label">Monthly Expenses</div><div class="fig-value">${£(res?.monthlyExpenses || 0)}</div></div>
++  </div>
++
++  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · metalyzi.com · For informational purposes only. Always seek professional financial and legal advice.</div>
++</div>
++
++<!-- ════════════════════════════════════════════════════════
++     PAGE 2 · DEAL ANALYSER — FINANCIAL BREAKDOWN
++     ════════════════════════════════════════════════════════ -->
++<div class="page">
++  <div class="rpt-header">
++    <div>
++      <div class="rpt-title">Deal Analyser · Financial Breakdown</div>
++      <div class="rpt-sub">${address} · ${strategy}</div>
++    </div>
++    <span class="rpt-badge">Metalyzi</span>
++  </div>
++
++  <div class="two-col">
++    <!-- Purchase Costs -->
++    <div>
++      <div class="sec-title" style="margin-top:0">Purchase Costs</div>
++      <table>
++        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
++        <tr><td>Purchase Price</td><td class="td-right">${£(fd?.purchasePrice || 0)}</td></tr>
++        <tr><td>Deposit (${fd?.depositPercentage || 25}%)</td><td class="td-right">${£(res?.depositAmount || 0)}</td></tr>
++        <tr><td>Mortgage Amount</td><td class="td-right">${£(res?.mortgageAmount || 0)}</td></tr>
++        <tr><td>Stamp Duty (SDLT)</td><td class="td-right">${£(res?.sdltAmount || 0)}</td></tr>
++        <tr><td>Legal Fees</td><td class="td-right">${£(fd?.legalFees || 0)}</td></tr>
++        <tr><td>Survey Costs</td><td class="td-right">${£(fd?.surveyCosts || 0)}</td></tr>
++        ${fd?.refurbishmentBudget ? `<tr><td>Refurbishment</td><td class="td-right">${£(fd.refurbishmentBudget)}</td></tr>` : ""}
++        ${fd?.investmentType === "brr" && fd?.arv ? `<tr><td>After Repair Value (ARV)</td><td class="td-right">${£(fd.arv)}</td></tr>` : ""}
++        <tr style="font-weight:700"><td><strong>Total Capital Required</strong></td><td class="td-right"><strong>${£(res?.totalCapitalRequired || 0)}</strong></td></tr>
++      </table>
++
++      ${fd?.investmentType === "brr" && fd?.arv ? `
++      <div class="sec-title">BRR — Money Left In</div>
++      <table>
++        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
++        <tr><td>After Repair Value (ARV)</td><td class="td-right">${£(fd.arv)}</td></tr>
++        <tr><td>New Mortgage (75% ARV)</td><td class="td-right">${£(fd.arv * 0.75)}</td></tr>
++        <tr><td>Total Money In</td><td class="td-right">${£(res?.totalCapitalRequired || 0)}</td></tr>
++        <tr><td>Money Pulled Out</td><td class="td-right">${£(Math.max(0, fd.arv * 0.75 - (res?.totalCapitalRequired || 0)))}</td></tr>
++        <tr style="font-weight:700"><td><strong>Money Left In</strong></td><td class="td-right"><strong>${£(Math.max(0, (res?.totalCapitalRequired || 0) - fd.arv * 0.75))}</strong></td></tr>
++        <tr><td>Equity Created</td><td class="td-right">${£(Math.max(0, fd.arv - (res?.totalCapitalRequired || 0)))}</td></tr>
++      </table>` : ""}
++
++      ${fd?.investmentType === "hmo" && fd?.roomCount && fd?.avgRoomRate ? `
++      <div class="sec-title">HMO Room Details</div>
++      <table>
++        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
++        <tr><td>Number of Rooms</td><td class="td-right">${fd.roomCount}</td></tr>
++        <tr><td>Avg Room Rate</td><td class="td-right">${£(fd.avgRoomRate)}/month</td></tr>
++        <tr><td>Total HMO Income</td><td class="td-right">${£(fd.roomCount * fd.avgRoomRate)}/month</td></tr>
++        <tr><td>Annual HMO Income</td><td class="td-right">${£(fd.roomCount * fd.avgRoomRate * 12)}/year</td></tr>
++      </table>` : ""}
++    </div>
++
++    <!-- Monthly P&L -->
++    <div>
++      <div class="sec-title" style="margin-top:0">Monthly P&amp;L</div>
++      <table>
++        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
++        <tr><td>Rental Income</td><td class="td-right">${£(res?.monthlyIncome || 0)}</td></tr>
++        ${fd?.voidWeeks ? `<tr><td>Void Allowance (${fd.voidWeeks} wks)</td><td class="td-right" style="color:#dc2626">-${£(((fd.monthlyRent || 0) * fd.voidWeeks) / 52)}</td></tr>` : ""}
++        <tr><td style="border-top:1px solid #ddd">Mortgage Payment</td><td class="td-right" style="border-top:1px solid #ddd">-${£(res?.monthlyMortgagePayment || 0)}</td></tr>
++        ${fd?.managementFeePercent ? `<tr><td>Management (${fd.managementFeePercent}%)</td><td class="td-right">-${£((res?.monthlyIncome || 0) * (fd.managementFeePercent / 100))}</td></tr>` : ""}
++        ${fd?.insurance ? `<tr><td>Insurance</td><td class="td-right">-${£(fd.insurance / 12)}/mo</td></tr>` : ""}
++        ${fd?.maintenance ? `<tr><td>Maintenance</td><td class="td-right">-${£(fd.maintenance / 12)}/mo</td></tr>` : ""}
++        ${fd?.groundRent ? `<tr><td>Ground Rent</td><td class="td-right">-${£(fd.groundRent / 12)}/mo</td></tr>` : ""}
++        ${fd?.bills ? `<tr><td>Bills</td><td class="td-right">-${£(fd.bills / 12)}/mo</td></tr>` : ""}
++        <tr><td><strong>Total Expenses</strong></td><td class="td-right"><strong>-${£(res?.monthlyExpenses || 0)}</strong></td></tr>
++        <tr style="font-size:13px;font-weight:700;color:${(res?.monthlyCashFlow || 0) >= 0 ? "#16a34a" : "#dc2626"}">
++          <td><strong>Net Monthly Cashflow</strong></td>
++          <td class="td-right"><strong>${£(res?.monthlyCashFlow || 0)}</strong></td>
++        </tr>
++        <tr style="font-weight:700"><td>Annual Cashflow</td><td class="td-right">${£(res?.annualCashFlow || 0)}</td></tr>
++      </table>
++
++      <div class="sec-title">Returns</div>
++      <table>
++        <tr><th>Metric</th><th style="text-align:right">Value</th></tr>
++        <tr><td>Gross Yield</td><td class="td-right">${pct(res?.grossYield || 0)}</td></tr>
++        <tr><td>Net Yield</td><td class="td-right">${pct(res?.netYield || 0)}</td></tr>
++        <tr><td>Cash-on-Cash ROI</td><td class="td-right">${pct(res?.cashOnCashReturn || 0)}</td></tr>
++        <tr><td>Interest Rate</td><td class="td-right">${pct(fd?.interestRate || 0)}</td></tr>
++        ${fd?.mortgageTerm ? `<tr><td>Mortgage Term</td><td class="td-right">${fd.mortgageTerm} years</td></tr>` : ""}
++      </table>
++
++      ${sdltRows ? `
++      <div class="sec-title">SDLT Breakdown</div>
++      <table>
++        <tr><th>Band</th><th style="text-align:right">Tax</th></tr>
++        ${sdltRows}
++        <tr style="font-weight:700"><td>Total SDLT</td><td class="td-right">${£(res?.sdltAmount || 0)}</td></tr>
++      </table>` : ""}
++    </div>
++  </div>
++
++  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · For informational purposes only.</div>
++</div>
++
++<!-- ════════════════════════════════════════════════════════
++     PAGE 3 · PROPERTY DETAILS, REFURB & 5-YEAR PROJECTION
++     ════════════════════════════════════════════════════════ -->
++<div class="page">
++  <div class="rpt-header">
++    <div>
++      <div class="rpt-title">Property Details &amp; Refurb</div>
++      <div class="rpt-sub">${address}</div>
++    </div>
++    <span class="rpt-badge">Metalyzi</span>
+   </div>
+-  <pre>${reportBody}</pre>
+-  <div class="footer">
+-    This report was generated by Metalyzi (metalyzi.com) and is for informational purposes only.
+-    Always seek professional financial and legal advice before making any property investment decisions.
++
++  <div class="sec-title" style="margin-top:0">Property Information</div>
++  <table style="margin-bottom:18px">
++    <tr><th>Field</th><th>Detail</th></tr>
++    <tr><td>Full Address</td><td>${address}</td></tr>
++    <tr><td>Postcode</td><td>${postcode || "—"}</td></tr>
++    <tr><td>Property Type</td><td>${propType}</td></tr>
++    <tr><td>Bedrooms</td><td>${na(fd?.bedrooms)}</td></tr>
++    <tr><td>Internal Area</td><td>${fd?.sqm ? fd.sqm + " m²" : "—"}</td></tr>
++    <tr><td>Condition</td><td>${condition}</td></tr>
++    <tr><td>Investment Strategy</td><td>${strategy}</td></tr>
++    <tr><td>Purchase Type</td><td>${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</td></tr>
++    ${fd?.purchaseType !== "r2sa" ? `<tr><td>Additional Property Surcharge</td><td>${fd?.isAdditionalProperty ? "Yes (5% applied)" : "No"}</td></tr>` : ""}
++  </table>
++
++  <!-- Refurb estimates -->
++  <div class="sec-title">Refurb &amp; Furnishing Estimate</div>
++  <table style="margin-bottom:18px">
++    <tr><th>Refurb Level</th><th style="text-align:right">Estimated Cost</th><th>Description</th></tr>
++    <tr>
++      <td><strong>Light (Cosmetic)</strong></td>
++      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqm ? £(fd.sqm * 40) : "—"}</td>
++      <td style="color:#555;font-size:9px">Redecorate, carpets, minor fixtures</td>
++    </tr>
++    <tr>
++      <td><strong>Medium (Standard)</strong></td>
++      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqm ? £(fd.sqm * 100) : "—"}</td>
++      <td style="color:#555;font-size:9px">New kitchen, bathroom, replastering</td>
++    </tr>
++    <tr>
++      <td><strong>Heavy (Full Refurb)</strong></td>
++      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqm ? £(fd.sqm * 185) : "—"}</td>
++      <td style="color:#555;font-size:9px">Rewire, new heating, full internal strip-out</td>
++    </tr>
++    <tr>
++      <td><strong>Budgeted Refurb</strong></td>
++      <td class="td-right" style="color:#4f46e5;font-weight:700">${£(fd?.refurbishmentBudget || 0)}</td>
++      <td style="color:#555;font-size:9px">As entered in deal analysis</td>
++    </tr>
++  </table>
++
++  <!-- 5-year projection -->
++  ${projRows ? `
++  <div class="sec-title">5-Year Investment Projection</div>
++  <div style="font-size:9px;color:#888;margin-bottom:6px">Assumes 3% annual capital growth &amp; ${fd?.annualRentIncrease || 2}% rent increase per year</div>
++  <table>
++    <tr>
++      <th>Year</th>
++      <th style="text-align:right">Property Value</th>
++      <th style="text-align:right">Equity</th>
++      <th style="text-align:right">Annual CF</th>
++      <th style="text-align:right">Cumulative CF</th>
++      <th style="text-align:right">Total Return</th>
++    </tr>
++    ${projRows}
++  </table>` : ""}
++
++  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · For informational purposes only. Projections are estimates only and not guaranteed.</div>
++</div>
++
++<!-- ════════════════════════════════════════════════════════
++     PAGE 4 · AI ANALYSIS
++     ════════════════════════════════════════════════════════ -->
++<div class="page">
++  <div class="rpt-header">
++    <div>
++      <div class="rpt-title">AI Investment Analysis</div>
++      <div class="rpt-sub">${address} · Powered by Metalyzi AI</div>
++    </div>
++    ${score !== null ? `<div style="text-align:center;padding:0 8px">${scoreRingSvg}<div style="font-size:9px;color:${scoreColor};font-weight:600">${scoreLabel}</div></div>` : ""}
+   </div>
++
++  ${aiStrengths ? `
++  <div class="ai-block">
++    <div class="ai-block-title">✅ Strengths</div>
++    <div class="ai-text">${aiStrengths}</div>
++  </div>` : ""}
++
++  ${aiRisks ? `
++  <div class="ai-block">
++    <div class="ai-block-title">⚠️ Risks &amp; Concerns</div>
++    <div class="ai-text">${aiRisks}</div>
++  </div>` : ""}
++
++  ${aiNextSteps ? `
++  <div class="ai-block">
++    <div class="ai-block-title">📋 Recommended Next Steps</div>
++    <div class="ai-text">${aiNextSteps}</div>
++  </div>` : ""}
++
++  <div class="sec-title">Full AI Analysis</div>
++  <div style="background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px">
++    <pre style="font-family:'Courier New',monospace;font-size:9.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#222">${aiText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre>
++  </div>
++
++  <div class="rpt-footer">This report was generated by Metalyzi (metalyzi.com) on ${date}. It is for informational purposes only. Always seek independent financial and legal advice before making any property investment decision. Past performance is not a reliable indicator of future results.</div>
++</div>
++
+ </body>
+ </html>`
+ 
+-    const win = window.open("", "_blank", "width=900,height=700")
++    const win = window.open("", "_blank", "width=1000,height=800")
+     if (!win) {
+       alert("Please allow pop-ups for this site to download the PDF.")
+       return
+     }
+     win.document.write(html)
+     win.document.close()
+-    win.onload = () => {
+-      win.print()
+-    }
++    win.onload = () => { win.print() }
+   }
+ 
+   return (
+-- 
+2.43.0
+
