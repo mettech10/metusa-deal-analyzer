@@ -508,7 +508,7 @@ export default function AnalysePage() {
     const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
 
     // Helper formatters
-    const £ = (n: number) => `£${Math.round(n).toLocaleString("en-GB")}`
+    const gbp = (n: number) => `£${Math.round(n).toLocaleString("en-GB")}`
     const pct = (n: number) => `${n.toFixed(2)}%`
     const na = (v: unknown) => (v !== undefined && v !== null && v !== 0 && v !== "" ? String(v) : "—")
 
@@ -550,17 +550,17 @@ export default function AnalysePage() {
     const projRows = res?.fiveYearProjection?.map(y =>
       `<tr>
         <td>Year ${y.year}</td>
-        <td>${£(y.propertyValue)}</td>
-        <td>${£(y.equity)}</td>
-        <td>${£(y.annualCashFlow)}</td>
-        <td>${£(y.cumulativeCashFlow)}</td>
-        <td>${£(y.totalReturn)}</td>
+        <td>${gbp(y.propertyValue)}</td>
+        <td>${gbp(y.equity)}</td>
+        <td>${gbp(y.annualCashFlow)}</td>
+        <td>${gbp(y.cumulativeCashFlow)}</td>
+        <td>${gbp(y.totalReturn)}</td>
       </tr>`
     ).join("") || ""
 
     // SDLT breakdown rows
     const sdltRows = res?.sdltBreakdown?.map(b =>
-      `<tr><td>${b.band}</td><td>${£(b.tax)}</td></tr>`
+      `<tr><td>${b.band}</td><td>${gbp(b.tax)}</td></tr>`
     ).join("") || ""
 
     // Score ring SVG (inline)
@@ -674,18 +674,18 @@ export default function AnalysePage() {
   <!-- Headline figures -->
   <div class="sec-title">Headline Deal Figures</div>
   <div class="figures-grid">
-    <div class="fig-card accent"><div class="fig-label">Purchase Price</div><div class="fig-value">${£(fd?.purchasePrice || 0)}</div></div>
-    <div class="fig-card"><div class="fig-label">Stamp Duty</div><div class="fig-value">${£(res?.sdltAmount || 0)}</div></div>
-    <div class="fig-card"><div class="fig-label">Legal &amp; Survey</div><div class="fig-value">${£((fd?.legalFees || 0) + (fd?.surveyCosts || 0))}</div></div>
-    <div class="fig-card"><div class="fig-label">Refurb Budget</div><div class="fig-value">${£(fd?.refurbishmentBudget || 0)}</div></div>
-    <div class="fig-card accent"><div class="fig-label">Total Money In</div><div class="fig-value">${£(res?.totalCapitalRequired || 0)}</div></div>
-    <div class="fig-card ${(res?.monthlyCashFlow || 0) >= 0 ? "green" : ""}"><div class="fig-label">Monthly Cashflow</div><div class="fig-value">${£(res?.monthlyCashFlow || 0)}</div></div>
-    <div class="fig-card green"><div class="fig-label">Annual Cashflow</div><div class="fig-value">${£(res?.annualCashFlow || 0)}</div></div>
+    <div class="fig-card accent"><div class="fig-label">Purchase Price</div><div class="fig-value">${gbp(fd?.purchasePrice || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Stamp Duty</div><div class="fig-value">${gbp(res?.sdltAmount || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Legal &amp; Survey</div><div class="fig-value">${gbp((fd?.legalFees || 0) + (fd?.surveyCosts || 0))}</div></div>
+    <div class="fig-card"><div class="fig-label">Refurb Budget</div><div class="fig-value">${gbp(fd?.refurbishmentBudget || 0)}</div></div>
+    <div class="fig-card accent"><div class="fig-label">Total Money In</div><div class="fig-value">${gbp(res?.totalCapitalRequired || 0)}</div></div>
+    <div class="fig-card ${(res?.monthlyCashFlow || 0) >= 0 ? "green" : ""}"><div class="fig-label">Monthly Cashflow</div><div class="fig-value">${gbp(res?.monthlyCashFlow || 0)}</div></div>
+    <div class="fig-card green"><div class="fig-label">Annual Cashflow</div><div class="fig-value">${gbp(res?.annualCashFlow || 0)}</div></div>
     <div class="fig-card ${(res?.grossYield || 0) >= 6 ? "green" : "amber"}"><div class="fig-label">Gross Yield</div><div class="fig-value">${pct(res?.grossYield || 0)}</div></div>
     <div class="fig-card"><div class="fig-label">Net Yield</div><div class="fig-value">${pct(res?.netYield || 0)}</div></div>
     <div class="fig-card ${(res?.cashOnCashReturn || 0) >= 10 ? "green" : ""}"><div class="fig-label">Cash-on-Cash ROI</div><div class="fig-value">${pct(res?.cashOnCashReturn || 0)}</div></div>
-    <div class="fig-card"><div class="fig-label">Monthly Income</div><div class="fig-value">${£(res?.monthlyIncome || 0)}</div></div>
-    <div class="fig-card"><div class="fig-label">Monthly Expenses</div><div class="fig-value">${£(res?.monthlyExpenses || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Monthly Income</div><div class="fig-value">${gbp(res?.monthlyIncome || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Monthly Expenses</div><div class="fig-value">${gbp(res?.monthlyExpenses || 0)}</div></div>
   </div>
 
   <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · metalyzi.com · For informational purposes only. Always seek professional financial and legal advice.</div>
@@ -709,27 +709,27 @@ export default function AnalysePage() {
       <div class="sec-title" style="margin-top:0">Purchase Costs</div>
       <table>
         <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
-        <tr><td>Purchase Price</td><td class="td-right">${£(fd?.purchasePrice || 0)}</td></tr>
-        <tr><td>Deposit (${fd?.depositPercentage || 25}%)</td><td class="td-right">${£(res?.depositAmount || 0)}</td></tr>
-        <tr><td>Mortgage Amount</td><td class="td-right">${£(res?.mortgageAmount || 0)}</td></tr>
-        <tr><td>Stamp Duty (SDLT)</td><td class="td-right">${£(res?.sdltAmount || 0)}</td></tr>
-        <tr><td>Legal Fees</td><td class="td-right">${£(fd?.legalFees || 0)}</td></tr>
-        <tr><td>Survey Costs</td><td class="td-right">${£(fd?.surveyCosts || 0)}</td></tr>
-        ${fd?.refurbishmentBudget ? `<tr><td>Refurbishment</td><td class="td-right">${£(fd.refurbishmentBudget)}</td></tr>` : ""}
-        ${fd?.investmentType === "brr" && fd?.arv ? `<tr><td>After Repair Value (ARV)</td><td class="td-right">${£(fd.arv)}</td></tr>` : ""}
-        <tr style="font-weight:700"><td><strong>Total Capital Required</strong></td><td class="td-right"><strong>${£(res?.totalCapitalRequired || 0)}</strong></td></tr>
+        <tr><td>Purchase Price</td><td class="td-right">${gbp(fd?.purchasePrice || 0)}</td></tr>
+        <tr><td>Deposit (${fd?.depositPercentage || 25}%)</td><td class="td-right">${gbp(res?.depositAmount || 0)}</td></tr>
+        <tr><td>Mortgage Amount</td><td class="td-right">${gbp(res?.mortgageAmount || 0)}</td></tr>
+        <tr><td>Stamp Duty (SDLT)</td><td class="td-right">${gbp(res?.sdltAmount || 0)}</td></tr>
+        <tr><td>Legal Fees</td><td class="td-right">${gbp(fd?.legalFees || 0)}</td></tr>
+        <tr><td>Survey Costs</td><td class="td-right">${gbp(fd?.surveyCosts || 0)}</td></tr>
+        ${fd?.refurbishmentBudget ? `<tr><td>Refurbishment</td><td class="td-right">${gbp(fd.refurbishmentBudget)}</td></tr>` : ""}
+        ${fd?.investmentType === "brr" && fd?.arv ? `<tr><td>After Repair Value (ARV)</td><td class="td-right">${gbp(fd.arv)}</td></tr>` : ""}
+        <tr style="font-weight:700"><td><strong>Total Capital Required</strong></td><td class="td-right"><strong>${gbp(res?.totalCapitalRequired || 0)}</strong></td></tr>
       </table>
 
       ${fd?.investmentType === "brr" && fd?.arv ? `
       <div class="sec-title">BRR — Money Left In</div>
       <table>
         <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
-        <tr><td>After Repair Value (ARV)</td><td class="td-right">${£(fd.arv)}</td></tr>
-        <tr><td>New Mortgage (75% ARV)</td><td class="td-right">${£(fd.arv * 0.75)}</td></tr>
-        <tr><td>Total Money In</td><td class="td-right">${£(res?.totalCapitalRequired || 0)}</td></tr>
-        <tr><td>Money Pulled Out</td><td class="td-right">${£(Math.max(0, fd.arv * 0.75 - (res?.totalCapitalRequired || 0)))}</td></tr>
-        <tr style="font-weight:700"><td><strong>Money Left In</strong></td><td class="td-right"><strong>${£(Math.max(0, (res?.totalCapitalRequired || 0) - fd.arv * 0.75))}</strong></td></tr>
-        <tr><td>Equity Created</td><td class="td-right">${£(Math.max(0, fd.arv - (res?.totalCapitalRequired || 0)))}</td></tr>
+        <tr><td>After Repair Value (ARV)</td><td class="td-right">${gbp(fd.arv)}</td></tr>
+        <tr><td>New Mortgage (75% ARV)</td><td class="td-right">${gbp(fd.arv * 0.75)}</td></tr>
+        <tr><td>Total Money In</td><td class="td-right">${gbp(res?.totalCapitalRequired || 0)}</td></tr>
+        <tr><td>Money Pulled Out</td><td class="td-right">${gbp(Math.max(0, fd.arv * 0.75 - (res?.totalCapitalRequired || 0)))}</td></tr>
+        <tr style="font-weight:700"><td><strong>Money Left In</strong></td><td class="td-right"><strong>${gbp(Math.max(0, (res?.totalCapitalRequired || 0) - fd.arv * 0.75))}</strong></td></tr>
+        <tr><td>Equity Created</td><td class="td-right">${gbp(Math.max(0, fd.arv - (res?.totalCapitalRequired || 0)))}</td></tr>
       </table>` : ""}
 
       ${fd?.investmentType === "hmo" && fd?.roomCount && fd?.avgRoomRate ? `
@@ -737,9 +737,9 @@ export default function AnalysePage() {
       <table>
         <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
         <tr><td>Number of Rooms</td><td class="td-right">${fd.roomCount}</td></tr>
-        <tr><td>Avg Room Rate</td><td class="td-right">${£(fd.avgRoomRate)}/month</td></tr>
-        <tr><td>Total HMO Income</td><td class="td-right">${£(fd.roomCount * fd.avgRoomRate)}/month</td></tr>
-        <tr><td>Annual HMO Income</td><td class="td-right">${£(fd.roomCount * fd.avgRoomRate * 12)}/year</td></tr>
+        <tr><td>Avg Room Rate</td><td class="td-right">${gbp(fd.avgRoomRate)}/month</td></tr>
+        <tr><td>Total HMO Income</td><td class="td-right">${gbp(fd.roomCount * fd.avgRoomRate)}/month</td></tr>
+        <tr><td>Annual HMO Income</td><td class="td-right">${gbp(fd.roomCount * fd.avgRoomRate * 12)}/year</td></tr>
       </table>` : ""}
     </div>
 
@@ -748,20 +748,20 @@ export default function AnalysePage() {
       <div class="sec-title" style="margin-top:0">Monthly P&amp;L</div>
       <table>
         <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
-        <tr><td>Rental Income</td><td class="td-right">${£(res?.monthlyIncome || 0)}</td></tr>
-        ${fd?.voidWeeks ? `<tr><td>Void Allowance (${fd.voidWeeks} wks)</td><td class="td-right" style="color:#dc2626">-${£(((fd.monthlyRent || 0) * fd.voidWeeks) / 52)}</td></tr>` : ""}
-        <tr><td style="border-top:1px solid #ddd">Mortgage Payment</td><td class="td-right" style="border-top:1px solid #ddd">-${£(res?.monthlyMortgagePayment || 0)}</td></tr>
-        ${fd?.managementFeePercent ? `<tr><td>Management (${fd.managementFeePercent}%)</td><td class="td-right">-${£((res?.monthlyIncome || 0) * (fd.managementFeePercent / 100))}</td></tr>` : ""}
-        ${fd?.insurance ? `<tr><td>Insurance</td><td class="td-right">-${£(fd.insurance / 12)}/mo</td></tr>` : ""}
-        ${fd?.maintenance ? `<tr><td>Maintenance</td><td class="td-right">-${£(fd.maintenance / 12)}/mo</td></tr>` : ""}
-        ${fd?.groundRent ? `<tr><td>Ground Rent</td><td class="td-right">-${£(fd.groundRent / 12)}/mo</td></tr>` : ""}
-        ${fd?.bills ? `<tr><td>Bills</td><td class="td-right">-${£(fd.bills / 12)}/mo</td></tr>` : ""}
-        <tr><td><strong>Total Expenses</strong></td><td class="td-right"><strong>-${£(res?.monthlyExpenses || 0)}</strong></td></tr>
+        <tr><td>Rental Income</td><td class="td-right">${gbp(res?.monthlyIncome || 0)}</td></tr>
+        ${fd?.voidWeeks ? `<tr><td>Void Allowance (${fd.voidWeeks} wks)</td><td class="td-right" style="color:#dc2626">-${gbp(((fd.monthlyRent || 0) * fd.voidWeeks) / 52)}</td></tr>` : ""}
+        <tr><td style="border-top:1px solid #ddd">Mortgage Payment</td><td class="td-right" style="border-top:1px solid #ddd">-${gbp(res?.monthlyMortgagePayment || 0)}</td></tr>
+        ${fd?.managementFeePercent ? `<tr><td>Management (${fd.managementFeePercent}%)</td><td class="td-right">-${gbp((res?.monthlyIncome || 0) * (fd.managementFeePercent / 100))}</td></tr>` : ""}
+        ${fd?.insurance ? `<tr><td>Insurance</td><td class="td-right">-${gbp(fd.insurance / 12)}/mo</td></tr>` : ""}
+        ${fd?.maintenance ? `<tr><td>Maintenance</td><td class="td-right">-${gbp(fd.maintenance / 12)}/mo</td></tr>` : ""}
+        ${fd?.groundRent ? `<tr><td>Ground Rent</td><td class="td-right">-${gbp(fd.groundRent / 12)}/mo</td></tr>` : ""}
+        ${fd?.bills ? `<tr><td>Bills</td><td class="td-right">-${gbp(fd.bills / 12)}/mo</td></tr>` : ""}
+        <tr><td><strong>Total Expenses</strong></td><td class="td-right"><strong>-${gbp(res?.monthlyExpenses || 0)}</strong></td></tr>
         <tr style="font-size:13px;font-weight:700;color:${(res?.monthlyCashFlow || 0) >= 0 ? "#16a34a" : "#dc2626"}">
           <td><strong>Net Monthly Cashflow</strong></td>
-          <td class="td-right"><strong>${£(res?.monthlyCashFlow || 0)}</strong></td>
+          <td class="td-right"><strong>${gbp(res?.monthlyCashFlow || 0)}</strong></td>
         </tr>
-        <tr style="font-weight:700"><td>Annual Cashflow</td><td class="td-right">${£(res?.annualCashFlow || 0)}</td></tr>
+        <tr style="font-weight:700"><td>Annual Cashflow</td><td class="td-right">${gbp(res?.annualCashFlow || 0)}</td></tr>
       </table>
 
       <div class="sec-title">Returns</div>
@@ -779,7 +779,7 @@ export default function AnalysePage() {
       <table>
         <tr><th>Band</th><th style="text-align:right">Tax</th></tr>
         ${sdltRows}
-        <tr style="font-weight:700"><td>Total SDLT</td><td class="td-right">${£(res?.sdltAmount || 0)}</td></tr>
+        <tr style="font-weight:700"><td>Total SDLT</td><td class="td-right">${gbp(res?.sdltAmount || 0)}</td></tr>
       </table>` : ""}
     </div>
   </div>
@@ -810,7 +810,7 @@ export default function AnalysePage() {
     <tr><td>Condition</td><td>${condition}</td></tr>
     <tr><td>Investment Strategy</td><td>${strategy}</td></tr>
     <tr><td>Purchase Type</td><td>${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</td></tr>
-    ${fd?.purchaseType !== "r2sa" ? `<tr><td>Additional Property Surcharge</td><td>${fd?.isAdditionalProperty ? "Yes (5% applied)" : "No"}</td></tr>` : ""}
+    ${fd?.investmentType !== "r2sa" ? `<tr><td>Additional Property Surcharge</td><td>${fd?.isAdditionalProperty ? "Yes (5% applied)" : "No"}</td></tr>` : ""}
   </table>
 
   <!-- Refurb estimates -->
@@ -819,22 +819,22 @@ export default function AnalysePage() {
     <tr><th>Refurb Level</th><th style="text-align:right">Estimated Cost</th><th>Description</th></tr>
     <tr>
       <td><strong>Light (Cosmetic)</strong></td>
-      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqm ? £(fd.sqm * 40) : "—"}</td>
+      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 40) : "—"}</td>
       <td style="color:#555;font-size:9px">Redecorate, carpets, minor fixtures</td>
     </tr>
     <tr>
       <td><strong>Medium (Standard)</strong></td>
-      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqm ? £(fd.sqm * 100) : "—"}</td>
+      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 100) : "—"}</td>
       <td style="color:#555;font-size:9px">New kitchen, bathroom, replastering</td>
     </tr>
     <tr>
       <td><strong>Heavy (Full Refurb)</strong></td>
-      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqm ? £(fd.sqm * 185) : "—"}</td>
+      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 185) : "—"}</td>
       <td style="color:#555;font-size:9px">Rewire, new heating, full internal strip-out</td>
     </tr>
     <tr>
       <td><strong>Budgeted Refurb</strong></td>
-      <td class="td-right" style="color:#4f46e5;font-weight:700">${£(fd?.refurbishmentBudget || 0)}</td>
+      <td class="td-right" style="color:#4f46e5;font-weight:700">${gbp(fd?.refurbishmentBudget || 0)}</td>
       <td style="color:#555;font-size:9px">As entered in deal analysis</td>
     </tr>
   </table>
