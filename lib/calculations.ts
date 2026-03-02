@@ -426,6 +426,26 @@ export function formatPercent(value: number): string {
 }
 
 /**
+ * Calculate deal score from cash-on-cash ROI (%).
+ *
+ * Bands (linear interpolation within each):
+ *   ROI ≥ 20%        → 100
+ *   15% ≤ ROI < 20%  → 75 – 100
+ *   10% ≤ ROI < 15%  → 50 – 75
+ *   5%  ≤ ROI < 10%  → 25 – 50
+ *   0%  ≤ ROI < 5%   → 0  – 25
+ *   ROI < 0%         → 0
+ */
+export function calculateDealScore(cashOnCashReturn: number): number {
+  if (cashOnCashReturn >= 20) return 100
+  if (cashOnCashReturn >= 15) return Math.round(75 + ((cashOnCashReturn - 15) / 5) * 25)
+  if (cashOnCashReturn >= 10) return Math.round(50 + ((cashOnCashReturn - 10) / 5) * 25)
+  if (cashOnCashReturn >= 5)  return Math.round(25 + ((cashOnCashReturn - 5)  / 5) * 25)
+  if (cashOnCashReturn >= 0)  return Math.round((cashOnCashReturn / 5) * 25)
+  return 0
+}
+
+/**
  * Estimate refurbishment cost based on floor area and condition.
  * Rates are per sq metre, adjusted for London postcodes and property type.
  *
