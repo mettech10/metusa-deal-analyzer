@@ -95,7 +95,12 @@ function MetricCard({
 }
 
 function parseAIAnalysis(text: string) {
-  const dealScoreMatch = text.match(/Deal Score:\s*(\d+)/i)
+  // Match all score formats the backend uses:
+  // "Deal Score: 77", "⭐ SCORE:  77/100", "SCORE: 77"
+  const dealScoreMatch =
+    text.match(/Deal Score:\s*(\d+)/i) ||
+    text.match(/⭐\s*SCORE:\s*(\d+)/i) ||
+    text.match(/SCORE:\s*(\d+)/i)
   const score = dealScoreMatch ? parseInt(dealScoreMatch[1], 10) : null
 
   const sections: { heading: string; content: string }[] = []
@@ -135,7 +140,8 @@ export function AnalysisResults({
   aiLoading,
 }: AnalysisResultsProps) {
   const parsedAI = parseAIAnalysis(aiText)
-  const dealScore = calculateDealScore(results.cashOnCashReturn)
+  // Use the AI score when available; fall back to ROI-based score while AI is loading
+  const dealScore = parsedAI.score ?? calculateDealScore(results.cashOnCashReturn)
 
   // Cash flow chart data
   const cashFlowData = [

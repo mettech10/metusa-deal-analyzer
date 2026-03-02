@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { MoreVertical, Trash2, TrendingUp, Calendar, MapPin } from "lucide-react"
+import { MoreVertical, Trash2, TrendingUp, Calendar, MapPin, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import type { PropertyFormData, CalculationResults } from "@/lib/types"
 
 interface SavedAnalysis {
   id: string
@@ -21,6 +22,10 @@ interface SavedAnalysis {
   monthly_cashflow: number | null
   annual_cashflow: number | null
   gross_yield: number | null
+}
+
+interface RecentDealsProps {
+  onLoad?: (formData: PropertyFormData, results: CalculationResults, aiText: string) => void
 }
 
 const strategyLabel: Record<string, string> = {
@@ -54,16 +59,16 @@ function formatCurrency(n: number | null) {
   return `£${Math.round(n).toLocaleString("en-GB")}`
 }
 
-export function RecentDeals() {
+export function RecentDeals({ onLoad }: RecentDealsProps) {
   const [analyses, setAnalyses] = useState<SavedAnalysis[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [loadingId, setLoadingId] = useState<string | null>(null)
 
   const fetchAnalyses = useCallback(async () => {
     try {
       const res = await fetch("/api/analyses")
       if (!res.ok) {
-        // Not logged in or no analyses — silently hide the section
         setAnalyses([])
         return
       }
@@ -80,7 +85,8 @@ export function RecentDeals() {
     fetchAnalyses()
   }, [fetchAnalyses])
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
     setDeletingId(id)
     try {
       const res = await fetch(`/api/analyses/${id}`, { method: "DELETE" })
@@ -89,6 +95,23 @@ export function RecentDeals() {
       }
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const handleLoad = async (id: string) => {
+    if (!onLoad) return
+    setLoadingId(id)
+    try {
+      const res = await fetch(`/api/analyses/${id}`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.form_data && data.results) {
+        onLoad(data.form_data as PropertyFormData, data.results as CalculationResults, data.ai_text || "")
+      }
+    } catch {
+      // silently skip
+    } finally {
+      setLoadingId(null)
     }
   }
 
@@ -119,7 +142,8 @@ export function RecentDeals() {
         {analyses.map((deal) => (
           <div
             key={deal.id}
-            className="group relative rounded-xl border border-border/50 bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
+            onClick={() => handleLoad(deal.id)}
+            className={`group relative rounded-xl border border-border/50 bg-card p-4 shadow-sm transition-all hover:shadow-md hover:border-primary/30 ${onLoad ? "cursor-pointer" : ""} ${loadingId === deal.id ? "opacity-60" : ""}`}
           >
             {/* Top row: strategy badge + three-dot menu */}
             <div className="mb-2 flex items-start justify-between gap-2">
@@ -131,27 +155,33 @@ export function RecentDeals() {
                 {strategyLabel[deal.investment_type] || deal.investment_type.toUpperCase()}
               </span>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                    disabled={deletingId === deal.id}
-                  >
-                    <MoreVertical className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onClick={() => handleDelete(deal.id)}
-                  >
-                    <Trash2 className="mr-2 size-3.5" />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex items-center gap-1">
+                {onLoad && (
+                  <ExternalLink className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      disabled={deletingId === deal.id}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={(e) => handleDelete(e, deal.id)}
+                    >
+                      <Trash2 className="mr-2 size-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
             {/* Address */}

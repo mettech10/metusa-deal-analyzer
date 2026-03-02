@@ -20,7 +20,8 @@ import {
 } from "lucide-react"
 
 // Helper to format analysis results from backend
-function formatAnalysisResults(r: Record<string, any>): string {
+// overridePostcode: use the user's actual form postcode instead of any AI-hallucinated one
+function formatAnalysisResults(r: Record<string, any>, overridePostcode?: string): string {
   const verdict = r.verdict || 'N/A'
   const score = r.deal_score || 0
   const label = r.deal_score_label || 'N/A'
@@ -46,7 +47,7 @@ function formatAnalysisResults(r: Record<string, any>): string {
   formatted += `📍 PROPERTY\n`
   formatted += `─`.repeat(55) + `\n`
   formatted += `  Address: ${r.address || 'N/A'}\n`
-  formatted += `  Postcode: ${r.postcode || 'N/A'}\n`
+  formatted += `  Postcode: ${overridePostcode || r.postcode || 'N/A'}\n`
   formatted += `  Council: ${r.location?.council || 'Unknown'}\n`
   formatted += `  Purchase Price: £${r.purchase_price || 'N/A'}\n\n`
   
@@ -287,8 +288,9 @@ export default function AnalysePage() {
             const parsed = JSON.parse(analysis)
             if (parsed.results) {
               parsedResults = parsed.results
-              // Format for text display
-              analysis = formatAnalysisResults(parsed.results)
+              // Format for text display; pass user's postcode so AI can't override it
+              const userPostcode = (body.propertyData as Record<string, any>)?.postcode as string | undefined
+              analysis = formatAnalysisResults(parsed.results, userPostcode)
             } else if (parsed.success && parsed.message) {
               analysis = parsed.message
             }
@@ -500,6 +502,19 @@ export default function AnalysePage() {
 
   const hasResults = (results && formData) || aiText
   const isProcessing = isLoading || aiLoading
+
+  // Restore a saved analysis from the Recent Deals panel
+  const handleLoadSavedDeal = useCallback(
+    (savedFormData: PropertyFormData, savedResults: CalculationResults, savedAiText: string) => {
+      setFormData(savedFormData)
+      setResults(savedResults)
+      setAiText(savedAiText)
+      setError(null)
+      setInputMode("manual")
+      savedKeyRef.current = null // allow re-save if user triggers a new analysis
+    },
+    []
+  )
 
   const resetAll = () => {
     setResults(null)
@@ -880,7 +895,7 @@ export default function AnalysePage() {
       <div class="rpt-title">AI Investment Analysis</div>
       <div class="rpt-sub">${address} · Powered by Metalyzi AI</div>
     </div>
-    ${score !== null ? `<div style="text-align:center;padding:0 8px">${scoreRingSvg}<div style="font-size:9px;color:${scoreColor};font-weight:600">${scoreLabel}</div></div>` : ""}
+    <span class="rpt-badge">Metalyzi</span>
   </div>
 
   ${aiStrengths ? `
@@ -959,7 +974,7 @@ export default function AnalysePage() {
         {/* Recent Deals — shown only when not viewing a current analysis */}
         {!hasResults && !isProcessing && (
           <div className="mb-8">
-            <RecentDeals key={recentDealsVersion} />
+            <RecentDeals key={recentDealsVersion} onLoad={handleLoadSavedDeal} />
           </div>
         )}
 
