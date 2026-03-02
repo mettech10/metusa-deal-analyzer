@@ -1,6 +1,23 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { PropertyForm } from "@/components/analyse/property-form"
+import { AnalysisResults } from "@/components/analyse/analysis-results"
+import { RecentDeals } from "@/components/analyse/recent-deals"
+import { calculateAll, calculateDealScore } from "@/lib/calculations"
+import type { PropertyFormData, CalculationResults } from "@/lib/types"
+import {
+  BarChart3,
+  ArrowLeft,
+  Link2,
+  ClipboardEdit,
+  Loader2,
+  ExternalLink,
+  FileDown,
+} from "lucide-react"
 
 // Helper to format analysis results from backend
 function formatAnalysisResults(r: Record<string, any>): string {
@@ -154,56 +171,48 @@ function formatAnalysisResults(r: Record<string, any>): string {
     formatted += `\n`
   }
   
-  // STRENGTHS
+  // STRENGTHS — handle both new string[] arrays and legacy '<br>' strings
   if (r.ai_strengths) {
     formatted += `✅ STRENGTHS\n`
     formatted += `─`.repeat(55) + `\n`
-    const strengths = r.ai_strengths.split('<br>').filter((s: string) => s.trim())
-    strengths.slice(0, 3).forEach((s: string) => {
-      formatted += `  • ${s.trim().substring(0, 60)}\n`
+    const strengths: string[] = Array.isArray(r.ai_strengths)
+      ? r.ai_strengths
+      : String(r.ai_strengths).split('<br>').filter((s: string) => s.trim())
+    strengths.slice(0, 4).forEach((s: string) => {
+      formatted += `  • ${s.replace(/^[•\-]\s*/, '').trim().substring(0, 80)}\n`
     })
     formatted += `\n`
   }
-  
-  // RISKS
+
+  // RISKS — handle both new string[] arrays and legacy '<br>' strings
   if (r.ai_risks) {
     formatted += `⚠️  RISKS\n`
     formatted += `─`.repeat(55) + `\n`
-    const risks = r.ai_risks.split('<br>').filter((s: string) => s.trim())
-    risks.slice(0, 3).forEach((s: string) => {
-      formatted += `  • ${s.trim().substring(0, 60)}\n`
+    const risks: string[] = Array.isArray(r.ai_risks)
+      ? r.ai_risks
+      : String(r.ai_risks).split('<br>').filter((s: string) => s.trim())
+    risks.slice(0, 4).forEach((s: string) => {
+      formatted += `  • ${s.replace(/^[•\-]\s*/, '').trim().substring(0, 80)}\n`
     })
     formatted += `\n`
   }
-  
-  // NEXT STEPS
-  if (r.next_steps && r.next_steps.length > 0) {
+
+  // NEXT STEPS — ai_next_steps is now an array; also check legacy next_steps
+  const nextSteps: string[] = Array.isArray(r.ai_next_steps)
+    ? r.ai_next_steps
+    : Array.isArray(r.next_steps)
+      ? r.next_steps
+      : []
+  if (nextSteps.length > 0) {
     formatted += `📋 NEXT STEPS\n`
     formatted += `─`.repeat(55) + `\n`
-    r.next_steps.slice(0, 5).forEach((step: string) => {
+    nextSteps.slice(0, 5).forEach((step: string) => {
       formatted += `  → ${step}\n`
     })
   }
   
   return formatted
 }
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { PropertyForm } from "@/components/analyse/property-form"
-import { AnalysisResults } from "@/components/analyse/analysis-results"
-import { RecentDeals } from "@/components/analyse/recent-deals"
-import { calculateAll } from "@/lib/calculations"
-import type { PropertyFormData, CalculationResults } from "@/lib/types"
-import {
-  BarChart3,
-  ArrowLeft,
-  Link2,
-  ClipboardEdit,
-  Loader2,
-  ExternalLink,
-  FileDown,
-} from "lucide-react"
 
 type InputMode = "url" | "manual"
 
@@ -234,6 +243,11 @@ export default function AnalysePage() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => null)
+          if (errData?.code === "subscription_required") {
+            throw new Error(
+              "🔒 An active subscription is required to run analyses. Please upgrade your plan."
+            )
+          }
           throw new Error(
             errData?.error || "Analysis failed. Please try again."
           )
@@ -524,11 +538,10 @@ export default function AnalysePage() {
     const condition = conditionLabels[fd?.condition || "good"] || "Good"
     const propType = (fd?.propertyType || "house").charAt(0).toUpperCase() + (fd?.propertyType || "house").slice(1)
 
-    // Extract AI score from aiText
-    const scoreMatch = aiText.match(/SCORE:\s*(\d+)/i) || aiText.match(/Deal Score:\s*(\d+)/i)
-    const score = scoreMatch ? parseInt(scoreMatch[1]) : null
-    const scoreColor = score !== null ? (score >= 75 ? "#16a34a" : score >= 50 ? "#0ea5e9" : score >= 25 ? "#f59e0b" : "#dc2626") : "#999"
-    const scoreLabel = score !== null ? (score >= 80 ? "Excellent Deal" : score >= 65 ? "Good Deal" : score >= 50 ? "Fair Deal" : score >= 35 ? "Below Average" : "Poor Deal") : ""
+    // ROI-based deal score (matches the on-screen scoring formula)
+    const score = calculateDealScore(results?.cashOnCashReturn ?? 0)
+    const scoreColor = score >= 75 ? "#16a34a" : score >= 50 ? "#0ea5e9" : score >= 25 ? "#f59e0b" : "#dc2626"
+    const scoreLabel = score >= 100 ? "Excellent Deal" : score >= 75 ? "Good Deal" : score >= 50 ? "Fair Deal" : score >= 25 ? "Below Average" : "Poor Deal"
 
     // Extract AI text sections for summary/strengths/risks
     const extractSection = (label: string) => {
@@ -588,8 +601,8 @@ export default function AnalysePage() {
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a1a2e;background:#fff}
-  .page{padding:28px 32px;min-height:297mm}
-  .page+.page{page-break-before:always}
+  .page{padding:28px 32px;page-break-after:always;break-after:page}
+  .page:last-child{page-break-after:auto;break-after:auto}
   /* ── HEADER ── */
   .rpt-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a2e;padding-bottom:12px;margin-bottom:18px}
   .rpt-title{font-size:20px;font-weight:700;letter-spacing:.3px}
@@ -627,7 +640,7 @@ export default function AnalysePage() {
   .score-banner{display:flex;align-items:center;gap:20px;background:#f8f8fc;border:1px solid #e8e8f0;border-radius:8px;padding:14px 16px;margin-bottom:14px}
   /* ── FOOTER ── */
   .rpt-footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-size:8px;color:#aaa;text-align:center}
-  @media print{.page{padding:16px 20px}.page+.page{page-break-before:always}}
+  @media print{.page{padding:16px 20px;page-break-after:always;break-after:page}.page:last-child{page-break-after:auto;break-after:auto}}
 </style>
 </head>
 <body>

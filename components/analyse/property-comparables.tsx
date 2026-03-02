@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCurrency } from "@/lib/calculations"
-import { Home, PoundSterling, TrendingUp, MapPin, AlertCircle } from "lucide-react"
+import { Home, PoundSterling, TrendingUp, MapPin } from "lucide-react"
 
 interface ComparableSale {
   price: number
@@ -114,17 +114,55 @@ export function PropertyComparables({ postcode, bedrooms, currentPrice }: Proper
 
   if (error || !data) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Market Comparables</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <AlertCircle className="size-4" />
-            {error || "No comparables available"}
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Sold Comparables placeholder */}
+        <Card className="border-dashed">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Home className="size-4 text-primary" />
+              <CardTitle className="text-base">Sold Comparables</CardTitle>
+            </div>
+            <CardDescription>Recent sales from Land Registry</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <div className="flex size-10 items-center justify-center rounded-full bg-primary/10">
+                <Home className="size-5 text-primary/60" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Coming Soon</p>
+                <p className="text-xs text-muted-foreground max-w-[220px]">
+                  Sold price data from Land Registry will appear here once the market data API is connected.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Rental Comparables placeholder */}
+        <Card className="border-dashed">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <PoundSterling className="size-4 text-primary" />
+              <CardTitle className="text-base">Rental Comparables</CardTitle>
+            </div>
+            <CardDescription>Market rent for {bedrooms} bed properties</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <div className="flex size-10 items-center justify-center rounded-full bg-primary/10">
+                <PoundSterling className="size-5 text-primary/60" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Coming Soon</p>
+                <p className="text-xs text-muted-foreground max-w-[220px]">
+                  Live rental estimates for {postcode} will appear here once the rental data API is connected.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 

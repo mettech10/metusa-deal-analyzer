@@ -44,6 +44,9 @@ export interface PropertyFormData {
   saMonthlySARevenue?: number // expected gross monthly SA revenue
   saSetupCosts?: number       // one-off setup / furnishing costs
 
+  // Projections — user-supplied assumptions
+  capitalGrowthRate?: number  // annual property appreciation %, default 4
+
   // Rental Income
   monthlyRent: number
   annualRentIncrease: number

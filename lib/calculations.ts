@@ -132,8 +132,10 @@ export function calculateBridgingLoan(
   // Total to repay
   const totalRepayment = loanAmount + (interestRolledUp ? totalInterest : 0) + exitFee
   
-  // Calculate approximate APR
-  const apr = Math.round((monthlyRate * 12 + (arrangementFeePercent + exitFeePercent) / termMonths * 12) * 100) / 100
+  // True APR: compound monthly rate → effective annual + fee drag (matches Flask backend)
+  const effectiveAnnual = (Math.pow(1 + monthlyRate / 100, 12) - 1) * 100
+  const feeDrag = (arrangementFeePercent + exitFeePercent) / Math.max(termMonths / 12, 0.083)
+  const apr = Math.round((effectiveAnnual + feeDrag) * 100) / 100
   
   return {
     monthlyInterest,
@@ -373,13 +375,14 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
       ? Math.round((annualCashFlow / totalCapitalRequired) * 10000) / 100
       : 0
 
-  // 5-year projection
+  // 5-year projection — use user-supplied capitalGrowthRate (default 4%, clamped 0–30%)
+  const capitalGrowthRate = Math.min(Math.max(data.capitalGrowthRate ?? 4, 0), 30)
   const fiveYearProjection = calculateProjection(
     data.purchasePrice,
     annualRent,
     annualCashFlow,
     mortgageAmount,
-    3,
+    capitalGrowthRate,
     data.annualRentIncrease
   )
 
@@ -423,6 +426,26 @@ export function formatCurrency(value: number): string {
  */
 export function formatPercent(value: number): string {
   return `${value.toFixed(2)}%`
+}
+
+/**
+ * Calculate deal score from cash-on-cash ROI (%).
+ *
+ * Bands (linear interpolation within each):
+ *   ROI ≥ 20%        → 100
+ *   15% ≤ ROI < 20%  → 75 – 100
+ *   10% ≤ ROI < 15%  → 50 – 75
+ *   5%  ≤ ROI < 10%  → 25 – 50
+ *   0%  ≤ ROI < 5%   → 0  – 25
+ *   ROI < 0%         → 0
+ */
+export function calculateDealScore(cashOnCashReturn: number): number {
+  if (cashOnCashReturn >= 20) return 100
+  if (cashOnCashReturn >= 15) return Math.round(75 + ((cashOnCashReturn - 15) / 5) * 25)
+  if (cashOnCashReturn >= 10) return Math.round(50 + ((cashOnCashReturn - 10) / 5) * 25)
+  if (cashOnCashReturn >= 5)  return Math.round(25 + ((cashOnCashReturn - 5)  / 5) * 25)
+  if (cashOnCashReturn >= 0)  return Math.round((cashOnCashReturn / 5) * 25)
+  return 0
 }
 
 /**

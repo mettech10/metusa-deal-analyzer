@@ -28,7 +28,7 @@ import {
   Line,
 } from "recharts"
 import type { PropertyFormData, CalculationResults } from "@/lib/types"
-import { formatCurrency, formatPercent } from "@/lib/calculations"
+import { formatCurrency, formatPercent, calculateDealScore } from "@/lib/calculations"
 import {
   TrendingUp,
   TrendingDown,
@@ -135,6 +135,7 @@ export function AnalysisResults({
   aiLoading,
 }: AnalysisResultsProps) {
   const parsedAI = parseAIAnalysis(aiText)
+  const dealScore = calculateDealScore(results.cashOnCashReturn)
 
   // Cash flow chart data
   const cashFlowData = [
@@ -167,12 +168,10 @@ export function AnalysisResults({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Deal Score — top centre, visible immediately */}
-      {parsedAI.score !== null && (
-        <div className="flex flex-col items-center gap-1 py-4">
-          <DealScore score={parsedAI.score} />
-        </div>
-      )}
+      {/* Deal Score — ROI-based, visible immediately (no AI wait) */}
+      <div className="flex flex-col items-center gap-1 py-4">
+        <DealScore score={dealScore} />
+      </div>
 
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -322,7 +321,7 @@ export function AnalysisResults({
             <CardHeader>
               <CardTitle className="text-base">5-Year Projection</CardTitle>
               <CardDescription>
-                Assuming 3% capital growth and {data.annualRentIncrease}% rent
+                Assuming {data.capitalGrowthRate ?? 4}% capital growth and {data.annualRentIncrease}% rent
                 increase
               </CardDescription>
             </CardHeader>

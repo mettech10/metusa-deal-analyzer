@@ -31,10 +31,12 @@ async function sendToFlask(
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error")
       console.error("[v0] FLASK PROXY: Error response body:", errText)
-      return Response.json(
-        { error: `Backend error (${res.status}): ${errText}` },
-        { status: res.status }
-      )
+      // Parse structured errors from Flask (e.g. subscription gate)
+      let errJson: Record<string, string> | null = null
+      try { errJson = JSON.parse(errText) } catch { /* ignore */ }
+      const code    = errJson?.code    || null
+      const message = errJson?.message || `Backend error (${res.status})`
+      return Response.json({ error: message, code }, { status: res.status })
     }
 
     return res
@@ -222,6 +224,8 @@ export async function POST(req: Request) {
       // R2SA
       saMonthlySARevenue: Number(propertyData.saMonthlySARevenue) || 0,
       saSetupCosts: Number(propertyData.saSetupCosts) || 5000,
+      // Projection assumption
+      capitalGrowthRate: Number(propertyData.capitalGrowthRate) || 4,
     }
     console.log("[v0] FLASK PROXY: Sending flattened payload:", aiPayload)
     const aiRes = await sendToFlask("/ai-analyze", aiPayload)

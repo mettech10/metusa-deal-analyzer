@@ -49,6 +49,7 @@ const schema = z.object({
   // R2SA
   saMonthlySARevenue: z.coerce.number().min(0).optional(),
   saSetupCosts: z.coerce.number().min(0).optional(),
+  capitalGrowthRate: z.coerce.number().min(0).max(30).optional(),
   monthlyRent: z.coerce.number().min(0),
   annualRentIncrease: z.coerce.number().min(0).max(20),
   voidWeeks: z.coerce.number().min(0).max(52),
@@ -112,6 +113,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     bridgingTermMonths: 12,
     bridgingArrangementFee: 1.0,
     bridgingExitFee: 0.5,
+    capitalGrowthRate: 4,
     arv: 0,
     roomCount: 0,
     avgRoomRate: 0,
@@ -398,6 +400,23 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                 </FormField>
               </>
             )}
+            {/* Capital Growth — visible for all non-R2SA types */}
+            <FormField
+              label="Capital Growth (annual)"
+              hint="Used in 5-year projection (default 4%)"
+            >
+              <div className="relative">
+                <Input
+                  type="number"
+                  step="0.5"
+                  className="pr-7"
+                  placeholder="4"
+                  {...register("capitalGrowthRate")}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+              </div>
+            </FormField>
+
             {/* Bridging Loan Detail Fields */}
             {isBridging && (
               <>
