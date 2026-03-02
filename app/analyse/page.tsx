@@ -1,6 +1,23 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { PropertyForm } from "@/components/analyse/property-form"
+import { AnalysisResults } from "@/components/analyse/analysis-results"
+import { RecentDeals } from "@/components/analyse/recent-deals"
+import { calculateAll, calculateDealScore } from "@/lib/calculations"
+import type { PropertyFormData, CalculationResults } from "@/lib/types"
+import {
+  BarChart3,
+  ArrowLeft,
+  Link2,
+  ClipboardEdit,
+  Loader2,
+  ExternalLink,
+  FileDown,
+} from "lucide-react"
 
 // Helper to format analysis results from backend
 function formatAnalysisResults(r: Record<string, any>): string {
@@ -187,23 +204,6 @@ function formatAnalysisResults(r: Record<string, any>): string {
   
   return formatted
 }
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { PropertyForm } from "@/components/analyse/property-form"
-import { AnalysisResults } from "@/components/analyse/analysis-results"
-import { RecentDeals } from "@/components/analyse/recent-deals"
-import { calculateAll, calculateDealScore } from "@/lib/calculations"
-import type { PropertyFormData, CalculationResults } from "@/lib/types"
-import {
-  BarChart3,
-  ArrowLeft,
-  Link2,
-  ClipboardEdit,
-  Loader2,
-  ExternalLink,
-  FileDown,
-} from "lucide-react"
 
 type InputMode = "url" | "manual"
 
