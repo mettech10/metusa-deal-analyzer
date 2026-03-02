@@ -2,10 +2,14 @@ services:
   - type: web
     name: metusa-deal-analyzer
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    plan: free
+    buildCommand: apt-get install -y wkhtmltopdf && pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: "3.11.0"
       - key: FLASK_ENV
         value: production
+      - key: FLASK_DEBUG
+        value: "false"

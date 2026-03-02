@@ -346,7 +346,76 @@
         .projection-table tr:last-child td { border-bottom: none; }
         .projection-table tr:nth-child(even) td { background: var(--bg); }
 
-        .pdf-btn-row { display: flex; justify-content: flex-end; margin-top: 16px; }
+        .pdf-btn-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+        /* Saved Analyses */
+        .saved-panel {
+            background: var(--bg-white);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .saved-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .saved-panel-header:hover { background: var(--bg); }
+        .saved-panel-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .saved-count {
+            background: var(--accent);
+            color: var(--primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+        }
+        .saved-panel-body { display: none; border-top: 1px solid var(--border); }
+        .saved-panel-body.open { display: block; }
+        .saved-list { padding: 12px; }
+        .saved-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .saved-item:hover { border-color: var(--accent); background: var(--bg); }
+        .saved-item-info { flex: 1; min-width: 0; }
+        .saved-item-address { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .saved-item-meta { font-size: 0.8rem; color: var(--text-light); margin-top: 2px; }
+        .saved-item-verdict { font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+        .saved-item-verdict.PROCEED { background: #d4edda; color: #155724; }
+        .saved-item-verdict.REVIEW  { background: #fff3cd; color: #856404; }
+        .saved-item-verdict.AVOID   { background: #f8d7da; color: #721c24; }
+        .saved-delete { background: none; border: none; cursor: pointer; color: var(--text-light); font-size: 1.1rem; padding: 4px; line-height: 1; }
+        .saved-delete:hover { color: var(--red); }
+        .saved-empty { text-align: center; padding: 24px; color: var(--text-light); font-size: 0.9rem; }
+
+        /* Crime data */
+        .crime-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
+        .crime-card { background: var(--bg); border-radius: 10px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .crime-card-num { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
+        .crime-card-label { font-size: 0.75rem; color: var(--text-light); margin-top: 4px; }
+        .crime-level { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
+        .crime-level-low  { background: #d4edda; color: #155724; }
+        .crime-level-med  { background: #fff3cd; color: #856404; }
+        .crime-level-high { background: #f8d7da; color: #721c24; }
 
         /* Loading overlay */
         .loading-overlay {
@@ -406,6 +475,20 @@
 </div>
 
 <div class="page-wrapper">
+
+    <!-- Saved Analyses -->
+    <div class="saved-panel" id="savedPanel">
+        <div class="saved-panel-header" onclick="toggleSavedPanel()">
+            <div class="saved-panel-title">
+                📁 My Saved Analyses
+                <span class="saved-count" id="savedCount">0</span>
+            </div>
+            <span id="savedToggleArrow" style="color:var(--text-light);font-size:0.85rem">▼</span>
+        </div>
+        <div class="saved-panel-body" id="savedPanelBody">
+            <div class="saved-list" id="savedList"></div>
+        </div>
+    </div>
 
     <!-- URL Loader -->
     <div class="card">
@@ -663,6 +746,12 @@
                 <div class="ai-section-title">📍 Area Assessment</div>
                 <div id="areaText" class="ai-text"></div>
             </div>
+            <!-- Crime data (loaded async) -->
+            <div id="crimeSection" style="display:none;margin-top:20px">
+                <div class="ai-section-title">🚔 Crime Statistics <span style="font-size:0.75rem;font-weight:400;color:var(--text-light)">(Source: data.police.uk)</span></div>
+                <div id="crimeLevel"></div>
+                <div class="crime-grid" id="crimeGrid"></div>
+            </div>
         </div>
 
         <!-- Next Steps -->
@@ -688,8 +777,10 @@
             </table>
         </div>
 
-        <!-- Download -->
+        <!-- Download + Save + Share -->
         <div class="pdf-btn-row">
+            <button class="btn btn-outline" onclick="saveAnalysis()" id="saveBtn">💾 Save Analysis</button>
+            <button class="btn btn-outline" onclick="shareAnalysis()" id="shareBtn">🔗 Share</button>
             <button class="btn btn-outline" onclick="downloadPDF()">📄 Download PDF Report</button>
         </div>
 
@@ -700,6 +791,8 @@
 <script>
     // ── State ──────────────────────────────────────────────────────────────
     let lastFormData = null;
+    let lastResults  = null;
+    const STORAGE_KEY = 'metusaSavedAnalyses';
 
     // ── On page load ───────────────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
@@ -713,6 +806,7 @@
         document.getElementById('dealType').addEventListener('change', updateFormFields);
         document.getElementById('purchaseType').addEventListener('change', updateFormFields);
         updateFormFields(); // set correct initial state
+        renderSavedList();
     });
 
     // ── Dynamic field visibility ───────────────────────────────────────────
@@ -891,7 +985,10 @@
             const json = await resp.json();
 
             if (json.success) {
+                lastResults = json.results;
                 renderResults(json.results);
+                // Load crime data async after results shown
+                if (data.postcode) loadCrimeData(data.postcode);
             } else {
                 alert('Analysis failed: ' + (json.message || 'Unknown error'));
             }
@@ -1097,6 +1194,184 @@
     }
     function hideLoading() {
         document.getElementById('loadingOverlay').classList.remove('active');
+    }
+
+    // ── Save Analysis ───────────────────────────────────────────────────────
+    function saveAnalysis() {
+        if (!lastFormData || !lastResults) return;
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const entry = {
+            id: Date.now(),
+            date: new Date().toISOString(),
+            address: lastFormData.address || lastFormData.postcode || 'Unknown',
+            postcode: lastFormData.postcode || '',
+            dealType: lastResults.deal_type || lastFormData.dealType || 'BTL',
+            verdict: lastResults.verdict || 'REVIEW',
+            score: lastResults.deal_score || 0,
+            grossYield: lastResults.gross_yield,
+            cashflow: lastResults.monthly_cashflow,
+            purchasePrice: lastFormData.purchasePrice,
+            formData: lastFormData,
+            results: lastResults,
+        };
+        saved.unshift(entry);
+        // Keep max 20 saved analyses
+        if (saved.length > 20) saved.pop();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        renderSavedList();
+        const btn = document.getElementById('saveBtn');
+        btn.textContent = '✅ Saved!';
+        setTimeout(() => { btn.innerHTML = '💾 Save Analysis'; }, 2000);
+    }
+
+    // ── Load saved analyses list ────────────────────────────────────────────
+    function renderSavedList() {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const count = document.getElementById('savedCount');
+        const list  = document.getElementById('savedList');
+        count.textContent = saved.length;
+
+        if (saved.length === 0) {
+            list.innerHTML = '<div class="saved-empty">No saved analyses yet.<br>Run an analysis and click "Save Analysis" to save it here.</div>';
+            return;
+        }
+
+        list.innerHTML = saved.map(e => {
+            const d = new Date(e.date);
+            const dateStr = d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+            const yieldStr = e.grossYield ? ` · ${parseFloat(e.grossYield).toFixed(1)}% yield` : '';
+            const cfStr    = e.cashflow !== undefined ? ` · £${Math.round(e.cashflow)}/mo` : '';
+            return `
+            <div class="saved-item" onclick="loadSavedAnalysis(${e.id})">
+                <div class="saved-item-info">
+                    <div class="saved-item-address">${e.address}</div>
+                    <div class="saved-item-meta">${dateStr} · ${e.dealType}${yieldStr}${cfStr}</div>
+                </div>
+                <span class="saved-item-verdict ${e.verdict}">${e.verdict}</span>
+                <button class="saved-delete" onclick="deleteSaved(event,${e.id})" title="Delete">×</button>
+            </div>`;
+        }).join('');
+    }
+
+    function toggleSavedPanel() {
+        const body  = document.getElementById('savedPanelBody');
+        const arrow = document.getElementById('savedToggleArrow');
+        const open  = body.classList.toggle('open');
+        arrow.textContent = open ? '▲' : '▼';
+    }
+
+    function deleteSaved(event, id) {
+        event.stopPropagation();
+        let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        saved = saved.filter(e => e.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        renderSavedList();
+    }
+
+    function loadSavedAnalysis(id) {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const entry = saved.find(e => e.id === id);
+        if (!entry) return;
+        // Populate form fields
+        const fd = entry.formData;
+        const fields = ['address','postcode','dealType','purchaseType','purchasePrice',
+            'monthlyRent','deposit','interestRate','bedrooms','property_type',
+            'refurbCosts','arv','bridgingMonthlyRate','bridgingTermMonths',
+            'bridgingArrangementFee','bridgingExitFee','roomCount','avgRoomRate',
+            'saMonthlySARevenue','saSetupCosts'];
+        fields.forEach(f => {
+            const el = document.getElementById(f);
+            if (el && fd[f] !== undefined) el.value = fd[f];
+        });
+        updateFormFields();
+        // Show results
+        lastFormData = fd;
+        lastResults  = entry.results;
+        renderResults(entry.results);
+        document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ── Share Analysis ──────────────────────────────────────────────────────
+    function shareAnalysis() {
+        if (!lastFormData) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set('shared', '1');
+        // Encode key params for sharing
+        if (lastFormData.address)       url.searchParams.set('addr', lastFormData.address);
+        if (lastFormData.postcode)      url.searchParams.set('pc',   lastFormData.postcode);
+        if (lastFormData.dealType)      url.searchParams.set('dt',   lastFormData.dealType);
+        if (lastFormData.purchasePrice) url.searchParams.set('pp',   lastFormData.purchasePrice);
+        if (lastFormData.monthlyRent)   url.searchParams.set('mr',   lastFormData.monthlyRent);
+        const shareUrl = url.toString();
+
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                const btn = document.getElementById('shareBtn');
+                btn.textContent = '✅ Link Copied!';
+                setTimeout(() => { btn.innerHTML = '🔗 Share'; }, 2500);
+            });
+        } else {
+            prompt('Copy this link to share:', shareUrl);
+        }
+    }
+
+    // ── Load shared params on page load ────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+        const p = new URLSearchParams(window.location.search);
+        if (p.get('shared') === '1') {
+            if (p.get('addr')) document.getElementById('address').value = p.get('addr');
+            if (p.get('pc'))   document.getElementById('postcode').value = p.get('pc');
+            if (p.get('dt'))   document.getElementById('dealType').value = p.get('dt');
+            if (p.get('pp'))   document.getElementById('purchasePrice').value = p.get('pp');
+            if (p.get('mr'))   document.getElementById('monthlyRent').value = p.get('mr');
+            updateFormFields();
+        }
+    });
+
+    // ── Crime Data ──────────────────────────────────────────────────────────
+    async function loadCrimeData(postcode) {
+        try {
+            const resp = await fetch('/api/crime', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postcode })
+            });
+            if (!resp.ok) return;
+            const json = await resp.json();
+            if (!json.success) return;
+            renderCrimeData(json.data);
+        } catch (e) {
+            // Silently fail — crime data is supplementary
+        }
+    }
+
+    function renderCrimeData(data) {
+        const section = document.getElementById('crimeSection');
+        const grid    = document.getElementById('crimeGrid');
+        const lvlEl   = document.getElementById('crimeLevel');
+
+        if (!data || !data.categories) return;
+        section.style.display = 'block';
+
+        const total = data.total_crimes || 0;
+        const level = data.crime_level || 'Unknown';
+        const cls   = level === 'Low' ? 'crime-level-low' : level === 'Medium' ? 'crime-level-med' : 'crime-level-high';
+
+        lvlEl.innerHTML = `
+            <div style="margin-bottom:10px">
+                Total crimes (last month near area): <strong>${total.toLocaleString()}</strong>
+                <span class="crime-level ${cls}">${level} Crime Area</span>
+            </div>`;
+
+        const topCats = Object.entries(data.categories)
+            .sort((a,b) => b[1] - a[1])
+            .slice(0, 6);
+
+        grid.innerHTML = topCats.map(([cat, count]) => `
+            <div class="crime-card">
+                <div class="crime-card-num">${count}</div>
+                <div class="crime-card-label">${cat.replace(/-/g,' ')}</div>
+            </div>`).join('');
     }
 </script>
 </body>

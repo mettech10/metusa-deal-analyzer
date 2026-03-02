@@ -3465,6 +3465,81 @@ def get_uk_transport_summary():
             'message': 'Error fetching transport data. Please try again.'
         }), 500
 
+@app.route('/api/crime', methods=['POST'])
+@limiter.limit("20 per minute")
+def get_crime_data():
+    """Get crime statistics for a postcode using Police UK API (free, no key required)"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        if not validate_postcode(postcode):
+            return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
+
+        # Step 1: Get lat/lng from postcodes.io
+        geo_resp = requests.get(
+            f'https://api.postcodes.io/postcodes/{postcode.replace(" ", "")}',
+            timeout=8
+        )
+        if geo_resp.status_code != 200:
+            return jsonify({'success': False, 'message': 'Could not geocode postcode'}), 404
+
+        geo = geo_resp.json().get('result', {})
+        lat = geo.get('latitude')
+        lon = geo.get('longitude')
+        if not lat or not lon:
+            return jsonify({'success': False, 'message': 'No coordinates for postcode'}), 404
+
+        # Step 2: Fetch crimes from Police UK API
+        crime_resp = requests.get(
+            'https://data.police.uk/api/crimes-street/all-crime',
+            params={'lat': lat, 'lng': lon},
+            timeout=12
+        )
+        if crime_resp.status_code != 200:
+            return jsonify({'success': False, 'message': 'Crime API unavailable'}), 503
+
+        crimes = crime_resp.json()
+        total = len(crimes)
+
+        # Aggregate by category
+        categories = {}
+        for c in crimes:
+            cat = c.get('category', 'other')
+            categories[cat] = categories.get(cat, 0) + 1
+
+        # Determine crime level based on total monthly crimes in area
+        if total < 30:
+            crime_level = 'Low'
+        elif total < 80:
+            crime_level = 'Medium'
+        else:
+            crime_level = 'High'
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_crimes': total,
+                'crime_level': crime_level,
+                'categories': categories,
+                'lat': lat,
+                'lon': lon,
+            }
+        })
+
+    except requests.Timeout:
+        return jsonify({'success': False, 'message': 'Crime API timed out'}), 503
+    except Exception as e:
+        app.logger.error(f'Crime data error: {str(e)}')
+        return jsonify({'success': False, 'message': 'Error fetching crime data'}), 500
+
+
 if __name__ == '__main__':
     # Security: Don't run with debug in production
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
