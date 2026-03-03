@@ -1174,31 +1174,53 @@ def get_refurb_estimate(postcode, property_type, bedrooms, sqft=None, condition=
     }
     primary_tier = condition_tier.get(condition, 'medium')
 
+    # Source: Checkatrade/RICS/BRRR frameworks — detached has more external envelope,
+    # bungalows have a high roof-to-floor ratio; flats share structure with neighbours.
     type_multipliers = {
-        'detached':      1.00,
-        'semi-detached': 0.95,
-        'semi':          0.95,
-        'terraced':      0.90,
-        'flat':          0.85,
-        'bungalow':      1.10,
+        'detached':      1.10,
+        'semi-detached': 1.00,   # semi is the UK baseline
+        'semi':          1.00,
+        'terraced':      0.95,
+        'flat':          0.85,   # no roof/external structure
+        'bungalow':      1.15,   # large roof footprint vs floor area
+        'cottage':       1.20,   # non-standard, older construction
     }
     type_mult = type_multipliers.get(property_type.lower().strip(), 0.95)
 
-    # Regional multiplier from postcode prefix
-    pc = (postcode or '').upper().strip()
-    london_inner = {'EC', 'WC', 'E1', 'W1', 'SW1', 'SE1', 'N1'}
-    london_outer = {'E', 'N', 'NW', 'SE', 'SW', 'W', 'BR', 'CR', 'DA', 'EN',
-                    'HA', 'IG', 'KT', 'RM', 'SM', 'TW', 'UB', 'WD'}
-    south_east   = {'GU', 'RH', 'BN', 'TN', 'ME', 'CT', 'AL', 'HP', 'OX', 'SL', 'RG'}
-    pc_area = re.match(r'^[A-Z]{1,2}', pc).group() if pc else ''
-    if any(pc.startswith(a) for a in london_inner):
-        region_mult = 1.50
-    elif pc_area in london_outer:
-        region_mult = 1.25
-    elif pc_area in south_east:
-        region_mult = 1.10
-    else:
-        region_mult = 1.00  # Midlands, North, Wales, Scotland
+    # Regional multipliers from postcode prefix.
+    # Midlands/North are 10-18% below national average; London inner +40-50%;
+    # South East +10-25%. Sources: Checkatrade, BuildPartner regional guides 2024-25.
+    REGION_MULT = {
+        # London inner
+        'EC': 1.50, 'WC': 1.50, 'W1': 1.50, 'SW1': 1.50, 'SE1': 1.45, 'N1': 1.40,
+        # London outer
+        'SW': 1.35, 'W': 1.35, 'NW': 1.30, 'E': 1.30,
+        'N': 1.25, 'SE': 1.25, 'KT': 1.25, 'TW': 1.25,
+        'BR': 1.20, 'CR': 1.20, 'RM': 1.20, 'HA': 1.20, 'UB': 1.20,
+        'SM': 1.20, 'WD': 1.15, 'EN': 1.15, 'IG': 1.15, 'DA': 1.15,
+        # South East / Home Counties
+        'GU': 1.20, 'RH': 1.20, 'SL': 1.15, 'AL': 1.15, 'OX': 1.15,
+        'RG': 1.15, 'HP': 1.10, 'CM': 1.10, 'BN': 1.10, 'TN': 1.10,
+        'ME': 1.05, 'CT': 1.05,
+        # Midlands
+        'B': 0.95, 'CV': 0.92, 'LE': 0.92, 'NG': 0.90, 'DE': 0.90,
+        'ST': 0.90, 'WS': 0.90, 'WV': 0.90, 'DY': 0.90,
+        # North of England
+        'M': 0.90, 'L': 0.88, 'LS': 0.88, 'WF': 0.87, 'HD': 0.87,
+        'BD': 0.87, 'S': 0.87, 'NE': 0.87, 'HU': 0.85, 'DN': 0.85,
+        'PR': 0.87, 'BB': 0.85, 'BL': 0.85, 'OL': 0.85, 'SK': 0.88,
+        # Scotland
+        'EH': 0.90, 'G': 0.88, 'AB': 0.85, 'DD': 0.82, 'KY': 0.82,
+        # Wales
+        'CF': 0.85, 'SA': 0.82, 'NP': 0.83, 'LL': 0.80, 'SY': 0.82,
+    }
+    pc = (postcode or '').upper().replace(' ', '')
+    region_mult = 1.00  # national average default (South West, East Midlands, etc.)
+    # Try longest prefix first to avoid 'N' matching 'NW', etc.
+    for prefix in sorted(REGION_MULT, key=len, reverse=True):
+        if pc.startswith(prefix):
+            region_mult = REGION_MULT[prefix]
+            break
 
     estimates = {}
     for tier, (low, mid, high) in tier_costs.items():
