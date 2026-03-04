@@ -243,13 +243,17 @@ def scrape_with_jina(url: str) -> dict:
                         score += 40
 
                     # Strongly penalise agent/branch/contact sections
-                    if any(w in context for w in ['estate agent', 'branch', 'contact us',
-                                                   'tel:', 'phone', 'call us', 'our office']):
+                    if any(w in context for w in ['estate agent', 'letting agent', 'branch',
+                                                   'contact us', 'contact agent', 'enquire',
+                                                   'tel:', 'phone', 'call us', 'our office',
+                                                   'book a viewing', 'arrange a viewing']):
                         score -= 200
                     if any(w in context for w in ['agent address', 'agent postcode',
-                                                   'branch address', 'office address']):
-                        score -= 100
-                    if any(w in context for w in ['vat', 'registration', 'company number']):
+                                                   'branch address', 'office address',
+                                                   'registered office', 'managing agent']):
+                        score -= 200
+                    if any(w in context for w in ['vat', 'registration', 'company number',
+                                                   'company no', 'registered in england']):
                         score -= 200
 
                     best_score = max(best_score, score)
@@ -280,6 +284,8 @@ def scrape_with_jina(url: str) -> dict:
             raw = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', raw, flags=re.IGNORECASE)
             # Remove trailing sale/rent description: "- Property for Sale", "- For Sale"
             raw = re.sub(r'\s*[-–]\s*(?:property\s+)?(?:for sale|to rent|to let)\s*$', '', raw, flags=re.IGNORECASE)
+            # Remove leading "To Let:", "For Sale:", "To Rent:" prefix
+            raw = re.sub(r'^(?:to let|for sale|to rent)\s*:\s*', '', raw, flags=re.IGNORECASE)
             # If "for sale in / to rent in / to let at" is present, keep only the part after it
             m = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', raw, re.IGNORECASE)
             if m:
@@ -314,18 +320,37 @@ def scrape_with_jina(url: str) -> dict:
                 data['address'] = candidate
                 print(f"[Jina] Address from title: {candidate}")
 
-        # Strategy 2: First H1/H2 heading — Rightmove renders address as # Heading
+        # Words that indicate we're in the agent/contact/footer section of the page.
+        # Check only the 150 chars BEFORE the position — if we're already inside an
+        # agent block, these words will have appeared just above us.
+        _AGENT_WORDS = ('estate agent', 'letting agent', 'branch', 'contact us',
+                        'contact agent', 'enquire', 'tel:', 'phone:', 'call us',
+                        'our office', 'agent address', 'agent postcode',
+                        'branch address', 'office address', 'managing agent',
+                        'registered office', 'company no', 'vat number')
+
+        def _in_agent_section(idx: int) -> bool:
+            ctx = text[max(0, idx - 150):idx + 150].lower()
+            return any(w in ctx for w in _AGENT_WORDS)
+
+        # Strategy 2: First H1/H2 heading in the TOP portion of the page only.
+        # Agent sections and footers are towards the bottom — restricting to the
+        # first 3 500 chars avoids picking up the estate agent's branch address.
         if not data['address']:
-            for h1 in re.finditer(r'^#{1,2}\s+(.+)$', text, re.MULTILINE):
+            for h1 in re.finditer(r'^#{1,2}\s+(.+)$', text[:3500], re.MULTILINE):
+                if _in_agent_section(h1.start()):
+                    continue
                 candidate = _clean_addr(h1.group(1))
                 if _looks_like_address(candidate):
                     data['address'] = candidate
                     print(f"[Jina] Address from H1: {candidate}")
                     break
 
-        # Strategy 3: Bold "**text**" near the top — some portals bold the address
+        # Strategy 3: Bold "**text**" near the very top — some portals bold the address
         if not data['address']:
             for bold in re.finditer(r'\*\*([^*]{4,80})\*\*', text[:4000]):
+                if _in_agent_section(bold.start()):
+                    continue
                 candidate = _clean_addr(bold.group(1))
                 if _looks_like_address(candidate):
                     if ',' in candidate or re.search(r'[A-Z]{1,2}\d', candidate):
@@ -336,22 +361,21 @@ def scrape_with_jina(url: str) -> dict:
         # Strategy 4: Explicit "Address:" label
         if not data['address']:
             addr_label = re.search(r'(?:^|\n)Address:\s*(.+)', text, re.IGNORECASE)
-            if addr_label:
+            if addr_label and not _in_agent_section(addr_label.start()):
                 candidate = _clean_addr(addr_label.group(1))
                 if _looks_like_address(candidate):
                     data['address'] = candidate
 
-        # Strategy 5: Text immediately before any valid UK postcode in the text.
-        # Rightmove often renders: "Prettywood, Heap Bridge\nBL9 7XT\n£210,000"
-        if not data['address']:
-            for pc_match in re.finditer(r'([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})', text):
-                pc_candidate = pc_match.group(1).strip().upper()
-                if not pc_candidate.replace(' ', '') in text.replace(' ', ''):
+        # Strategy 5: Look for text on the line immediately BEFORE the already-
+        # selected property postcode. Only use data['postcode'] — not every postcode
+        # on the page — to avoid accidentally reading the agent's address.
+        if not data['address'] and data['postcode']:
+            pc_search = data['postcode'].replace(' ', r'\s?')
+            for pc_match in re.finditer(pc_search, text, re.IGNORECASE):
+                if _in_agent_section(pc_match.start()):
                     continue
-                # Grab up to 120 chars before the postcode
-                start = max(0, pc_match.start() - 120)
+                start = max(0, pc_match.start() - 150)
                 before = text[start:pc_match.start()].strip()
-                # Take the last non-empty line before the postcode
                 lines = [l.strip() for l in before.split('\n') if l.strip()]
                 if lines:
                     candidate = _clean_addr(lines[-1])
@@ -360,14 +384,17 @@ def scrape_with_jina(url: str) -> dict:
                         print(f"[Jina] Address from text before postcode: {candidate}")
                         break
 
-        # Strategy 6: Street-name pattern (Road, Avenue, Lane …) — OSM-safe
+        # Strategy 6: Street-name pattern (Road, Avenue, Lane …) — OSM-safe,
+        # only look in the first 4 000 chars to avoid agent address sections.
         if not data['address']:
             for m in re.finditer(
                 r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+'
                 r'(?:Road|Avenue|Lane|Drive|Way|Close|Crescent|Gardens|Place|Grove|Court|Terrace|Hill|View|Park))'
                 r'[,\s]+([^,\n)]{5,50})',
-                text
+                text[:4000]
             ):
+                if _in_agent_section(m.start()):
+                    continue
                 candidate = m.group(0)
                 if _looks_like_address(candidate):
                     data['address'] = f"{m.group(1)}, {m.group(2).strip()}"

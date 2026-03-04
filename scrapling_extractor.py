@@ -7,6 +7,7 @@ import requests
 import re
 import time
 import random
+import json
 from typing import Dict, Optional
 
 # Rotate user agents to avoid detection
@@ -188,26 +189,114 @@ class PropertyExtractor:
                 data['property_type'] = 'Semi-Detached' if ptype == 'semi' else ptype.title()
                 break
         
-        # 5. Address from title
-        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-        if title_match:
-            title = title_match.group(1)
-            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
-            # Extract everything after "for sale in" / "to rent in"
-            sale_in = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', title, re.IGNORECASE)
-            if sale_in:
-                data['address'] = title[sale_in.end():].strip()
-            else:
-                # Title may already be just the address (Zoopla / OnTheMarket style)
-                clean = re.sub(
-                    r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
-                    r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
-                    r'(?:house|property|home)?\s*',
-                    '', title, flags=re.IGNORECASE
-                ).strip()
-                if clean and len(clean) > 5:
-                    data['address'] = clean
-        
+        # ── Structured-data address extraction (most reliable) ──────────────
+
+        # 5a. __NEXT_DATA__ JSON (Rightmove is Next.js — this is the gold standard)
+        next_data_match = re.search(
+            r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+            html, re.DOTALL | re.IGNORECASE
+        )
+        if next_data_match:
+            try:
+                nd = json.loads(next_data_match.group(1))
+                # Rightmove path: props.pageProps.propertyData.address.displayAddress
+                prop = (nd.get('props', {})
+                          .get('pageProps', {})
+                          .get('propertyData', {}))
+                addr_obj = prop.get('address', {})
+                display = (addr_obj.get('displayAddress')
+                           or addr_obj.get('streetAddress')
+                           or addr_obj.get('summary'))
+                if display and len(display) > 3:
+                    data['address'] = display.strip()
+                    print(f"[Scraper] Address from __NEXT_DATA__: {data['address']}")
+                # Also grab postcode if not already found
+                if not data['postcode']:
+                    outcode = addr_obj.get('outcode', '')
+                    incode  = addr_obj.get('incode', '')
+                    if outcode and incode:
+                        data['postcode'] = f"{outcode} {incode}".upper()
+                    elif addr_obj.get('postcode'):
+                        data['postcode'] = addr_obj['postcode'].upper()
+            except Exception as e:
+                print(f"[Scraper] __NEXT_DATA__ parse error: {e}")
+
+        # 5b. meta itemprop="streetAddress" (schema.org — works on Rightmove & Zoopla)
+        if not data['address']:
+            meta_addr = re.search(
+                r'<meta[^>]+itemprop=["\']streetAddress["\'][^>]+content=["\']([^"\']+)["\']'
+                r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+itemprop=["\']streetAddress["\']',
+                html, re.IGNORECASE
+            )
+            if meta_addr:
+                addr = (meta_addr.group(1) or meta_addr.group(2) or '').strip()
+                if addr and len(addr) > 3:
+                    data['address'] = addr
+                    print(f"[Scraper] Address from meta itemprop: {data['address']}")
+
+        # 5c. JSON-LD structured data (<script type="application/ld+json">)
+        if not data['address']:
+            for ld_match in re.finditer(
+                r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                html, re.DOTALL | re.IGNORECASE
+            ):
+                try:
+                    ld = json.loads(ld_match.group(1))
+                    # Handle both single object and array
+                    items = ld if isinstance(ld, list) else [ld]
+                    for item in items:
+                        addr_obj = item.get('address', {})
+                        if isinstance(addr_obj, str):
+                            if len(addr_obj) > 3:
+                                data['address'] = addr_obj.strip()
+                                break
+                        elif isinstance(addr_obj, dict):
+                            street = (addr_obj.get('streetAddress')
+                                      or addr_obj.get('name'))
+                            if street and len(street) > 3:
+                                data['address'] = street.strip()
+                                # Grab postalCode too
+                                if not data['postcode'] and addr_obj.get('postalCode'):
+                                    data['postcode'] = addr_obj['postalCode'].upper()
+                                break
+                    if data['address']:
+                        print(f"[Scraper] Address from JSON-LD: {data['address']}")
+                        break
+                except Exception:
+                    continue
+
+        # 5d. CSS class selector — h1/h2 with 'address' in the class name
+        if not data['address']:
+            css_addr = re.search(
+                r'<(?:h1|h2|span|p|div)[^>]+class=["\'][^"\']*address[^"\']*["\'][^>]*>\s*([^<]{5,120})\s*<',
+                html, re.IGNORECASE
+            )
+            if css_addr:
+                addr = css_addr.group(1).strip()
+                if addr and len(addr) > 3:
+                    data['address'] = addr
+                    print(f"[Scraper] Address from CSS class: {data['address']}")
+
+        # 5e. HTML <title> fallback — least reliable but catches remaining cases
+        if not data['address']:
+            title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+            if title_match:
+                title = title_match.group(1)
+                title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
+                title = re.sub(r'^(?:to let|for sale|to rent)\s*:\s*', '', title, flags=re.IGNORECASE)
+                sale_in = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', title, re.IGNORECASE)
+                if sale_in:
+                    data['address'] = title[sale_in.end():].strip()
+                else:
+                    clean = re.sub(
+                        r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
+                        r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
+                        r'(?:house|property|home)?\s*',
+                        '', title, flags=re.IGNORECASE
+                    ).strip()
+                    if clean and len(clean) > 5:
+                        data['address'] = clean
+
         return data
 
 
