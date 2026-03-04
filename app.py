@@ -58,7 +58,7 @@ def scrape_with_jina(url: str) -> dict:
             'property_type': None,
             'bedrooms': None,
             'description': None,
-            'sqm': None,
+            'sqft': None,
         }
 
         # --- Price ---
@@ -118,24 +118,25 @@ def scrape_with_jina(url: str) -> dict:
                 data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
 
-        # --- Floor area (sqm) ---
+        # --- Floor area (sqft) ---
         # Rightmove/Zoopla show size as "85 sq m", "85m²", "915 sq ft", etc.
-        sqm_val = None
-        sqm_patterns_list = [
-            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', False),   # Already metres
-            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', True),     # Feet → convert
+        # We store everything as sqft — convert sqm if needed.
+        sqft_val = None
+        floor_patterns = [
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', False),   # Already sqft
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', True),    # Metres → sqft
         ]
-        for pat, is_sqft in sqm_patterns_list:
+        for pat, is_sqm in floor_patterns:
             m = re.search(pat, text, re.IGNORECASE)
             if m:
                 val = float(m.group(1))
-                if is_sqft:
-                    val = val / 10.764  # sq ft → sq m
-                if 10 <= val <= 2000:   # Sanity check
-                    sqm_val = round(val, 1)
+                if is_sqm:
+                    val = val * 10.764  # sq m → sq ft
+                if 100 <= val <= 25000:   # Sanity check
+                    sqft_val = round(val)
                     break
-        data['sqm'] = sqm_val
-        print(f"[Jina] Floor area: {sqm_val} sqm")
+        data['sqft'] = sqft_val
+        print(f"[Jina] Floor area: {sqft_val} sqft")
 
         # --- Postcode ---
         VALID_AREAS = {
@@ -293,7 +294,7 @@ def scrape_with_jina(url: str) -> dict:
             data['address'] = "Address not available"
 
         print(f"[Jina] Extracted: price={data['price']}, beds={data['bedrooms']}, "
-              f"sqm={data['sqm']}, postcode={data['postcode']}, address={str(data['address'])[:60]}")
+              f"sqft={data['sqft']}, postcode={data['postcode']}, address={str(data['address'])[:60]}")
         return data
 
     except Exception as e:
@@ -333,6 +334,74 @@ def resolve_postcode_from_address(address: str) -> str | None:
     except Exception as e:
         print(f"[IdealPostcodes] Error resolving postcode: {e}")
     return None
+
+def lookup_floor_area_from_epc(address: str, postcode: str) -> float | None:
+    """Query the UK EPC Open Data API to obtain the floor area (sqft) of a property.
+
+    The API is free; register at https://epc.opendatacommunities.org to get
+    credentials.  Requires env vars EPC_API_EMAIL and EPC_API_KEY.
+
+    Searches by postcode (required) and optionally narrows by address string.
+    Returns the floor area converted to sqft, or None if unavailable.
+    """
+    if not EPC_API_EMAIL or not EPC_API_KEY:
+        return None
+    if not postcode:
+        return None
+
+    # Normalise postcode: strip spaces, upper-case, insert space before last 3
+    pc = postcode.upper().replace(' ', '')
+    if len(pc) > 3:
+        pc = pc[:-3] + ' ' + pc[-3:]
+
+    params = {'postcode': pc, 'size': 5}
+
+    try:
+        resp = requests.get(
+            'https://epc.opendatacommunities.org/api/v1/domestic/search',
+            params=params,
+            auth=(EPC_API_EMAIL, EPC_API_KEY),
+            headers={'Accept': 'application/json'},
+            timeout=6,
+        )
+        if resp.status_code != 200:
+            print(f"[EPC] API error {resp.status_code}")
+            return None
+
+        rows = resp.json().get('rows', [])
+        if not rows:
+            print(f"[EPC] No records found for postcode {pc}")
+            return None
+
+        # If we have an address, try to pick the best-matching row
+        best_row = rows[0]
+        if address and len(rows) > 1:
+            addr_upper = address.upper()
+            for row in rows:
+                row_addr = (row.get('address1', '') + ' ' + row.get('address2', '')).upper()
+                # Prefer a row whose address tokens appear in our scraped address
+                tokens = [t for t in row_addr.split() if len(t) > 2]
+                if tokens and sum(1 for t in tokens if t in addr_upper) >= max(1, len(tokens) // 2):
+                    best_row = row
+                    break
+
+        sqm = best_row.get('total-floor-area')
+        if sqm is None:
+            return None
+
+        sqm = float(sqm)
+        if sqm <= 0:
+            return None
+
+        sqft = round(sqm * 10.764)
+        print(f"[EPC] Floor area for {pc}: {sqm} m² = {sqft} sqft "
+              f"(address: {best_row.get('address1', '')})")
+        return sqft
+
+    except Exception as e:
+        print(f"[EPC] Error looking up floor area: {e}")
+        return None
+
 
 # Security: Input validation functions
 def validate_postcode(postcode):
@@ -385,6 +454,10 @@ limiter = Limiter(
 
 # ── Ideal Postcodes (address → postcode lookup) ─────────────────────────────
 IDEAL_POSTCODES_API_KEY = os.environ.get('IDEAL_POSTCODES_API_KEY', '')
+
+# ── EPC Open Data API (floor area lookup) ───────────────────────────────────
+EPC_API_EMAIL = os.environ.get('EPC_API_EMAIL', '')
+EPC_API_KEY   = os.environ.get('EPC_API_KEY', '')
 
 # ── Supabase (optional) ────────────────────────────────────────────────────
 _SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -1132,49 +1205,116 @@ def check_article_4(postcode):
     }
 
 
-def get_refurb_estimate(postcode, property_type, bedrooms, internal_area=1000):
+def get_refurb_estimate(postcode, property_type, bedrooms, sqft=None, condition='fair'):
+    """Estimate UK refurbishment costs from property size, condition, and location.
+
+    Tiers are based on 2024-2025 UK market rates (Checkatrade / RICS benchmarks):
+      cosmetic   £5–12/sqft  — paint, carpets, minor repairs
+      light      £12–25/sqft — redecoration, some flooring/fixtures
+      medium     £25–45/sqft — new kitchen + bathroom, full redecoration
+      full       £45–75/sqft — kitchen, bathroom, rewire, replumb, damp, windows
+      structural £75–140/sqft — all of the above plus structural/extension work
+
+    condition → primary tier mapping:
+      excellent → cosmetic  |  good → light  |  fair → medium
+      poor → full           |  derelict → structural
     """
-    Get refurbishment cost estimate per square meter
-    
-    Based on typical UK refurbishment costs
-    """
-    # Base costs per sq ft (converted from sq m)
-    base_costs = {
-        'light': 50,      # £50 per sq m - cosmetic only
-        'medium': 100,    # £100 per sq m - new kitchen, bathroom
-        'heavy': 180,     # £180 per sq m - full refurb including electrics
-        'structural': 250 # £250 per sq m - including structural work
+    # Bedroom-based sqft fallback (UK average internal areas)
+    bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
+    if not sqft or sqft <= 0:
+        try:
+            beds = int(bedrooms) if bedrooms else 3
+        except (TypeError, ValueError):
+            beds = 3
+        sqft = bedroom_sqft.get(min(beds, 5), 990)
+
+    # Cost per sqft: (low, mid, high)
+    tier_costs = {
+        'cosmetic':   (5,   8,   12),
+        'light':      (12,  18,  25),
+        'medium':     (25,  35,  45),
+        'full':       (45,  60,  75),
+        'structural': (75, 100, 140),
     }
-    
-    # Property type multipliers
+
+    condition_tier = {
+        'excellent': 'cosmetic',
+        'good':      'light',
+        'fair':      'medium',
+        'poor':      'full',
+        'derelict':  'structural',
+    }
+    primary_tier = condition_tier.get(condition, 'medium')
+
+    # Source: Checkatrade/RICS/BRRR frameworks — detached has more external envelope,
+    # bungalows have a high roof-to-floor ratio; flats share structure with neighbours.
     type_multipliers = {
-        'detached': 1.0,
-        'semi': 0.9,
-        'terraced': 0.85,
-        'flat': 0.8,
-        'bungalow': 1.1
+        'detached':      1.10,
+        'semi-detached': 1.00,   # semi is the UK baseline
+        'semi':          1.00,
+        'terraced':      0.95,
+        'flat':          0.85,   # no roof/external structure
+        'bungalow':      1.15,   # large roof footprint vs floor area
+        'cottage':       1.20,   # non-standard, older construction
     }
-    
-    # Area adjustment (London premium)
-    area_adjustment = 1.0
-    if postcode.startswith('SW') or postcode.startswith('W') or postcode.startswith('NW'):
-        area_adjustment = 1.3  # 30% premium for London
-    
-    # Default internal area if not provided
-    sqm = internal_area
-    
+    type_mult = type_multipliers.get(property_type.lower().strip(), 0.95)
+
+    # Regional multipliers from postcode prefix.
+    # Midlands/North are 10-18% below national average; London inner +40-50%;
+    # South East +10-25%. Sources: Checkatrade, BuildPartner regional guides 2024-25.
+    REGION_MULT = {
+        # London inner
+        'EC': 1.50, 'WC': 1.50, 'W1': 1.50, 'SW1': 1.50, 'SE1': 1.45, 'N1': 1.40,
+        # London outer
+        'SW': 1.35, 'W': 1.35, 'NW': 1.30, 'E': 1.30,
+        'N': 1.25, 'SE': 1.25, 'KT': 1.25, 'TW': 1.25,
+        'BR': 1.20, 'CR': 1.20, 'RM': 1.20, 'HA': 1.20, 'UB': 1.20,
+        'SM': 1.20, 'WD': 1.15, 'EN': 1.15, 'IG': 1.15, 'DA': 1.15,
+        # South East / Home Counties
+        'GU': 1.20, 'RH': 1.20, 'SL': 1.15, 'AL': 1.15, 'OX': 1.15,
+        'RG': 1.15, 'HP': 1.10, 'CM': 1.10, 'BN': 1.10, 'TN': 1.10,
+        'ME': 1.05, 'CT': 1.05,
+        # Midlands
+        'B': 0.95, 'CV': 0.92, 'LE': 0.92, 'NG': 0.90, 'DE': 0.90,
+        'ST': 0.90, 'WS': 0.90, 'WV': 0.90, 'DY': 0.90,
+        # North of England
+        'M': 0.90, 'L': 0.88, 'LS': 0.88, 'WF': 0.87, 'HD': 0.87,
+        'BD': 0.87, 'S': 0.87, 'NE': 0.87, 'HU': 0.85, 'DN': 0.85,
+        'PR': 0.87, 'BB': 0.85, 'BL': 0.85, 'OL': 0.85, 'SK': 0.88,
+        # Scotland
+        'EH': 0.90, 'G': 0.88, 'AB': 0.85, 'DD': 0.82, 'KY': 0.82,
+        # Wales
+        'CF': 0.85, 'SA': 0.82, 'NP': 0.83, 'LL': 0.80, 'SY': 0.82,
+    }
+    pc = (postcode or '').upper().replace(' ', '')
+    region_mult = 1.00  # national average default (South West, East Midlands, etc.)
+    # Try longest prefix first to avoid 'N' matching 'NW', etc.
+    for prefix in sorted(REGION_MULT, key=len, reverse=True):
+        if pc.startswith(prefix):
+            region_mult = REGION_MULT[prefix]
+            break
+
     estimates = {}
-    for level, base in base_costs.items():
-        multiplier = type_multipliers.get(property_type.lower().replace('-detached', '').replace('semi-', 'semi'), 1.0)
-        cost_per_sqm = base * multiplier * area_adjustment
-        total = cost_per_sqm * sqm
-        estimates[level] = {
-            'per_sqm': round(cost_per_sqm, 2),
-            'total': round(total, 0),
-            'label': level.capitalize()
+    for tier, (low, mid, high) in tier_costs.items():
+        effective_low  = round(low  * type_mult * region_mult * sqft)
+        effective_mid  = round(mid  * type_mult * region_mult * sqft)
+        effective_high = round(high * type_mult * region_mult * sqft)
+        estimates[tier] = {
+            'low':          effective_low,
+            'mid':          effective_mid,
+            'high':         effective_high,
+            'per_sqft_mid': round(mid * type_mult * region_mult, 2),
+            'label':        tier.capitalize(),
+            'is_primary':   tier == primary_tier,
         }
-    
-    return estimates
+
+    return {
+        'estimates':    estimates,
+        'sqft_used':    int(sqft),
+        'condition':    condition,
+        'primary_tier': primary_tier,
+        'recommended':  estimates[primary_tier],
+    }
 
 def analyze_deal(data):
     """Perform comprehensive deal analysis with input validation"""
@@ -1523,8 +1663,12 @@ def analyze_deal(data):
     
     # Get refurb estimates
     property_type_for_refurb = data.get('property_type', 'terraced').lower()
-    internal_area = data.get('internal_area', 1000)  # Default 1000 sq ft
-    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, internal_area)
+    try:
+        sqft = float(data.get('sqft', 0) or 0)
+    except (TypeError, ValueError):
+        sqft = 0
+    condition = data.get('condition', 'fair')
+    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, sqft, condition)
     
     # Score visualization data
     score_breakdown = {
@@ -2516,6 +2660,27 @@ def extract_url():
                 if resolved:
                     extracted_data['postcode'] = resolved
                     print(f"[extract-url] Postcode set to {resolved} via Ideal Postcodes")
+
+            # If no floor area was found in the listing, try the EPC API first,
+            # then fall back to a bedroom-based estimate.
+            if not extracted_data.get('sqft'):
+                epc_sqft = lookup_floor_area_from_epc(
+                    extracted_data.get('address', ''),
+                    extracted_data.get('postcode', ''),
+                )
+                if epc_sqft:
+                    extracted_data['sqft'] = epc_sqft
+                    extracted_data['sqft_source'] = 'epc'
+                    print(f"[extract-url] Floor area from EPC API: {epc_sqft} sqft")
+                else:
+                    bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
+                    try:
+                        beds = int(extracted_data.get('bedrooms') or 3)
+                    except (TypeError, ValueError):
+                        beds = 3
+                    extracted_data['sqft'] = bedroom_sqft.get(min(beds, 5), 990)
+                    extracted_data['sqft_estimated'] = True
+                    print(f"[extract-url] Floor area estimated from {beds} bed(s): {extracted_data['sqft']} sqft")
 
             return jsonify({
                 'success': True,
