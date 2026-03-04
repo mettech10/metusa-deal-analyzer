@@ -452,38 +452,57 @@ export function calculateDealScore(cashOnCashReturn: number): number {
  * Estimate refurbishment cost based on floor area and condition.
  * Rates are per sq metre, adjusted for London postcodes and property type.
  *
- * Condition → cost/sqm (ex-London):
- *   excellent  →  £0    (move-in ready, no refurb)
- *   good       →  £40   (cosmetic only: redecorate, carpets)
- *   fair       →  £100  (medium: kitchen/bathroom update, replastering)
- *   needs-work →  £185  (heavy: full rewire, new heating, full refurb)
+ * Condition → mid-tier cost/sqft (2024-25 UK benchmarks, Checkatrade / BRRR):
+ *   excellent  →  £0     (move-in ready, no refurb)
+ *   good       →  £18    (light: redecoration, some flooring/fixtures)
+ *   fair       →  £35    (medium: new kitchen + bathroom, full redecoration)
+ *   needs-work →  £60    (full: kitchen, bathroom, rewire, replumb, damp, windows)
  */
 export function estimateRefurbCost(
-  sqm: number,
+  sqft: number,
   condition: string,
   propertyType: string,
   postcode?: string
 ): number {
-  if (!sqm || sqm <= 0) return 0
+  if (!sqft || sqft <= 0) return 0
 
-  const costPerSqm: Record<string, number> = {
+  // Mid-tier cost per sqft aligned with backend get_refurb_estimate tiers
+  const costPerSqft: Record<string, number> = {
     excellent: 0,
-    good: 40,
-    fair: 100,
-    "needs-work": 185,
+    good: 18,
+    fair: 35,
+    "needs-work": 60,
   }
 
-  const base = costPerSqm[condition] ?? 100
+  const base = costPerSqft[condition] ?? 35
 
-  // Flats are slightly cheaper to refurb (no roof, smaller footprint)
-  const typeMultiplier = propertyType === "flat" ? 0.92 : 1.0
+  // Property type multipliers (detached/bungalow cost more; flats less)
+  const typeMultipliers: Record<string, number> = {
+    flat: 0.85,
+    house: 0.95,
+    commercial: 1.0,
+  }
+  const typeMultiplier = typeMultipliers[propertyType] ?? 0.95
 
-  // London premium (~30%) based on postcode prefix
-  const londonPrefixes = ["E", "EC", "N", "NW", "SE", "SW", "W", "WC", "BR", "CR", "DA", "EN", "HA", "IG", "KT", "RM", "SM", "TW", "UB", "WD"]
-  const isLondon = postcode
-    ? londonPrefixes.some((p) => postcode.toUpperCase().startsWith(p))
-    : false
-  const areaMultiplier = isLondon ? 1.3 : 1.0
+  // Regional multipliers from postcode prefix — matches backend REGION_MULT table
+  const pc = (postcode ?? "").toUpperCase().replace(/\s/g, "")
+  const REGION_MULT: Record<string, number> = {
+    EC: 1.50, WC: 1.50, W1: 1.50, SW1: 1.50, SE1: 1.45, N1: 1.40,
+    SW: 1.35, W: 1.35, NW: 1.30, E: 1.30,
+    N: 1.25, SE: 1.25, KT: 1.25, TW: 1.25,
+    BR: 1.20, CR: 1.20, RM: 1.20, HA: 1.20, UB: 1.20,
+    SM: 1.20, WD: 1.15, EN: 1.15, IG: 1.15, DA: 1.15,
+    GU: 1.20, RH: 1.20, SL: 1.15, AL: 1.15, OX: 1.15,
+    RG: 1.15, HP: 1.10, CM: 1.10, BN: 1.10, TN: 1.10, ME: 1.05, CT: 1.05,
+    B: 0.95, CV: 0.92, LE: 0.92, NG: 0.90, DE: 0.90, ST: 0.90,
+    M: 0.90, L: 0.88, LS: 0.88, S: 0.87, NE: 0.87, HU: 0.85,
+    PR: 0.87, BB: 0.85, BL: 0.85, OL: 0.85,
+    EH: 0.90, G: 0.88, AB: 0.85, CF: 0.85, SA: 0.82,
+  }
+  // Match longest prefix first to avoid 'N' shadowing 'NW'
+  const areaMultiplier = Object.keys(REGION_MULT)
+    .sort((a, b) => b.length - a.length)
+    .reduce((mult, prefix) => pc.startsWith(prefix) ? REGION_MULT[prefix] : mult, 1.0)
 
-  return Math.round(sqm * base * typeMultiplier * areaMultiplier)
+  return Math.round(sqft * base * typeMultiplier * areaMultiplier)
 }
