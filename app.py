@@ -335,6 +335,74 @@ def resolve_postcode_from_address(address: str) -> str | None:
         print(f"[IdealPostcodes] Error resolving postcode: {e}")
     return None
 
+def lookup_floor_area_from_epc(address: str, postcode: str) -> float | None:
+    """Query the UK EPC Open Data API to obtain the floor area (sqft) of a property.
+
+    The API is free; register at https://epc.opendatacommunities.org to get
+    credentials.  Requires env vars EPC_API_EMAIL and EPC_API_KEY.
+
+    Searches by postcode (required) and optionally narrows by address string.
+    Returns the floor area converted to sqft, or None if unavailable.
+    """
+    if not EPC_API_EMAIL or not EPC_API_KEY:
+        return None
+    if not postcode:
+        return None
+
+    # Normalise postcode: strip spaces, upper-case, insert space before last 3
+    pc = postcode.upper().replace(' ', '')
+    if len(pc) > 3:
+        pc = pc[:-3] + ' ' + pc[-3:]
+
+    params = {'postcode': pc, 'size': 5}
+
+    try:
+        resp = requests.get(
+            'https://epc.opendatacommunities.org/api/v1/domestic/search',
+            params=params,
+            auth=(EPC_API_EMAIL, EPC_API_KEY),
+            headers={'Accept': 'application/json'},
+            timeout=6,
+        )
+        if resp.status_code != 200:
+            print(f"[EPC] API error {resp.status_code}")
+            return None
+
+        rows = resp.json().get('rows', [])
+        if not rows:
+            print(f"[EPC] No records found for postcode {pc}")
+            return None
+
+        # If we have an address, try to pick the best-matching row
+        best_row = rows[0]
+        if address and len(rows) > 1:
+            addr_upper = address.upper()
+            for row in rows:
+                row_addr = (row.get('address1', '') + ' ' + row.get('address2', '')).upper()
+                # Prefer a row whose address tokens appear in our scraped address
+                tokens = [t for t in row_addr.split() if len(t) > 2]
+                if tokens and sum(1 for t in tokens if t in addr_upper) >= max(1, len(tokens) // 2):
+                    best_row = row
+                    break
+
+        sqm = best_row.get('total-floor-area')
+        if sqm is None:
+            return None
+
+        sqm = float(sqm)
+        if sqm <= 0:
+            return None
+
+        sqft = round(sqm * 10.764)
+        print(f"[EPC] Floor area for {pc}: {sqm} m² = {sqft} sqft "
+              f"(address: {best_row.get('address1', '')})")
+        return sqft
+
+    except Exception as e:
+        print(f"[EPC] Error looking up floor area: {e}")
+        return None
+
+
 # Security: Input validation functions
 def validate_postcode(postcode):
     """Validate UK postcode format"""
@@ -386,6 +454,10 @@ limiter = Limiter(
 
 # ── Ideal Postcodes (address → postcode lookup) ─────────────────────────────
 IDEAL_POSTCODES_API_KEY = os.environ.get('IDEAL_POSTCODES_API_KEY', '')
+
+# ── EPC Open Data API (floor area lookup) ───────────────────────────────────
+EPC_API_EMAIL = os.environ.get('EPC_API_EMAIL', '')
+EPC_API_KEY   = os.environ.get('EPC_API_KEY', '')
 
 # ── Supabase (optional) ────────────────────────────────────────────────────
 _SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -2589,17 +2661,26 @@ def extract_url():
                     extracted_data['postcode'] = resolved
                     print(f"[extract-url] Postcode set to {resolved} via Ideal Postcodes")
 
-            # If no floor area was found in the listing, estimate from bedrooms
-            # so the refurb calculator always has a starting value.
+            # If no floor area was found in the listing, try the EPC API first,
+            # then fall back to a bedroom-based estimate.
             if not extracted_data.get('sqft'):
-                bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
-                try:
-                    beds = int(extracted_data.get('bedrooms') or 3)
-                except (TypeError, ValueError):
-                    beds = 3
-                extracted_data['sqft'] = bedroom_sqft.get(min(beds, 5), 990)
-                extracted_data['sqft_estimated'] = True
-                print(f"[extract-url] Floor area estimated from {beds} bed(s): {extracted_data['sqft']} sqft")
+                epc_sqft = lookup_floor_area_from_epc(
+                    extracted_data.get('address', ''),
+                    extracted_data.get('postcode', ''),
+                )
+                if epc_sqft:
+                    extracted_data['sqft'] = epc_sqft
+                    extracted_data['sqft_source'] = 'epc'
+                    print(f"[extract-url] Floor area from EPC API: {epc_sqft} sqft")
+                else:
+                    bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
+                    try:
+                        beds = int(extracted_data.get('bedrooms') or 3)
+                    except (TypeError, ValueError):
+                        beds = 3
+                    extracted_data['sqft'] = bedroom_sqft.get(min(beds, 5), 990)
+                    extracted_data['sqft_estimated'] = True
+                    print(f"[extract-url] Floor area estimated from {beds} bed(s): {extracted_data['sqft']} sqft")
 
             return jsonify({
                 'success': True,
