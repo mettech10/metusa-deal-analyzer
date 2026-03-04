@@ -175,15 +175,24 @@ def scrape_with_jina(url: str) -> dict:
 
         found_postcode = None
 
-        # Strategy 0: scan the first 1 200 chars (Jina always puts Title / URL
-        # Source at the top).  This catches postcodes in the page title even if
-        # the "Title:" line regex doesn't match due to line-ending quirks.
-        header_pcs = re.findall(postcode_pattern, text[:1200].upper())
-        for pc in header_pcs:
-            fp = format_postcode(pc)
-            if valid_pc(fp):
-                found_postcode = fp
-                print(f"[Jina] Postcode from header scan: {fp}")
+        # Strategy 0: scan only lines containing property keywords in the first
+        # 1 200 chars. This catches postcodes in the page title even if the
+        # "Title:" line regex doesn't match due to line-ending quirks, while
+        # avoiding accidental picks of nav/widget postcodes.
+        _PROP_KEYWORDS = ('bed', 'for sale', 'to rent', 'to let', 'property',
+                          'house', 'flat', 'title:', 'detached', 'terraced', 'bungalow')
+        for line in text[:1200].split('\n'):
+            ll = line.lower()
+            if not any(k in ll for k in _PROP_KEYWORDS):
+                continue
+            line_pcs = re.findall(postcode_pattern, line.upper())
+            for pc in line_pcs:
+                fp = format_postcode(pc)
+                if valid_pc(fp):
+                    found_postcode = fp
+                    print(f"[Jina] Postcode from header scan: {fp}")
+                    break
+            if found_postcode:
                 break
 
         # Strategy 1: parse the "Title:" line that Jina emits.
@@ -298,17 +307,22 @@ def scrape_with_jina(url: str) -> dict:
                     r'(?:house|property|home)?\s*',
                     '', raw, flags=re.IGNORECASE
                 )
-            raw = raw.strip(' ,')
+                # After stripping bedroom prefix, "for sale" may still lead
+                # with an optional dash, e.g. "- For Sale, Alston, Cumbria"
+                # or "for sale, Lane End..." — strip it.
+                raw = re.sub(r'^[-–\s]*(?:for sale|to rent|to let)\s*[,:\-\s]+', '', raw, flags=re.IGNORECASE)
+            raw = raw.strip(' ,-')
             return raw
 
         def _looks_like_address(s: str) -> bool:
             """Reject navigation labels, map text, and very short/long strings."""
             if not s or len(s) < 4 or len(s) > 120:
                 return False
+            # Note: 'for sale'/'to rent'/'to let' removed — _clean_addr strips those;
+            # keeping them here was causing rural properties to be rejected
             bad = ('open street', 'openstreetmap', 'contributors', 'mapbox',
                    'cookie', 'privacy', 'terms', 'sign in', 'log in', 'rightmove',
-                   'zoopla', 'onthemarket', 'back to', 'for sale', 'to rent',
-                   'to let', 'property search', '©')
+                   'zoopla', 'onthemarket', 'back to', 'property search', '©')
             sl = s.lower()
             return not any(b in sl for b in bad)
 
@@ -336,11 +350,26 @@ def scrape_with_jina(url: str) -> dict:
         # Strategy 2: First H1/H2 heading in the TOP portion of the page only.
         # Agent sections and footers are towards the bottom — restricting to the
         # first 3 500 chars avoids picking up the estate agent's branch address.
+        # Also handles inline markdown links: [text](url) → text
+        # And combines consecutive headings when address is split (H1=house name, H2=area).
         if not data['address']:
-            for h1 in re.finditer(r'^#{1,2}\s+(.+)$', text[:3500], re.MULTILINE):
+            headings = list(re.finditer(r'^(#{1,2})\s+(.+)$', text[:3500], re.MULTILINE))
+            for i, h1 in enumerate(headings):
                 if _in_agent_section(h1.start()):
                     continue
-                candidate = _clean_addr(h1.group(1))
+                raw_h = h1.group(2)
+                # Strip inline markdown links: [text](url) → text
+                raw_h = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', raw_h)
+                candidate = _clean_addr(raw_h)
+                # If heading is very short (just a house name) and there's a next
+                # heading nearby, combine them (e.g. "# Hill Farm" + "## Garrigill, Alston")
+                if (len(candidate) < 25 and ',' not in candidate and
+                        i + 1 < len(headings) and not _in_agent_section(headings[i+1].start())):
+                    raw_h2 = headings[i+1].group(2)
+                    raw_h2 = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', raw_h2)
+                    next_cand = _clean_addr(raw_h2)
+                    if _looks_like_address(next_cand):
+                        candidate = f"{candidate}, {next_cand}" if candidate else next_cand
                 if _looks_like_address(candidate):
                     data['address'] = candidate
                     print(f"[Jina] Address from H1: {candidate}")
