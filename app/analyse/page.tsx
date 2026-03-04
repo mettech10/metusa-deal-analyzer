@@ -133,10 +133,10 @@ function formatAnalysisResults(r: Record<string, any>, overridePostcode?: string
     formatted += `🔨 REFURBISHMENT COSTS (per sq meter)\n`
     formatted += `─`.repeat(55) + `\n`
     const ref = r.refurb_estimates
-    if (ref.light) formatted += `  • Light (cosmetic): £${ref.light.total} (£${ref.light.per_sqm}/sqm)\n`
-    if (ref.medium) formatted += `  • Medium (kitchen/bath): £${ref.medium.total} (£${ref.medium.per_sqm}/sqm)\n`
-    if (ref.heavy) formatted += `  • Heavy (full refurb): £${ref.heavy.total} (£${ref.heavy.per_sqm}/sqm)\n`
-    if (ref.structural) formatted += `  • Structural: £${ref.structural.total} (£${ref.structural.per_sqm}/sqm)\n`
+    if (ref.light) formatted += `  • Light (cosmetic): £${ref.light.total} (£${ref.light.per_sqft_mid ?? ref.light.per_sqm}/sqft)\n`
+    if (ref.medium) formatted += `  • Medium (kitchen/bath): £${ref.medium.total} (£${ref.medium.per_sqft_mid ?? ref.medium.per_sqm}/sqft)\n`
+    if (ref.heavy) formatted += `  • Heavy (full refurb): £${ref.heavy.total} (£${ref.heavy.per_sqft_mid ?? ref.heavy.per_sqm}/sqft)\n`
+    if (ref.structural) formatted += `  • Structural: £${ref.structural.total} (£${ref.structural.per_sqft_mid ?? ref.structural.per_sqm}/sqft)\n`
     formatted += `\n`
   }
   
@@ -434,7 +434,7 @@ export default function AnalysePage() {
           purchasePrice: Number(scraped.purchasePrice) || 0,
           propertyType: scraped.propertyType || "house",
           bedrooms: Number(scraped.bedrooms) || 3,
-          ...(scraped.sqm ? { sqm: Number(scraped.sqm) } : {}),
+          ...(scraped.sqft ? { sqft: Number(scraped.sqft) } : {}),
         }
 
         // Transition to manual form with pre-filled data
@@ -693,7 +693,7 @@ export default function AnalysePage() {
   <div class="detail-grid">
     <div class="detail-item"><div class="detail-label">Property Type</div><div class="detail-value">${propType}</div></div>
     <div class="detail-item"><div class="detail-label">Bedrooms</div><div class="detail-value">${na(fd?.bedrooms)} bed</div></div>
-    <div class="detail-item"><div class="detail-label">Internal Area</div><div class="detail-value">${fd?.sqm ? fd.sqm + " m²" : "—"}</div></div>
+    <div class="detail-item"><div class="detail-label">Internal Area</div><div class="detail-value">${fd?.sqft ? fd.sqft + " sqft" : "—"}</div></div>
     <div class="detail-item"><div class="detail-label">Condition</div><div class="detail-value">${condition}</div></div>
     <div class="detail-item"><div class="detail-label">Strategy</div><div class="detail-value">${strategy}</div></div>
     <div class="detail-item"><div class="detail-label">Purchase Type</div><div class="detail-value">${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</div></div>
@@ -834,7 +834,7 @@ export default function AnalysePage() {
     <tr><td>Postcode</td><td>${postcode || "—"}</td></tr>
     <tr><td>Property Type</td><td>${propType}</td></tr>
     <tr><td>Bedrooms</td><td>${na(fd?.bedrooms)}</td></tr>
-    <tr><td>Internal Area</td><td>${fd?.sqm ? fd.sqm + " m²" : "—"}</td></tr>
+    <tr><td>Internal Area</td><td>${fd?.sqft ? fd.sqft + " sqft" : "—"}</td></tr>
     <tr><td>Condition</td><td>${condition}</td></tr>
     <tr><td>Investment Strategy</td><td>${strategy}</td></tr>
     <tr><td>Purchase Type</td><td>${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</td></tr>
@@ -847,17 +847,17 @@ export default function AnalysePage() {
     <tr><th>Refurb Level</th><th style="text-align:right">Estimated Cost</th><th>Description</th></tr>
     <tr>
       <td><strong>Light (Cosmetic)</strong></td>
-      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 40) : "—"}</td>
+      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 18) : "—"}</td>
       <td style="color:#555;font-size:9px">Redecorate, carpets, minor fixtures</td>
     </tr>
     <tr>
       <td><strong>Medium (Standard)</strong></td>
-      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 100) : "—"}</td>
+      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 35) : "—"}</td>
       <td style="color:#555;font-size:9px">New kitchen, bathroom, replastering</td>
     </tr>
     <tr>
       <td><strong>Heavy (Full Refurb)</strong></td>
-      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqm ? gbp(fd.sqm * 185) : "—"}</td>
+      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 60) : "—"}</td>
       <td style="color:#555;font-size:9px">Rewire, new heating, full internal strip-out</td>
     </tr>
     <tr>

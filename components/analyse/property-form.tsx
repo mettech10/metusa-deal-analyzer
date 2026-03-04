@@ -25,7 +25,7 @@ const schema = z.object({
   purchasePrice: z.coerce.number().min(0),
   propertyType: z.enum(["house", "flat", "commercial"]),
   investmentType: z.enum(["btl", "brr", "hmo", "flip", "r2sa", "development"]),
-  sqm: z.coerce.number().min(0).optional(),
+  sqft: z.coerce.number().min(0).optional(),
   bedrooms: z.coerce.number().min(0).max(20),
   condition: z.enum(["excellent", "good", "fair", "needs-work"]),
   isAdditionalProperty: z.boolean(),
@@ -97,7 +97,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     purchasePrice: 0,
     propertyType: "house",
     investmentType: "btl",
-    sqm: undefined,
+    sqft: undefined,
     bedrooms: 3,
     condition: "good",
     isAdditionalProperty: true,
@@ -143,7 +143,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
 
   const purchaseType = watch("purchaseType")
   const investmentType = watch("investmentType")
-  const sqmValue = watch("sqm")
+  const sqftValue = watch("sqft")
   const conditionValue = watch("condition")
   const propertyTypeValue = watch("propertyType")
   const postcodeValue = watch("postcode")
@@ -153,14 +153,14 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
   // but only if the user hasn't manually entered a custom refurb amount
   // (i.e. refurb is still 0 or matches our last auto-estimate).
   useEffect(() => {
-    if (!sqmValue || sqmValue <= 0) return
-    const estimated = estimateRefurbCost(sqmValue, conditionValue, propertyTypeValue, postcodeValue)
+    if (!sqftValue || sqftValue <= 0) return
+    const estimated = estimateRefurbCost(sqftValue, conditionValue, propertyTypeValue, postcodeValue)
     // Only overwrite if field is currently 0 or if estimate changed meaningfully
     if (refurbValue === 0 || refurbValue === undefined) {
       setValue("refurbishmentBudget", estimated, { shouldDirty: false })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sqmValue, conditionValue, propertyTypeValue, postcodeValue])
+  }, [sqftValue, conditionValue, propertyTypeValue, postcodeValue])
 
   const isR2SA     = investmentType === "r2sa"
   const isHMO      = investmentType === "hmo"
@@ -255,15 +255,15 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
               )}
             />
           </FormField>
-          <FormField label="Sqm" hint="Property size in square meters (optional)">
+          <FormField label="Floor Size (sqft)" hint="From listing or EPC certificate (optional)">
             <div className="relative">
               <Input
                 type="number"
-                className="pr-12"
-                placeholder="85"
-                {...register("sqm")}
+                className="pr-14"
+                placeholder="990"
+                {...register("sqft")}
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">m²</span>
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">sqft</span>
             </div>
           </FormField>
           <FormField label="Bedrooms">
@@ -308,7 +308,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                 Additional property (5% SDLT surcharge)
               </Label>
             </div>
-            <FormField label="Refurbishment Budget" hint={sqmValue ? "Auto-estimated from size & condition — edit to override" : "Enter manually or set sqm + condition above"}>
+            <FormField label="Refurbishment Budget" hint={sqftValue ? "Auto-estimated from size & condition — edit to override" : "Enter manually or set floor size + condition above"}>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
                 <Input type="number" className="pl-7" {...register("refurbishmentBudget")} />
