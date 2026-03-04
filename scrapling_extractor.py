@@ -193,9 +193,20 @@ class PropertyExtractor:
         if title_match:
             title = title_match.group(1)
             title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', title, flags=re.IGNORECASE)
-            match = re.search(r'for sale\s+(?:in|at)\s+(.+?)(?:,\s*[A-Z]|$)', title, re.IGNORECASE)
-            if match:
-                data['address'] = match.group(1).strip()
+            # Extract everything after "for sale in" / "to rent in"
+            sale_in = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', title, re.IGNORECASE)
+            if sale_in:
+                data['address'] = title[sale_in.end():].strip()
+            else:
+                # Title may already be just the address (Zoopla / OnTheMarket style)
+                clean = re.sub(
+                    r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
+                    r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
+                    r'(?:house|property|home)?\s*',
+                    '', title, flags=re.IGNORECASE
+                ).strip()
+                if clean and len(clean) > 5:
+                    data['address'] = clean
         
         return data
 

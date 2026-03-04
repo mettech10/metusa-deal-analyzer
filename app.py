@@ -267,57 +267,96 @@ def scrape_with_jina(url: str) -> dict:
         data['postcode'] = found_postcode
 
         # --- Address ---
-        # Jina typically starts its output with "Title: <page title>"
-        # Rightmove: "3 bed house for sale in Prettywood, Heap Bridge, BL9 | Rightmove"
-        # Zoopla:    "Prettywood, Heap Bridge, BL9 | Zoopla"
-        title_line = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
-        if title_line:
-            title = title_line.group(1).strip()
-            # Strip portal suffix
-            title = re.sub(
-                r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale|To Rent).*',
-                '', title, flags=re.IGNORECASE
-            )
-            # Strip leading property-type prefix:
-            #   "3 bedroom semi-detached house for sale in ..."
-            #   "Flat to rent at ..."
-            # Strategy: if "for sale in" / "to rent in" / "to let in" is present,
-            # extract everything AFTER that phrase.
-            sale_in = re.search(
-                r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+',
-                title, re.IGNORECASE
-            )
-            if sale_in:
-                title = title[sale_in.end():].strip()
+        # Jina renders property portals with several address patterns:
+        #   Title line: "3 bed house for sale in Prettywood, Heap Bridge | Rightmove"
+        #   H1 heading: "# Prettywood, Heap Bridge"   (most reliable for Rightmove)
+        #   Bold line:  "**Prettywood, Heap Bridge**"
+        #   Meta desc:  "Address: Prettywood, Heap Bridge"
+
+        # Helper: clean a candidate address string
+        def _clean_addr(raw: str) -> str:
+            raw = raw.strip().strip('*#').strip()
+            # Remove portal suffix
+            raw = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', raw, flags=re.IGNORECASE)
+            # If "for sale in / to rent in" is present, keep only the part after it
+            m = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', raw, re.IGNORECASE)
+            if m:
+                raw = raw[m.end():]
             else:
-                # Fallback: strip a leading "N bed(room) Type " prefix if present
-                title = re.sub(
+                # Strip leading bedroom/type prefix: "3 bed semi-detached house "
+                raw = re.sub(
                     r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
                     r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
                     r'(?:house|property|home)?\s*',
-                    '', title, flags=re.IGNORECASE
-                ).strip()
-            if title and len(title) > 5:
-                if data['postcode'] and data['postcode'] not in title:
-                    title = f"{title}, {data['postcode']}"
-                data['address'] = title
+                    '', raw, flags=re.IGNORECASE
+                )
+            raw = raw.strip(' ,')
+            return raw
 
+        def _looks_like_address(s: str) -> bool:
+            """Reject navigation labels, map text, and very short/long strings."""
+            if not s or len(s) < 5 or len(s) > 120:
+                return False
+            bad = ('open street', 'openstreetmap', 'contributors', 'mapbox',
+                   'cookie', 'privacy', 'terms', 'sign in', 'log in', 'rightmove',
+                   'zoopla', 'onthemarket', 'back to', 'property for sale',
+                   'properties for sale', 'property to rent', '©')
+            sl = s.lower()
+            return not any(b in sl for b in bad)
+
+        # Strategy 1: "Title:" line
+        title_line = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
+        if title_line:
+            candidate = _clean_addr(title_line.group(1))
+            if _looks_like_address(candidate):
+                data['address'] = candidate
+
+        # Strategy 2: First H1 heading (# ...) in Jina markdown — most reliable for Rightmove
         if not data['address']:
-            # Fallback: find "Road / Street / etc." in text.
-            # Exclude OpenStreetMap attribution and map-widget text.
-            addr_pattern = re.search(
-                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Avenue|Lane|Drive|Way|Close|Crescent|Gardens|Place|Grove|Court|Terrace|Hill|View|Park))'
+            for h1 in re.finditer(r'^#{1,2}\s+(.+)$', text, re.MULTILINE):
+                candidate = _clean_addr(h1.group(1))
+                if _looks_like_address(candidate):
+                    data['address'] = candidate
+                    print(f"[Jina] Address from H1: {candidate}")
+                    break
+
+        # Strategy 3: Bold line "**Address**" near the top of the markdown
+        if not data['address']:
+            for bold in re.finditer(r'\*\*([^*]{5,80})\*\*', text[:3000]):
+                candidate = _clean_addr(bold.group(1))
+                if _looks_like_address(candidate):
+                    # Must contain a comma or postcode-like pattern to be an address
+                    if ',' in candidate or re.search(r'[A-Z]{1,2}\d', candidate):
+                        data['address'] = candidate
+                        print(f"[Jina] Address from bold: {candidate}")
+                        break
+
+        # Strategy 4: "Address:" explicit label in text
+        if not data['address']:
+            addr_label = re.search(r'(?:^|\n)Address:\s*(.+)', text, re.IGNORECASE)
+            if addr_label:
+                candidate = _clean_addr(addr_label.group(1))
+                if _looks_like_address(candidate):
+                    data['address'] = candidate
+
+        # Strategy 5: Street-name pattern (Road, Avenue, Lane …) — OSM-safe
+        if not data['address']:
+            for m in re.finditer(
+                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+'
+                r'(?:Road|Avenue|Lane|Drive|Way|Close|Crescent|Gardens|Place|Grove|Court|Terrace|Hill|View|Park))'
                 r'[,\s]+([^,\n)]{5,50})',
                 text
-            )
-            if addr_pattern:
-                candidate = addr_pattern.group(0)
-                # Reject if it's from a map attribution or OSM widget
-                if not re.search(r'open\s*street|openstreetmap|contributors|mapbox|©',
-                                 candidate, re.IGNORECASE):
-                    data['address'] = f"{addr_pattern.group(1)}, {addr_pattern.group(2).strip()}"
+            ):
+                candidate = m.group(0)
+                if _looks_like_address(candidate):
+                    data['address'] = f"{m.group(1)}, {m.group(2).strip()}"
+                    break
 
-        if not data['address']:
+        # Append postcode if not already present
+        if data['address'] and data['address'] != 'Address not available':
+            if data['postcode'] and data['postcode'] not in data['address']:
+                data['address'] = f"{data['address']}, {data['postcode']}"
+        elif not data['address']:
             data['address'] = "Address not available"
 
         print(f"[Jina] Extracted: price={data['price']}, beds={data['bedrooms']}, "
