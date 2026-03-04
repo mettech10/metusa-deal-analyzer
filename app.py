@@ -268,27 +268,54 @@ def scrape_with_jina(url: str) -> dict:
 
         # --- Address ---
         # Jina typically starts its output with "Title: <page title>"
+        # Rightmove: "3 bed house for sale in Prettywood, Heap Bridge, BL9 | Rightmove"
+        # Zoopla:    "Prettywood, Heap Bridge, BL9 | Zoopla"
         title_line = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
         if title_line:
             title = title_line.group(1).strip()
+            # Strip portal suffix
             title = re.sub(
-                r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*',
+                r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale|To Rent).*',
                 '', title, flags=re.IGNORECASE
             )
-            title = title.strip()
+            # Strip leading property-type prefix:
+            #   "3 bedroom semi-detached house for sale in ..."
+            #   "Flat to rent at ..."
+            # Strategy: if "for sale in" / "to rent in" / "to let in" is present,
+            # extract everything AFTER that phrase.
+            sale_in = re.search(
+                r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+',
+                title, re.IGNORECASE
+            )
+            if sale_in:
+                title = title[sale_in.end():].strip()
+            else:
+                # Fallback: strip a leading "N bed(room) Type " prefix if present
+                title = re.sub(
+                    r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
+                    r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
+                    r'(?:house|property|home)?\s*',
+                    '', title, flags=re.IGNORECASE
+                ).strip()
             if title and len(title) > 5:
                 if data['postcode'] and data['postcode'] not in title:
                     title = f"{title}, {data['postcode']}"
                 data['address'] = title
 
         if not data['address']:
+            # Fallback: find "Road / Street / etc." in text.
+            # Exclude OpenStreetMap attribution and map-widget text.
             addr_pattern = re.search(
-                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Street|Avenue|Lane|Drive|Way|Close|Crescent|Gardens))'
-                r'[,\s]+([^,\n]{5,50})',
+                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Avenue|Lane|Drive|Way|Close|Crescent|Gardens|Place|Grove|Court|Terrace|Hill|View|Park))'
+                r'[,\s]+([^,\n)]{5,50})',
                 text
             )
             if addr_pattern:
-                data['address'] = f"{addr_pattern.group(1)}, {addr_pattern.group(2).strip()}"
+                candidate = addr_pattern.group(0)
+                # Reject if it's from a map attribution or OSM widget
+                if not re.search(r'open\s*street|openstreetmap|contributors|mapbox|©',
+                                 candidate, re.IGNORECASE):
+                    data['address'] = f"{addr_pattern.group(1)}, {addr_pattern.group(2).strip()}"
 
         if not data['address']:
             data['address'] = "Address not available"
