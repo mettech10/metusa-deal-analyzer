@@ -28,6 +28,66 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
+def fetch_rightmove_api(property_id: str) -> dict:
+    """Fetch property details from Rightmove's internal JSON API.
+    Rightmove's TV/bigscreen app uses a public JSON endpoint that returns
+    structured property data including displayAddress — unaffected by anti-bot.
+    """
+    endpoints = [
+        f'https://api.rightmove.co.uk/api/bigscreen/property?propertyId={property_id}&apiApplication=BIGSCREEN',
+        f'https://www.rightmove.co.uk/api/_/properties/{property_id}',
+    ]
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': f'https://www.rightmove.co.uk/properties/{property_id}',
+        'Origin': 'https://www.rightmove.co.uk',
+    }
+    for endpoint in endpoints:
+        try:
+            r = requests.get(endpoint, headers=headers, timeout=10)
+            if r.status_code != 200:
+                continue
+            d = r.json()
+            result = {}
+            # BigScreen API nests data under 'property'; fall back to root
+            prop = d.get('property', d)
+            # Address
+            addr = (prop.get('displayAddress')
+                    or prop.get('address', {}).get('displayAddress')
+                    or prop.get('address', {}).get('summary'))
+            if addr and len(str(addr).strip()) > 3:
+                result['address'] = str(addr).strip()
+            # Postcode
+            addr_obj = prop.get('address', {})
+            pc = (addr_obj.get('postcode')
+                  or (addr_obj.get('outcode', '') + ' ' + addr_obj.get('incode', '')).strip())
+            if pc and len(pc) > 3:
+                result['postcode'] = pc.upper()
+            # Price
+            for price_path in [prop.get('price'), prop.get('listPrice', {}).get('amount'),
+                                prop.get('prices', {}).get('primaryPrice')]:
+                if price_path:
+                    try:
+                        result['price'] = int(str(price_path).replace(',', '').replace('£', '').strip())
+                        break
+                    except Exception:
+                        pass
+            # Bedrooms
+            beds = prop.get('bedrooms') or prop.get('bedroom')
+            if beds:
+                try:
+                    result['bedrooms'] = int(beds)
+                except Exception:
+                    pass
+            if result:
+                print(f"[RightmoveAPI] Got data from {endpoint}: {result}")
+                return result
+        except Exception as e:
+            print(f"[RightmoveAPI] {endpoint} failed: {e}")
+    return {}
+
+
 def scrape_with_jina(url: str) -> dict:
     """Scrape property using Jina Reader API (free, no API key required).
     Prepends https://r.jina.ai/ to the target URL and gets back clean markdown.
@@ -38,7 +98,9 @@ def scrape_with_jina(url: str) -> dict:
         'Accept': 'text/plain',
         'X-Timeout': '20',
         'X-Return-Format': 'markdown',
-        'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
+        # Don't remove 'header' — Rightmove wraps the property H1/address
+        # inside a sticky header element; removing it loses the address.
+        'X-Remove-Selector': 'nav,[class*="site-nav"],[class*="cookie"],[class*="banner"],[class*="popup"],[class*="modal"],footer',
     }
 
     try:
@@ -2745,7 +2807,14 @@ def extract_url():
         # Validate URL
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
-        
+
+        # For Rightmove URLs: call their JSON API first — it bypasses anti-bot
+        # and returns a structured address directly from Rightmove's own data.
+        rm_api_data = {}
+        rm_id_match = re.search(r'rightmove\.co\.uk/properties/(\d+)', url)
+        if rm_id_match:
+            rm_api_data = fetch_rightmove_api(rm_id_match.group(1))
+
         # Run Jina Reader and basic scraper in parallel to stay well under
         # Gunicorn's 30s worker timeout (Jina alone can take 15-20s).
         print("[extract-url] Running Jina Reader + basic scraper in parallel...")
@@ -2791,6 +2860,16 @@ def extract_url():
                 print("[extract-url] Using basic scraper result only")
             else:
                 extracted_data = None
+
+            # Apply Rightmove API data as highest-priority override for address/postcode.
+            # This bypasses anti-bot and returns the canonical displayAddress directly.
+            if rm_api_data:
+                if extracted_data is None:
+                    extracted_data = {}
+                for key in ('address', 'postcode', 'price', 'bedrooms'):
+                    if rm_api_data.get(key) and rm_api_data[key] not in ('', 'Address not available'):
+                        extracted_data[key] = rm_api_data[key]
+                print(f"[extract-url] Rightmove API data merged: {rm_api_data}")
 
         if extracted_data and _has_data(extracted_data):
             # Always validate / fill postcode via Ideal Postcodes PAF lookup.
