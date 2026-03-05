@@ -396,17 +396,21 @@ def scrape_with_jina(url: str) -> dict:
                 data['address'] = candidate
                 print(f"[Jina] Address from title: {candidate}")
 
-        # Words that indicate we're in the agent/contact/footer section of the page.
-        # Check only the 150 chars BEFORE the position — if we're already inside an
-        # agent block, these words will have appeared just above us.
-        _AGENT_WORDS = ('estate agent', 'letting agent', 'branch', 'contact us',
-                        'contact agent', 'enquire', 'tel:', 'phone:', 'call us',
+        # Words that indicate we're in the agent/contact section of the page.
+        # Only look at text BEFORE the position — if we're past the agent
+        # block header, these words will have appeared above us.
+        # Use specific multi-word phrases to avoid false positives ('branch'
+        # alone can appear in "local branch", "branch line", etc.)
+        _AGENT_WORDS = ('estate agent', 'letting agent', 'contact us', 'contact agent',
                         'our office', 'agent address', 'agent postcode',
                         'branch address', 'office address', 'managing agent',
-                        'registered office', 'company no', 'vat number')
+                        'registered office', 'company no', 'vat number',
+                        'call us on', 'tel: 0', 'phone: 0')
 
         def _in_agent_section(idx: int) -> bool:
-            ctx = text[max(0, idx - 150):idx + 150].lower()
+            # Only look BEFORE this position — descriptions after the heading can
+            # contain innocent words like 'branch', 'enquire', 'tel:' etc.
+            ctx = text[max(0, idx - 400):idx].lower()
             return any(w in ctx for w in _AGENT_WORDS)
 
         # Strategy 2: First H1/H2 heading in the TOP portion of the page only.
@@ -489,6 +493,28 @@ def scrape_with_jina(url: str) -> dict:
                 candidate = m.group(0)
                 if _looks_like_address(candidate):
                     data['address'] = f"{m.group(1)}, {m.group(2).strip()}"
+                    break
+
+        # Strategy 7: Last-resort — scan the very top of the page (first 1500 chars,
+        # guaranteed property content) for any short comma-separated line that looks
+        # like a place name (capitalised words, not a generic label).
+        if not data['address']:
+            for line in text[:1500].splitlines():
+                line = line.strip().strip('*#[]()').strip()
+                # Strip markdown links within the line
+                line = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', line)
+                if not line or len(line) < 5 or len(line) > 100:
+                    continue
+                # Must contain at least one comma OR a postcode-like pattern
+                if not (',' in line or re.search(r'[A-Z]{1,2}\d', line)):
+                    continue
+                # Must start with a capital letter word (place name, not a label)
+                if not re.match(r'^[A-Z][a-zA-Z]', line):
+                    continue
+                candidate = _clean_addr(line)
+                if _looks_like_address(candidate) and len(candidate) > 5:
+                    data['address'] = candidate
+                    print(f"[Jina] Address from top-of-page scan: {candidate}")
                     break
 
         # Append postcode if not already present
