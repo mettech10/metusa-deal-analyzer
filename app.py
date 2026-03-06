@@ -28,66 +28,6 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
-def fetch_rightmove_api(property_id: str) -> dict:
-    """Fetch property details from Rightmove's internal JSON API.
-    Rightmove's TV/bigscreen app uses a public JSON endpoint that returns
-    structured property data including displayAddress — unaffected by anti-bot.
-    """
-    endpoints = [
-        f'https://api.rightmove.co.uk/api/bigscreen/property?propertyId={property_id}&apiApplication=BIGSCREEN',
-        f'https://www.rightmove.co.uk/api/_/properties/{property_id}',
-    ]
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': f'https://www.rightmove.co.uk/properties/{property_id}',
-        'Origin': 'https://www.rightmove.co.uk',
-    }
-    for endpoint in endpoints:
-        try:
-            r = requests.get(endpoint, headers=headers, timeout=10)
-            if r.status_code != 200:
-                continue
-            d = r.json()
-            result = {}
-            # BigScreen API nests data under 'property'; fall back to root
-            prop = d.get('property', d)
-            # Address
-            addr = (prop.get('displayAddress')
-                    or prop.get('address', {}).get('displayAddress')
-                    or prop.get('address', {}).get('summary'))
-            if addr and len(str(addr).strip()) > 3:
-                result['address'] = str(addr).strip()
-            # Postcode
-            addr_obj = prop.get('address', {})
-            pc = (addr_obj.get('postcode')
-                  or (addr_obj.get('outcode', '') + ' ' + addr_obj.get('incode', '')).strip())
-            if pc and len(pc) > 3:
-                result['postcode'] = pc.upper()
-            # Price
-            for price_path in [prop.get('price'), prop.get('listPrice', {}).get('amount'),
-                                prop.get('prices', {}).get('primaryPrice')]:
-                if price_path:
-                    try:
-                        result['price'] = int(str(price_path).replace(',', '').replace('£', '').strip())
-                        break
-                    except Exception:
-                        pass
-            # Bedrooms
-            beds = prop.get('bedrooms') or prop.get('bedroom')
-            if beds:
-                try:
-                    result['bedrooms'] = int(beds)
-                except Exception:
-                    pass
-            if result:
-                print(f"[RightmoveAPI] Got data from {endpoint}: {result}")
-                return result
-        except Exception as e:
-            print(f"[RightmoveAPI] {endpoint} failed: {e}")
-    return {}
-
-
 def scrape_with_jina(url: str) -> dict:
     """Scrape property using Jina Reader API (free, no API key required).
     Prepends https://r.jina.ai/ to the target URL and gets back clean markdown.
@@ -98,9 +38,7 @@ def scrape_with_jina(url: str) -> dict:
         'Accept': 'text/plain',
         'X-Timeout': '20',
         'X-Return-Format': 'markdown',
-        # Don't remove 'header' — Rightmove wraps the property H1/address
-        # inside a sticky header element; removing it loses the address.
-        'X-Remove-Selector': 'nav,[class*="site-nav"],[class*="cookie"],[class*="banner"],[class*="popup"],[class*="modal"],footer',
+        'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
     }
 
     try:
@@ -120,7 +58,7 @@ def scrape_with_jina(url: str) -> dict:
             'property_type': None,
             'bedrooms': None,
             'description': None,
-            'sqft': None,
+            'sqm': None,
         }
 
         # --- Price ---
@@ -180,25 +118,24 @@ def scrape_with_jina(url: str) -> dict:
                 data['property_type'] = 'Semi-Detached' if ptype.lower() == 'semi' else ptype.title()
                 break
 
-        # --- Floor area (sqft) ---
+        # --- Floor area (sqm) ---
         # Rightmove/Zoopla show size as "85 sq m", "85m²", "915 sq ft", etc.
-        # We store everything as sqft — convert sqm if needed.
-        sqft_val = None
-        floor_patterns = [
-            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', False),   # Already sqft
-            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', True),    # Metres → sqft
+        sqm_val = None
+        sqm_patterns_list = [
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', False),   # Already metres
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', True),     # Feet → convert
         ]
-        for pat, is_sqm in floor_patterns:
+        for pat, is_sqft in sqm_patterns_list:
             m = re.search(pat, text, re.IGNORECASE)
             if m:
                 val = float(m.group(1))
-                if is_sqm:
-                    val = val * 10.764  # sq m → sq ft
-                if 100 <= val <= 25000:   # Sanity check
-                    sqft_val = round(val)
+                if is_sqft:
+                    val = val / 10.764  # sq ft → sq m
+                if 10 <= val <= 2000:   # Sanity check
+                    sqm_val = round(val, 1)
                     break
-        data['sqft'] = sqft_val
-        print(f"[Jina] Floor area: {sqft_val} sqft")
+        data['sqm'] = sqm_val
+        print(f"[Jina] Floor area: {sqm_val} sqm")
 
         # --- Postcode ---
         VALID_AREAS = {
@@ -237,24 +174,15 @@ def scrape_with_jina(url: str) -> dict:
 
         found_postcode = None
 
-        # Strategy 0: scan only lines containing property keywords in the first
-        # 1 200 chars. This catches postcodes in the page title even if the
-        # "Title:" line regex doesn't match due to line-ending quirks, while
-        # avoiding accidental picks of nav/widget postcodes.
-        _PROP_KEYWORDS = ('bed', 'for sale', 'to rent', 'to let', 'property',
-                          'house', 'flat', 'title:', 'detached', 'terraced', 'bungalow')
-        for line in text[:1200].split('\n'):
-            ll = line.lower()
-            if not any(k in ll for k in _PROP_KEYWORDS):
-                continue
-            line_pcs = re.findall(postcode_pattern, line.upper())
-            for pc in line_pcs:
-                fp = format_postcode(pc)
-                if valid_pc(fp):
-                    found_postcode = fp
-                    print(f"[Jina] Postcode from header scan: {fp}")
-                    break
-            if found_postcode:
+        # Strategy 0: scan the first 1 200 chars (Jina always puts Title / URL
+        # Source at the top).  This catches postcodes in the page title even if
+        # the "Title:" line regex doesn't match due to line-ending quirks.
+        header_pcs = re.findall(postcode_pattern, text[:1200].upper())
+        for pc in header_pcs:
+            fp = format_postcode(pc)
+            if valid_pc(fp):
+                found_postcode = fp
+                print(f"[Jina] Postcode from header scan: {fp}")
                 break
 
         # Strategy 1: parse the "Title:" line that Jina emits.
@@ -314,17 +242,13 @@ def scrape_with_jina(url: str) -> dict:
                         score += 40
 
                     # Strongly penalise agent/branch/contact sections
-                    if any(w in context for w in ['estate agent', 'letting agent', 'branch',
-                                                   'contact us', 'contact agent', 'enquire',
-                                                   'tel:', 'phone', 'call us', 'our office',
-                                                   'book a viewing', 'arrange a viewing']):
+                    if any(w in context for w in ['estate agent', 'branch', 'contact us',
+                                                   'tel:', 'phone', 'call us', 'our office']):
                         score -= 200
                     if any(w in context for w in ['agent address', 'agent postcode',
-                                                   'branch address', 'office address',
-                                                   'registered office', 'managing agent']):
-                        score -= 200
-                    if any(w in context for w in ['vat', 'registration', 'company number',
-                                                   'company no', 'registered in england']):
+                                                   'branch address', 'office address']):
+                        score -= 100
+                    if any(w in context for w in ['vat', 'registration', 'company number']):
                         score -= 200
 
                     best_score = max(best_score, score)
@@ -342,190 +266,34 @@ def scrape_with_jina(url: str) -> dict:
         data['postcode'] = found_postcode
 
         # --- Address ---
-        # Jina renders property portals with several address patterns:
-        #   Title line: "3 bed house for sale in Prettywood, Heap Bridge | Rightmove"
-        #   H1 heading: "# Prettywood, Heap Bridge"   (most reliable for Rightmove)
-        #   Bold line:  "**Prettywood, Heap Bridge**"
-        #   Meta desc:  "Address: Prettywood, Heap Bridge"
-
-        # Helper: clean a candidate address string
-        def _clean_addr(raw: str) -> str:
-            raw = raw.strip().strip('*#').strip()
-            # Remove portal suffix (| Rightmove, - Zoopla, etc.)
-            raw = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket).*', '', raw, flags=re.IGNORECASE)
-            # Remove trailing sale/rent description: "- Property for Sale", "- For Sale"
-            raw = re.sub(r'\s*[-–]\s*(?:property\s+)?(?:for sale|to rent|to let)\s*$', '', raw, flags=re.IGNORECASE)
-            # Remove leading "To Let:", "For Sale:", "To Rent:" prefix
-            raw = re.sub(r'^(?:to let|for sale|to rent)\s*:\s*', '', raw, flags=re.IGNORECASE)
-            # If "for sale in / to rent in / to let at" is present, keep only the part after it
-            m = re.search(r'\b(?:for sale|to rent|to let)\s+(?:in|at)\s+', raw, re.IGNORECASE)
-            if m:
-                raw = raw[m.end():]
-            else:
-                # Strip leading bedroom/type prefix: "3 bed semi-detached house "
-                raw = re.sub(
-                    r'^(?:\d+\s+)?(?:bed(?:room)?s?\s+)?'
-                    r'(?:(?:detached|semi[- ]detached|terraced|flat|apartment|bungalow|maisonette|studio)\s+)?'
-                    r'(?:house|property|home)?\s*',
-                    '', raw, flags=re.IGNORECASE
-                )
-                # After stripping bedroom prefix, "for sale" may still lead
-                # with an optional dash, e.g. "- For Sale, Alston, Cumbria"
-                # or "for sale, Lane End..." — strip it.
-                raw = re.sub(r'^[-–\s]*(?:for sale|to rent|to let)\s*[,:\-\s]+', '', raw, flags=re.IGNORECASE)
-            raw = raw.strip(' ,-')
-            return raw
-
-        def _looks_like_address(s: str) -> bool:
-            """Reject navigation labels, map text, and very short/long strings."""
-            if not s or len(s) < 4 or len(s) > 120:
-                return False
-            # Note: 'for sale'/'to rent'/'to let' removed — _clean_addr strips those;
-            # keeping them here was causing rural properties to be rejected
-            bad = ('open street', 'openstreetmap', 'contributors', 'mapbox',
-                   'cookie', 'privacy', 'terms', 'sign in', 'log in', 'rightmove',
-                   'zoopla', 'onthemarket', 'back to', 'property search', '©')
-            sl = s.lower()
-            return not any(b in sl for b in bad)
-
-        # Strategy 1: "Title:" line
+        # Jina typically starts its output with "Title: <page title>"
         title_line = re.search(r'^Title:\s*(.+)$', text, re.MULTILINE | re.IGNORECASE)
         if title_line:
-            candidate = _clean_addr(title_line.group(1))
-            if _looks_like_address(candidate):
-                data['address'] = candidate
-                print(f"[Jina] Address from title: {candidate}")
+            title = title_line.group(1).strip()
+            title = re.sub(
+                r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*',
+                '', title, flags=re.IGNORECASE
+            )
+            title = title.strip()
+            if title and len(title) > 5:
+                if data['postcode'] and data['postcode'] not in title:
+                    title = f"{title}, {data['postcode']}"
+                data['address'] = title
 
-        # Words that indicate we're in the agent/contact section of the page.
-        # Only look at text BEFORE the position — if we're past the agent
-        # block header, these words will have appeared above us.
-        # Use specific multi-word phrases to avoid false positives ('branch'
-        # alone can appear in "local branch", "branch line", etc.)
-        _AGENT_WORDS = ('estate agent', 'letting agent', 'contact us', 'contact agent',
-                        'our office', 'agent address', 'agent postcode',
-                        'branch address', 'office address', 'managing agent',
-                        'registered office', 'company no', 'vat number',
-                        'call us on', 'tel: 0', 'phone: 0')
-
-        def _in_agent_section(idx: int) -> bool:
-            # Only look BEFORE this position — descriptions after the heading can
-            # contain innocent words like 'branch', 'enquire', 'tel:' etc.
-            ctx = text[max(0, idx - 400):idx].lower()
-            return any(w in ctx for w in _AGENT_WORDS)
-
-        # Strategy 2: First H1/H2 heading in the TOP portion of the page only.
-        # Agent sections and footers are towards the bottom — restricting to the
-        # first 3 500 chars avoids picking up the estate agent's branch address.
-        # Also handles inline markdown links: [text](url) → text
-        # And combines consecutive headings when address is split (H1=house name, H2=area).
         if not data['address']:
-            headings = list(re.finditer(r'^(#{1,2})\s+(.+)$', text[:3500], re.MULTILINE))
-            for i, h1 in enumerate(headings):
-                if _in_agent_section(h1.start()):
-                    continue
-                raw_h = h1.group(2)
-                # Strip inline markdown links: [text](url) → text
-                raw_h = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', raw_h)
-                candidate = _clean_addr(raw_h)
-                # If heading is very short (just a house name) and there's a next
-                # heading nearby, combine them (e.g. "# Hill Farm" + "## Garrigill, Alston")
-                if (len(candidate) < 25 and ',' not in candidate and
-                        i + 1 < len(headings) and not _in_agent_section(headings[i+1].start())):
-                    raw_h2 = headings[i+1].group(2)
-                    raw_h2 = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', raw_h2)
-                    next_cand = _clean_addr(raw_h2)
-                    if _looks_like_address(next_cand):
-                        candidate = f"{candidate}, {next_cand}" if candidate else next_cand
-                if _looks_like_address(candidate):
-                    data['address'] = candidate
-                    print(f"[Jina] Address from H1: {candidate}")
-                    break
+            addr_pattern = re.search(
+                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+(?:Road|Street|Avenue|Lane|Drive|Way|Close|Crescent|Gardens))'
+                r'[,\s]+([^,\n]{5,50})',
+                text
+            )
+            if addr_pattern:
+                data['address'] = f"{addr_pattern.group(1)}, {addr_pattern.group(2).strip()}"
 
-        # Strategy 3: Bold "**text**" near the very top — some portals bold the address
         if not data['address']:
-            for bold in re.finditer(r'\*\*([^*]{4,80})\*\*', text[:4000]):
-                if _in_agent_section(bold.start()):
-                    continue
-                candidate = _clean_addr(bold.group(1))
-                if _looks_like_address(candidate):
-                    if ',' in candidate or re.search(r'[A-Z]{1,2}\d', candidate):
-                        data['address'] = candidate
-                        print(f"[Jina] Address from bold: {candidate}")
-                        break
-
-        # Strategy 4: Explicit "Address:" label
-        if not data['address']:
-            addr_label = re.search(r'(?:^|\n)Address:\s*(.+)', text, re.IGNORECASE)
-            if addr_label and not _in_agent_section(addr_label.start()):
-                candidate = _clean_addr(addr_label.group(1))
-                if _looks_like_address(candidate):
-                    data['address'] = candidate
-
-        # Strategy 5: Look for text on the line immediately BEFORE the already-
-        # selected property postcode. Only use data['postcode'] — not every postcode
-        # on the page — to avoid accidentally reading the agent's address.
-        if not data['address'] and data['postcode']:
-            pc_search = data['postcode'].replace(' ', r'\s?')
-            for pc_match in re.finditer(pc_search, text, re.IGNORECASE):
-                if _in_agent_section(pc_match.start()):
-                    continue
-                start = max(0, pc_match.start() - 150)
-                before = text[start:pc_match.start()].strip()
-                lines = [l.strip() for l in before.split('\n') if l.strip()]
-                if lines:
-                    candidate = _clean_addr(lines[-1])
-                    if _looks_like_address(candidate) and len(candidate) > 4:
-                        data['address'] = candidate
-                        print(f"[Jina] Address from text before postcode: {candidate}")
-                        break
-
-        # Strategy 6: Street-name pattern (Road, Avenue, Lane …) — OSM-safe,
-        # only look in the first 4 000 chars to avoid agent address sections.
-        if not data['address']:
-            for m in re.finditer(
-                r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?\s+'
-                r'(?:Road|Avenue|Lane|Drive|Way|Close|Crescent|Gardens|Place|Grove|Court|Terrace|Hill|View|Park))'
-                r'[,\s]+([^,\n)]{5,50})',
-                text[:4000]
-            ):
-                if _in_agent_section(m.start()):
-                    continue
-                candidate = m.group(0)
-                if _looks_like_address(candidate):
-                    data['address'] = f"{m.group(1)}, {m.group(2).strip()}"
-                    break
-
-        # Strategy 7: Last-resort — scan the very top of the page (first 1500 chars,
-        # guaranteed property content) for any short comma-separated line that looks
-        # like a place name (capitalised words, not a generic label).
-        if not data['address']:
-            for line in text[:1500].splitlines():
-                line = line.strip().strip('*#[]()').strip()
-                # Strip markdown links within the line
-                line = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', line)
-                if not line or len(line) < 5 or len(line) > 100:
-                    continue
-                # Must contain at least one comma OR a postcode-like pattern
-                if not (',' in line or re.search(r'[A-Z]{1,2}\d', line)):
-                    continue
-                # Must start with a capital letter word (place name, not a label)
-                if not re.match(r'^[A-Z][a-zA-Z]', line):
-                    continue
-                candidate = _clean_addr(line)
-                if _looks_like_address(candidate) and len(candidate) > 5:
-                    data['address'] = candidate
-                    print(f"[Jina] Address from top-of-page scan: {candidate}")
-                    break
-
-        # Append postcode if not already present
-        if data['address'] and data['address'] != 'Address not available':
-            if data['postcode'] and data['postcode'] not in data['address']:
-                data['address'] = f"{data['address']}, {data['postcode']}"
-        elif not data['address']:
             data['address'] = "Address not available"
 
         print(f"[Jina] Extracted: price={data['price']}, beds={data['bedrooms']}, "
-              f"sqft={data['sqft']}, postcode={data['postcode']}, address={str(data['address'])[:60]}")
+              f"sqm={data['sqm']}, postcode={data['postcode']}, address={str(data['address'])[:60]}")
         return data
 
     except Exception as e:
@@ -565,74 +333,6 @@ def resolve_postcode_from_address(address: str) -> str | None:
     except Exception as e:
         print(f"[IdealPostcodes] Error resolving postcode: {e}")
     return None
-
-def lookup_floor_area_from_epc(address: str, postcode: str) -> float | None:
-    """Query the UK EPC Open Data API to obtain the floor area (sqft) of a property.
-
-    The API is free; register at https://epc.opendatacommunities.org to get
-    credentials.  Requires env vars EPC_API_EMAIL and EPC_API_KEY.
-
-    Searches by postcode (required) and optionally narrows by address string.
-    Returns the floor area converted to sqft, or None if unavailable.
-    """
-    if not EPC_API_EMAIL or not EPC_API_KEY:
-        return None
-    if not postcode:
-        return None
-
-    # Normalise postcode: strip spaces, upper-case, insert space before last 3
-    pc = postcode.upper().replace(' ', '')
-    if len(pc) > 3:
-        pc = pc[:-3] + ' ' + pc[-3:]
-
-    params = {'postcode': pc, 'size': 5}
-
-    try:
-        resp = requests.get(
-            'https://epc.opendatacommunities.org/api/v1/domestic/search',
-            params=params,
-            auth=(EPC_API_EMAIL, EPC_API_KEY),
-            headers={'Accept': 'application/json'},
-            timeout=6,
-        )
-        if resp.status_code != 200:
-            print(f"[EPC] API error {resp.status_code}")
-            return None
-
-        rows = resp.json().get('rows', [])
-        if not rows:
-            print(f"[EPC] No records found for postcode {pc}")
-            return None
-
-        # If we have an address, try to pick the best-matching row
-        best_row = rows[0]
-        if address and len(rows) > 1:
-            addr_upper = address.upper()
-            for row in rows:
-                row_addr = (row.get('address1', '') + ' ' + row.get('address2', '')).upper()
-                # Prefer a row whose address tokens appear in our scraped address
-                tokens = [t for t in row_addr.split() if len(t) > 2]
-                if tokens and sum(1 for t in tokens if t in addr_upper) >= max(1, len(tokens) // 2):
-                    best_row = row
-                    break
-
-        sqm = best_row.get('total-floor-area')
-        if sqm is None:
-            return None
-
-        sqm = float(sqm)
-        if sqm <= 0:
-            return None
-
-        sqft = round(sqm * 10.764)
-        print(f"[EPC] Floor area for {pc}: {sqm} m² = {sqft} sqft "
-              f"(address: {best_row.get('address1', '')})")
-        return sqft
-
-    except Exception as e:
-        print(f"[EPC] Error looking up floor area: {e}")
-        return None
-
 
 # Security: Input validation functions
 def validate_postcode(postcode):
@@ -685,10 +385,6 @@ limiter = Limiter(
 
 # ── Ideal Postcodes (address → postcode lookup) ─────────────────────────────
 IDEAL_POSTCODES_API_KEY = os.environ.get('IDEAL_POSTCODES_API_KEY', '')
-
-# ── EPC Open Data API (floor area lookup) ───────────────────────────────────
-EPC_API_EMAIL = os.environ.get('EPC_API_EMAIL', '')
-EPC_API_KEY   = os.environ.get('EPC_API_KEY', '')
 
 # ── Supabase (optional) ────────────────────────────────────────────────────
 _SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -1436,116 +1132,49 @@ def check_article_4(postcode):
     }
 
 
-def get_refurb_estimate(postcode, property_type, bedrooms, sqft=None, condition='fair'):
-    """Estimate UK refurbishment costs from property size, condition, and location.
-
-    Tiers are based on 2024-2025 UK market rates (Checkatrade / RICS benchmarks):
-      cosmetic   £5–12/sqft  — paint, carpets, minor repairs
-      light      £12–25/sqft — redecoration, some flooring/fixtures
-      medium     £25–45/sqft — new kitchen + bathroom, full redecoration
-      full       £45–75/sqft — kitchen, bathroom, rewire, replumb, damp, windows
-      structural £75–140/sqft — all of the above plus structural/extension work
-
-    condition → primary tier mapping:
-      excellent → cosmetic  |  good → light  |  fair → medium
-      poor → full           |  derelict → structural
+def get_refurb_estimate(postcode, property_type, bedrooms, internal_area=1000):
     """
-    # Bedroom-based sqft fallback (UK average internal areas)
-    bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
-    if not sqft or sqft <= 0:
-        try:
-            beds = int(bedrooms) if bedrooms else 3
-        except (TypeError, ValueError):
-            beds = 3
-        sqft = bedroom_sqft.get(min(beds, 5), 990)
-
-    # Cost per sqft: (low, mid, high)
-    tier_costs = {
-        'cosmetic':   (5,   8,   12),
-        'light':      (12,  18,  25),
-        'medium':     (25,  35,  45),
-        'full':       (45,  60,  75),
-        'structural': (75, 100, 140),
+    Get refurbishment cost estimate per square meter
+    
+    Based on typical UK refurbishment costs
+    """
+    # Base costs per sq ft (converted from sq m)
+    base_costs = {
+        'light': 50,      # £50 per sq m - cosmetic only
+        'medium': 100,    # £100 per sq m - new kitchen, bathroom
+        'heavy': 180,     # £180 per sq m - full refurb including electrics
+        'structural': 250 # £250 per sq m - including structural work
     }
-
-    condition_tier = {
-        'excellent': 'cosmetic',
-        'good':      'light',
-        'fair':      'medium',
-        'poor':      'full',
-        'derelict':  'structural',
-    }
-    primary_tier = condition_tier.get(condition, 'medium')
-
-    # Source: Checkatrade/RICS/BRRR frameworks — detached has more external envelope,
-    # bungalows have a high roof-to-floor ratio; flats share structure with neighbours.
+    
+    # Property type multipliers
     type_multipliers = {
-        'detached':      1.10,
-        'semi-detached': 1.00,   # semi is the UK baseline
-        'semi':          1.00,
-        'terraced':      0.95,
-        'flat':          0.85,   # no roof/external structure
-        'bungalow':      1.15,   # large roof footprint vs floor area
-        'cottage':       1.20,   # non-standard, older construction
+        'detached': 1.0,
+        'semi': 0.9,
+        'terraced': 0.85,
+        'flat': 0.8,
+        'bungalow': 1.1
     }
-    type_mult = type_multipliers.get(property_type.lower().strip(), 0.95)
-
-    # Regional multipliers from postcode prefix.
-    # Midlands/North are 10-18% below national average; London inner +40-50%;
-    # South East +10-25%. Sources: Checkatrade, BuildPartner regional guides 2024-25.
-    REGION_MULT = {
-        # London inner
-        'EC': 1.50, 'WC': 1.50, 'W1': 1.50, 'SW1': 1.50, 'SE1': 1.45, 'N1': 1.40,
-        # London outer
-        'SW': 1.35, 'W': 1.35, 'NW': 1.30, 'E': 1.30,
-        'N': 1.25, 'SE': 1.25, 'KT': 1.25, 'TW': 1.25,
-        'BR': 1.20, 'CR': 1.20, 'RM': 1.20, 'HA': 1.20, 'UB': 1.20,
-        'SM': 1.20, 'WD': 1.15, 'EN': 1.15, 'IG': 1.15, 'DA': 1.15,
-        # South East / Home Counties
-        'GU': 1.20, 'RH': 1.20, 'SL': 1.15, 'AL': 1.15, 'OX': 1.15,
-        'RG': 1.15, 'HP': 1.10, 'CM': 1.10, 'BN': 1.10, 'TN': 1.10,
-        'ME': 1.05, 'CT': 1.05,
-        # Midlands
-        'B': 0.95, 'CV': 0.92, 'LE': 0.92, 'NG': 0.90, 'DE': 0.90,
-        'ST': 0.90, 'WS': 0.90, 'WV': 0.90, 'DY': 0.90,
-        # North of England
-        'M': 0.90, 'L': 0.88, 'LS': 0.88, 'WF': 0.87, 'HD': 0.87,
-        'BD': 0.87, 'S': 0.87, 'NE': 0.87, 'HU': 0.85, 'DN': 0.85,
-        'PR': 0.87, 'BB': 0.85, 'BL': 0.85, 'OL': 0.85, 'SK': 0.88,
-        # Scotland
-        'EH': 0.90, 'G': 0.88, 'AB': 0.85, 'DD': 0.82, 'KY': 0.82,
-        # Wales
-        'CF': 0.85, 'SA': 0.82, 'NP': 0.83, 'LL': 0.80, 'SY': 0.82,
-    }
-    pc = (postcode or '').upper().replace(' ', '')
-    region_mult = 1.00  # national average default (South West, East Midlands, etc.)
-    # Try longest prefix first to avoid 'N' matching 'NW', etc.
-    for prefix in sorted(REGION_MULT, key=len, reverse=True):
-        if pc.startswith(prefix):
-            region_mult = REGION_MULT[prefix]
-            break
-
+    
+    # Area adjustment (London premium)
+    area_adjustment = 1.0
+    if postcode.startswith('SW') or postcode.startswith('W') or postcode.startswith('NW'):
+        area_adjustment = 1.3  # 30% premium for London
+    
+    # Default internal area if not provided
+    sqm = internal_area
+    
     estimates = {}
-    for tier, (low, mid, high) in tier_costs.items():
-        effective_low  = round(low  * type_mult * region_mult * sqft)
-        effective_mid  = round(mid  * type_mult * region_mult * sqft)
-        effective_high = round(high * type_mult * region_mult * sqft)
-        estimates[tier] = {
-            'low':          effective_low,
-            'mid':          effective_mid,
-            'high':         effective_high,
-            'per_sqft_mid': round(mid * type_mult * region_mult, 2),
-            'label':        tier.capitalize(),
-            'is_primary':   tier == primary_tier,
+    for level, base in base_costs.items():
+        multiplier = type_multipliers.get(property_type.lower().replace('-detached', '').replace('semi-', 'semi'), 1.0)
+        cost_per_sqm = base * multiplier * area_adjustment
+        total = cost_per_sqm * sqm
+        estimates[level] = {
+            'per_sqm': round(cost_per_sqm, 2),
+            'total': round(total, 0),
+            'label': level.capitalize()
         }
-
-    return {
-        'estimates':    estimates,
-        'sqft_used':    int(sqft),
-        'condition':    condition,
-        'primary_tier': primary_tier,
-        'recommended':  estimates[primary_tier],
-    }
+    
+    return estimates
 
 def analyze_deal(data):
     """Perform comprehensive deal analysis with input validation"""
@@ -1894,12 +1523,8 @@ def analyze_deal(data):
     
     # Get refurb estimates
     property_type_for_refurb = data.get('property_type', 'terraced').lower()
-    try:
-        sqft = float(data.get('sqft', 0) or 0)
-    except (TypeError, ValueError):
-        sqft = 0
-    condition = data.get('condition', 'fair')
-    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, sqft, condition)
+    internal_area = data.get('internal_area', 1000)  # Default 1000 sq ft
+    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, internal_area)
     
     # Score visualization data
     score_breakdown = {
@@ -2833,14 +2458,7 @@ def extract_url():
         # Validate URL
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
-
-        # For Rightmove URLs: call their JSON API first — it bypasses anti-bot
-        # and returns a structured address directly from Rightmove's own data.
-        rm_api_data = {}
-        rm_id_match = re.search(r'rightmove\.co\.uk/properties/(\d+)', url)
-        if rm_id_match:
-            rm_api_data = fetch_rightmove_api(rm_id_match.group(1))
-
+        
         # Run Jina Reader and basic scraper in parallel to stay well under
         # Gunicorn's 30s worker timeout (Jina alone can take 15-20s).
         print("[extract-url] Running Jina Reader + basic scraper in parallel...")
@@ -2887,16 +2505,6 @@ def extract_url():
             else:
                 extracted_data = None
 
-            # Apply Rightmove API data as highest-priority override for address/postcode.
-            # This bypasses anti-bot and returns the canonical displayAddress directly.
-            if rm_api_data:
-                if extracted_data is None:
-                    extracted_data = {}
-                for key in ('address', 'postcode', 'price', 'bedrooms'):
-                    if rm_api_data.get(key) and rm_api_data[key] not in ('', 'Address not available'):
-                        extracted_data[key] = rm_api_data[key]
-                print(f"[extract-url] Rightmove API data merged: {rm_api_data}")
-
         if extracted_data and _has_data(extracted_data):
             # Always validate / fill postcode via Ideal Postcodes PAF lookup.
             # Uses the scraped address string as the query so we get a confirmed
@@ -2908,27 +2516,6 @@ def extract_url():
                 if resolved:
                     extracted_data['postcode'] = resolved
                     print(f"[extract-url] Postcode set to {resolved} via Ideal Postcodes")
-
-            # If no floor area was found in the listing, try the EPC API first,
-            # then fall back to a bedroom-based estimate.
-            if not extracted_data.get('sqft'):
-                epc_sqft = lookup_floor_area_from_epc(
-                    extracted_data.get('address', ''),
-                    extracted_data.get('postcode', ''),
-                )
-                if epc_sqft:
-                    extracted_data['sqft'] = epc_sqft
-                    extracted_data['sqft_source'] = 'epc'
-                    print(f"[extract-url] Floor area from EPC API: {epc_sqft} sqft")
-                else:
-                    bedroom_sqft = {1: 480, 2: 720, 3: 990, 4: 1350, 5: 1800}
-                    try:
-                        beds = int(extracted_data.get('bedrooms') or 3)
-                    except (TypeError, ValueError):
-                        beds = 3
-                    extracted_data['sqft'] = bedroom_sqft.get(min(beds, 5), 990)
-                    extracted_data['sqft_estimated'] = True
-                    print(f"[extract-url] Floor area estimated from {beds} bed(s): {extracted_data['sqft']} sqft")
 
             return jsonify({
                 'success': True,
