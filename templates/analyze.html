@@ -667,6 +667,32 @@
                     </select>
                 </div>
 
+                <div class="form-group">
+                    <label for="floorSize">
+                        Floor Size (m²)
+                        <span id="epcSpinner" style="display:none;font-size:0.75rem;color:var(--text-light);margin-left:6px">⏳ Looking up EPC…</span>
+                        <span id="epcFound"   style="display:none;font-size:0.75rem;color:#22c55e;margin-left:6px">✓ From EPC register</span>
+                    </label>
+                    <input type="number" id="floorSize" name="internal_area" placeholder="e.g. 85" min="10" max="2000" step="1">
+                </div>
+
+                <div class="form-group">
+                    <label for="propertyCondition">Property Condition</label>
+                    <select id="propertyCondition" name="property_condition">
+                        <option value="">— Select condition —</option>
+                        <option value="needs-works">Needs Works (full refurb)</option>
+                        <option value="fair">Fair (kitchen / bathroom)</option>
+                        <option value="good">Good (cosmetic only)</option>
+                        <option value="excellent">Excellent / Move-in Ready</option>
+                    </select>
+                </div>
+
+                <!-- Refurb estimate hint — shown when floor size + condition are set -->
+                <div class="form-group full" id="refurbEstimateHint" style="display:none">
+                    <label>Estimated Refurb Cost</label>
+                    <div id="refurbEstimateDisplay" style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.9rem;color:var(--text-light)"></div>
+                </div>
+
                 <!-- Finance Type (hidden for R2SA) -->
                 <div class="form-group" id="financeTypeGroup">
                     <label for="purchaseType">Finance Type</label>
@@ -994,6 +1020,106 @@
         showEl('saSetupGroup',  isR2SA);
     }
 
+    // ── Refurb estimate (real-time) ────────────────────────────────────────
+    // Cost per sqm by condition → refurb level
+    const REFURB_COST_PER_SQM = {
+        'needs-works': 180,
+        'fair':        100,
+        'good':         50,
+        'excellent':    25,
+    };
+    const PROP_TYPE_MULT = {
+        'terraced':      0.85,
+        'semi-detached': 0.90,
+        'detached':      1.00,
+        'flat':          0.80,
+        'bungalow':      1.10,
+    };
+    const CONDITION_LABEL = {
+        'needs-works': 'Needs Works — heavy refurb',
+        'fair':        'Fair — kitchen/bathroom refresh',
+        'good':        'Good — cosmetic only',
+        'excellent':   'Excellent — move-in ready',
+    };
+
+    function updateRefurbEstimate() {
+        const sqm       = parseFloat(document.getElementById('floorSize').value);
+        const condition = document.getElementById('propertyCondition').value;
+        const propType  = document.getElementById('property_type').value;
+        const postcode  = document.getElementById('postcode').value.trim().toUpperCase();
+        const hint      = document.getElementById('refurbEstimateHint');
+        const display   = document.getElementById('refurbEstimateDisplay');
+
+        if (!sqm || sqm < 10 || !condition) {
+            hint.style.display = 'none';
+            // Also clear refurbCosts auto-fill marker so user can see their own value
+            return;
+        }
+
+        const baseCostPerSqm = REFURB_COST_PER_SQM[condition] || 100;
+        const typeMult       = PROP_TYPE_MULT[propType] || 1.0;
+        // London premium (matches backend logic)
+        const londonPrefixes = ['SW','W1','W2','W3','W4','W5','W6','W7','W8','W9','NW'];
+        const isLondon       = londonPrefixes.some(p => postcode.startsWith(p));
+        const areaMult       = isLondon ? 1.3 : 1.0;
+
+        const costPerSqm = baseCostPerSqm * typeMult * areaMult;
+        const total      = Math.round(costPerSqm * sqm);
+        const low        = Math.round(total * 0.85);
+        const high       = Math.round(total * 1.15);
+
+        display.innerHTML = `
+            <strong style="color:var(--primary)">£${low.toLocaleString()} – £${high.toLocaleString()}</strong>
+            <span style="margin-left:8px;color:var(--text-light);font-size:0.8rem">(£${Math.round(costPerSqm)}/m² × ${sqm} m²${isLondon ? ' · London +30%' : ''})</span>
+            <br><span style="font-size:0.8rem;color:var(--text-light)">${CONDITION_LABEL[condition]}</span>
+        `;
+        hint.style.display = '';
+
+        // Auto-populate refurbCosts field if it is visible and currently empty
+        const refurbInput = document.getElementById('refurbCosts');
+        if (refurbInput && refurbInput.offsetParent !== null && !refurbInput.dataset.userEdited) {
+            refurbInput.value = total;
+        }
+    }
+
+    // Track if user has manually edited refurbCosts
+    document.addEventListener('DOMContentLoaded', () => {
+        const refurbInput = document.getElementById('refurbCosts');
+        if (refurbInput) {
+            refurbInput.addEventListener('input', () => { refurbInput.dataset.userEdited = '1'; });
+        }
+        document.getElementById('floorSize').addEventListener('input', updateRefurbEstimate);
+        document.getElementById('propertyCondition').addEventListener('change', updateRefurbEstimate);
+        document.getElementById('property_type').addEventListener('change', updateRefurbEstimate);
+        document.getElementById('postcode').addEventListener('change', updateRefurbEstimate);
+    });
+
+    // ── EPC Floor Area Lookup ──────────────────────────────────────────────
+    async function fetchEpcFloorArea(address, postcode) {
+        if (!address && !postcode) return;
+        const spinner = document.getElementById('epcSpinner');
+        const found   = document.getElementById('epcFound');
+        const field   = document.getElementById('floorSize');
+        // Only fetch if floor size is not already filled
+        if (field.value) return;
+        spinner.style.display = '';
+        found.style.display   = 'none';
+        try {
+            const resp = await fetch('/epc-lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address, postcode })
+            });
+            const json = await resp.json();
+            if (json.success && json.sqm) {
+                field.value = json.sqm;
+                found.style.display = '';
+                updateRefurbEstimate();
+            }
+        } catch (_) {}
+        finally { spinner.style.display = 'none'; }
+    }
+
     // ── URL Scraper ────────────────────────────────────────────────────────
     async function loadFromUrl() {
         const url = document.getElementById('propertyUrl').value.trim();
@@ -1051,6 +1177,19 @@
                     if (map[pt]) { sel.value = map[pt]; filled++; }
                 }
 
+                // Floor size — use sqm from scraper if available, otherwise EPC lookup
+                const floorField = document.getElementById('floorSize');
+                if (d.sqm && d.sqm > 0) {
+                    floorField.value = d.sqm;
+                    document.getElementById('epcFound').style.display = '';
+                    document.getElementById('epcFound').textContent = '✓ From listing';
+                    filled++;
+                    updateRefurbEstimate();
+                } else {
+                    // Try EPC lookup in background
+                    fetchEpcFloorArea(d.address || '', d.postcode || '');
+                }
+
                 status.textContent = `✓ Loaded ${filled} fields from listing. Please review and fill in any missing details.`;
                 status.className = 'url-status success';
             } else {
@@ -1093,7 +1232,8 @@
                 'refurbCosts','arv',
                 'bridgingMonthlyRate','bridgingTermMonths','bridgingArrangementFee','bridgingExitFee',
                 'roomCount','avgRoomRate',
-                'saMonthlySARevenue','saSetupCosts'
+                'saMonthlySARevenue','saSetupCosts',
+                'internal_area'
             ];
             if (numFields.includes(key) && val !== '') {
                 data[key] = parseFloat(val);

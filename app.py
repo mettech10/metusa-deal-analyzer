@@ -334,6 +334,61 @@ def resolve_postcode_from_address(address: str) -> str | None:
         print(f"[IdealPostcodes] Error resolving postcode: {e}")
     return None
 
+
+def get_floor_area_from_epc(address: str, postcode: str) -> float | None:
+    """Look up a property's total floor area (sqm) from the UK EPC Open Data API.
+
+    Registration at https://epc.opendatacommunities.org is required.
+    Set EPC_API_EMAIL and EPC_API_KEY environment variables.
+    Returns None if the API is unconfigured, the property is not found, or the
+    request fails.
+    """
+    if not EPC_API_EMAIL or not EPC_API_KEY:
+        return None
+    try:
+        import base64
+        credentials = base64.b64encode(f"{EPC_API_EMAIL}:{EPC_API_KEY}".encode()).decode()
+        params = {'size': 1}
+        if postcode:
+            params['postcode'] = postcode.replace(' ', '').upper()
+        if address:
+            # Strip the postcode from the address string so we don't double-up
+            addr_clean = re.sub(r'[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}', '', address, flags=re.IGNORECASE).strip().strip(',')
+            if addr_clean:
+                params['address'] = addr_clean[:100]
+        resp = requests.get(
+            'https://epc.opendatacommunities.org/api/v1/domestic/search',
+            headers={
+                'Authorization': f'Basic {credentials}',
+                'Accept': 'application/json',
+            },
+            params=params,
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            print(f"[EPC] API error: {resp.status_code}")
+            return None
+        body = resp.json()
+        columns = body.get('column-names', [])
+        rows    = body.get('rows', [])
+        if not rows:
+            print(f"[EPC] No records found for {address}, {postcode}")
+            return None
+        try:
+            idx = columns.index('total-floor-area')
+            val = rows[0][idx]
+            if val not in (None, '', 'N/A'):
+                area = float(val)
+                if 10 <= area <= 2000:
+                    print(f"[EPC] Floor area: {area} sqm for {postcode}")
+                    return area
+        except (ValueError, IndexError):
+            pass
+    except Exception as e:
+        print(f"[EPC] Error: {e}")
+    return None
+
+
 # Security: Input validation functions
 def validate_postcode(postcode):
     """Validate UK postcode format"""
@@ -372,6 +427,7 @@ CORS(app, resources={
     r"/analyze":                         {"origins": _allowed_origins},
     r"/ai-analyze":                      {"origins": _allowed_origins},
     r"/extract-url":                     {"origins": _allowed_origins},
+    r"/epc-lookup":                      {"origins": _allowed_origins},
     r"/download-pdf":                    {"origins": _allowed_origins},
     r"/api/*":                           {"origins": _allowed_origins},
 })
@@ -385,6 +441,10 @@ limiter = Limiter(
 
 # ── Ideal Postcodes (address → postcode lookup) ─────────────────────────────
 IDEAL_POSTCODES_API_KEY = os.environ.get('IDEAL_POSTCODES_API_KEY', '')
+
+# ── EPC Open Data API (floor area lookup) ────────────────────────────────────
+EPC_API_EMAIL = os.environ.get('EPC_API_EMAIL', '')
+EPC_API_KEY   = os.environ.get('EPC_API_KEY', '')
 
 # ── Supabase (optional) ────────────────────────────────────────────────────
 _SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -1523,8 +1583,19 @@ def analyze_deal(data):
     
     # Get refurb estimates
     property_type_for_refurb = data.get('property_type', 'terraced').lower()
-    internal_area = data.get('internal_area', 1000)  # Default 1000 sq ft
-    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, internal_area)
+    internal_area_raw = data.get('internal_area')
+    internal_area = float(internal_area_raw) if internal_area_raw and validate_numeric(internal_area_raw, 10, 2000) else None
+    refurb_estimates = get_refurb_estimate(postcode, property_type_for_refurb, bedrooms, internal_area or 85)
+
+    # Determine which refurb level was selected by the user (condition-based)
+    property_condition = sanitize_input(data.get('property_condition', ''), 30)
+    condition_level_map = {
+        'needs-works': 'heavy',
+        'fair':        'medium',
+        'good':        'light',
+        'excellent':   'light',
+    }
+    selected_refurb_level = condition_level_map.get(property_condition, None)
     
     # Score visualization data
     score_breakdown = {
@@ -1578,6 +1649,8 @@ def analyze_deal(data):
         'article_4': article_4_info,
         'strategy_recommendations': strategy_recommendations,
         'refurb_estimates': refurb_estimates,
+        'selected_refurb_level': selected_refurb_level,
+        'internal_area': internal_area,
         'analysis_date': datetime.now().strftime('%Y-%m-%d'),
         'next_steps': [
             "Verify rental comparables in the area",
@@ -2534,6 +2607,27 @@ def extract_url():
             'success': False,
             'message': 'Error extracting data from URL'
         }), 500
+
+@app.route('/epc-lookup', methods=['POST'])
+@limiter.limit("20 per minute")
+def epc_lookup():
+    """Look up floor area for a property from the UK EPC Open Data API."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        data = request.get_json(silent=True) or {}
+        address  = sanitize_input(data.get('address', ''), 200)
+        postcode = sanitize_input(data.get('postcode', ''), 20)
+        if not address and not postcode:
+            return jsonify({'success': False, 'message': 'Address or postcode required'}), 400
+        floor_area = get_floor_area_from_epc(address, postcode)
+        if floor_area:
+            return jsonify({'success': True, 'sqm': floor_area})
+        return jsonify({'success': False, 'message': 'Floor area not found in EPC register'})
+    except Exception as e:
+        app.logger.error(f'EPC lookup error: {str(e)}')
+        return jsonify({'success': False, 'message': 'EPC lookup failed'}), 500
+
 
 def get_ai_property_analysis(property_data, calculated_metrics, market_data=None):
     """
