@@ -3185,11 +3185,15 @@ def ai_analyze():
                     price_trend = land_registry.get_price_trend(postcode)
                     avg_price = land_registry.get_average_price(postcode, months=12)
                     
+                    # Add rent estimate so rent_comparables fallback has data
+                    rent_est = _estimate_rent_from_land_registry(postcode, bedrooms)
                     market_data = {
                         'source': 'Land Registry',
                         'recent_sales': sold_prices,
                         'price_trend': price_trend,
-                        'average_price': avg_price
+                        'average_price': avg_price,
+                        'estimated_rent': rent_est.get('estimated_monthly_rent') if rent_est else None,
+                        'rental_confidence': 'Low'
                     }
                     app.logger.info(f"Using Land Registry for {postcode}")
                 except Exception as e:
@@ -3225,12 +3229,13 @@ def ai_analyze():
         rent_comparables = market_data.get('rent_comparables', [])
         if not rent_comparables and market_data.get('estimated_rent'):
             # We have a market estimate but no individual comparables
+            src = market_data.get('source', 'Market estimate')
             rent_comparables = [
                 {
                     'address': f"{bedrooms}-bed property, {postcode}",
                     'monthly_rent': market_data['estimated_rent'],
                     'bedrooms': bedrooms,
-                    'source': 'PropertyData market estimate',
+                    'source': src,
                     'confidence': market_data.get('rental_confidence', 'N/A')
                 }
             ]
