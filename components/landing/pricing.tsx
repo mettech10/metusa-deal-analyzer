@@ -1,7 +1,23 @@
+"use client"
+
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Check } from "lucide-react"
+import { openStripeCheckout } from "@/lib/stripe"
+
+// ── Configure your Stripe price IDs ────────────────────────────────────
+// Stripe Dashboard → Products → copy the Price ID (e.g. price_xxx)
+// Add to .env.local / Vercel / Render:
+//   NEXT_PUBLIC_STRIPE_PRICE_PAY_PER_DEAL=price_xxxxxxxxxxxxxxxx
+//   NEXT_PUBLIC_STRIPE_PRICE_PRO=price_xxxxxxxxxxxxxxxx
+//   NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED=price_xxxxxxxxxxxxxxxx
+
+const PRICE_IDS = {
+  payPerDeal: process.env.NEXT_PUBLIC_STRIPE_PRICE_PAY_PER_DEAL ?? "",
+  pro:        process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO ?? "",
+  unlimited:  process.env.NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED ?? "",
+}
 
 const plans = [
   {
@@ -17,6 +33,9 @@ const plans = [
     ],
     cta: "Get Started Free",
     highlighted: false,
+    priceId: null,
+    mode: null as 'payment' | 'subscription' | null,
+    href: "/analyse",
   },
   {
     name: "Pay Per Deal",
@@ -30,8 +49,11 @@ const plans = [
       "Cash flow projections",
       "PDF report export",
     ],
-    cta: "Start Analysing",
+    cta: "Pay per Deal →",
     highlighted: false,
+    priceId: PRICE_IDS.payPerDeal,
+    mode: 'payment' as const,
+    href: null,
   },
   {
     name: "Pro",
@@ -48,6 +70,9 @@ const plans = [
     ],
     cta: "Go Pro",
     highlighted: true,
+    priceId: PRICE_IDS.pro,
+    mode: 'subscription' as const,
+    href: null,
   },
   {
     name: "Unlimited",
@@ -62,10 +87,52 @@ const plans = [
       "Dedicated account manager",
       "White-label reports",
     ],
-    cta: "Contact Sales",
+    cta: "Go Unlimited",
     highlighted: false,
+    priceId: PRICE_IDS.unlimited,
+    mode: 'subscription' as const,
+    href: null,
   },
 ]
+
+function PlanButton({ plan }: { plan: (typeof plans)[number] }) {
+  // Free plan — just navigate
+  if (plan.href) {
+    return (
+      <Button
+        asChild
+        variant={plan.highlighted ? "default" : "outline"}
+        className="w-full"
+      >
+        <Link href={plan.href}>{plan.cta}</Link>
+      </Button>
+    )
+  }
+
+  // Paid plan — redirect to Stripe Checkout
+  return (
+    <Button
+      variant={plan.highlighted ? "default" : "outline"}
+      className="w-full"
+      onClick={() => {
+        if (!plan.priceId || !plan.mode) {
+          console.warn(
+            `[Stripe] Price ID not yet configured for "${plan.name}". ` +
+            `Add it to .env as NEXT_PUBLIC_STRIPE_PRICE_XXX`
+          )
+          alert(
+            `Payment for "${plan.name}" is not yet activated.\n` +
+            `Add your Stripe price ID to your environment variables.`
+          )
+          return
+        }
+        openStripeCheckout(plan.priceId, plan.mode)
+      }}
+    >
+      {plan.cta}
+    </Button>
+  )
+}
 
 export function Pricing() {
   return (
@@ -117,16 +184,15 @@ export function Pricing() {
                 ))}
               </ul>
 
-              <Button
-                asChild
-                variant={plan.highlighted ? "default" : "outline"}
-                className="w-full"
-              >
-                <Link href="/analyse">{plan.cta}</Link>
-              </Button>
+              <PlanButton plan={plan} />
             </div>
           ))}
         </div>
+
+        <p className="mt-8 text-center text-xs text-muted-foreground">
+          Payments processed securely by{" "}
+          <span className="font-medium text-foreground">Stripe</span>. Cancel anytime.
+        </p>
       </div>
     </section>
   )

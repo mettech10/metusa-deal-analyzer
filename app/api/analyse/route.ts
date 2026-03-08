@@ -31,10 +31,12 @@ async function sendToFlask(
     if (!res.ok) {
       const errText = await res.text().catch(() => "Unknown error")
       console.error("[v0] FLASK PROXY: Error response body:", errText)
-      return Response.json(
-        { error: `Backend error (${res.status}): ${errText}` },
-        { status: res.status }
-      )
+      // Parse structured errors from Flask (e.g. subscription gate)
+      let errJson: Record<string, string> | null = null
+      try { errJson = JSON.parse(errText) } catch { /* ignore */ }
+      const code    = errJson?.code    || null
+      const message = errJson?.message || `Backend error (${res.status})`
+      return Response.json({ error: message, code }, { status: res.status })
     }
 
     return res
@@ -109,6 +111,7 @@ export async function POST(req: Request) {
     }
 
     // Map scraped fields to our PropertyFormData field names
+    const rawSqft = Number(raw.sqft) || 0
     const mappedData = {
       address: raw.address || "",
       postcode: raw.postcode || "",
@@ -116,6 +119,8 @@ export async function POST(req: Request) {
       propertyType,
       bedrooms: Number(raw.bedrooms) || 3,
       description: raw.description || "",
+      sqft: rawSqft > 0 ? rawSqft : undefined,
+      sqftEstimated: Boolean(raw.sqft_estimated),
     }
 
     console.log("[v0] FLASK PROXY: Mapped scrape data:", mappedData)
@@ -192,19 +197,36 @@ export async function POST(req: Request) {
 
     console.log("[v0] FLASK PROXY: Manual mode - flattening data for /ai-analyze")
     // Flatten the nested structure - backend expects flat fields
+    // investmentType (lowercase e.g. "btl") → dealType (uppercase e.g. "BTL")
+    const rawInvestmentType = propertyData.investmentType || 'btl'
     const aiPayload = {
       address: propertyData.address || 'Unknown Address',
       postcode: propertyData.postcode || 'N/A',
-      dealType: calculationResults.dealType || propertyData.dealType || 'BTL',
-      purchasePrice: Number(propertyData.purchasePrice) || Number(calculationResults.purchasePrice) || 0,
+      dealType: String(rawInvestmentType).toUpperCase(),
+      purchaseType: propertyData.purchaseType || 'mortgage',
+      purchasePrice: Number(propertyData.purchasePrice) || 0,
       bedrooms: Number(propertyData.bedrooms) || 3,
-      monthlyRent: Number(propertyData.monthlyRent) || Number(calculationResults.monthlyRent) || 0,
-      deposit: Number(propertyData.deposit) || Number(calculationResults.deposit) || 25,
-      interestRate: Number(propertyData.interestRate) || Number(calculationResults.interestRate) || 3.75,
-      propertyType: propertyData.propertyType || 'Terrace',
+      monthlyRent: Number(propertyData.monthlyRent) || 0,
+      deposit: Number(propertyData.depositPercentage) || 25,
+      interestRate: Number(propertyData.interestRate) || 5.5,
+      propertyType: propertyData.propertyType || 'house',
       description: propertyData.description || '',
-      refurbCost: Number(propertyData.refurbCost) || 0,
-      arv: Number(propertyData.arv) || 0
+      // BRR / Flip
+      refurbCosts: Number(propertyData.refurbishmentBudget) || 0,
+      arv: Number(propertyData.arv) || 0,
+      // Bridging loan
+      bridgingMonthlyRate: Number(propertyData.bridgingMonthlyRate) || 0.75,
+      bridgingTermMonths: Number(propertyData.bridgingTermMonths) || 12,
+      bridgingArrangementFee: Number(propertyData.bridgingArrangementFee) || 1.0,
+      bridgingExitFee: Number(propertyData.bridgingExitFee) || 0.5,
+      // HMO
+      roomCount: Number(propertyData.roomCount) || 0,
+      avgRoomRate: Number(propertyData.avgRoomRate) || 0,
+      // R2SA
+      saMonthlySARevenue: Number(propertyData.saMonthlySARevenue) || 0,
+      saSetupCosts: Number(propertyData.saSetupCosts) || 5000,
+      // Projection assumption
+      capitalGrowthRate: Number(propertyData.capitalGrowthRate) || 4,
     }
     console.log("[v0] FLASK PROXY: Sending flattened payload:", aiPayload)
     const aiRes = await sendToFlask("/ai-analyze", aiPayload)

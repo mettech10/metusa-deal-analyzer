@@ -132,8 +132,10 @@ export function calculateBridgingLoan(
   // Total to repay
   const totalRepayment = loanAmount + (interestRolledUp ? totalInterest : 0) + exitFee
   
-  // Calculate approximate APR
-  const apr = Math.round((monthlyRate * 12 + (arrangementFeePercent + exitFeePercent) / termMonths * 12) * 100) / 100
+  // True APR: compound monthly rate → effective annual + fee drag (matches Flask backend)
+  const effectiveAnnual = (Math.pow(1 + monthlyRate / 100, 12) - 1) * 100
+  const feeDrag = (arrangementFeePercent + exitFeePercent) / Math.max(termMonths / 12, 0.083)
+  const apr = Math.round((effectiveAnnual + feeDrag) * 100) / 100
   
   return {
     monthlyInterest,
@@ -208,6 +210,42 @@ function calculateProjection(
  * Run full analysis calculations
  */
 export function calculateAll(data: PropertyFormData): CalculationResults {
+  // ── R2SA: rent the property from a landlord, sublet as serviced accommodation ──
+  if (data.investmentType === "r2sa") {
+    const saRevenue   = data.saMonthlySARevenue || 0
+    const rentPaid    = data.monthlyRent         // rent paid to the landlord
+    const setupCosts  = data.saSetupCosts || 5000
+    // Operating costs: cleaning, utilities, platform fees (~30% of SA revenue)
+    const monthlyOpCosts  = saRevenue * 0.30
+    const monthlyExpenses = Math.round((rentPaid + monthlyOpCosts) * 100) / 100
+    const monthlyCashFlow = Math.round((saRevenue - monthlyExpenses) * 100) / 100
+    const annualCashFlow  = Math.round(monthlyCashFlow * 12 * 100) / 100
+    const cashOnCashReturn =
+      setupCosts > 0 ? Math.round((annualCashFlow / setupCosts) * 10000) / 100 : 0
+
+    return {
+      sdltAmount: 0,
+      sdltBreakdown: [],
+      totalPurchaseCost: 0,
+      totalCapitalRequired: setupCosts,
+      depositAmount: 0,
+      mortgageAmount: 0,
+      monthlyMortgagePayment: 0,
+      annualMortgageCost: 0,
+      bridgingLoanDetails: undefined,
+      grossYield: 0,
+      netYield: 0,
+      monthlyIncome: Math.round(saRevenue * 100) / 100,
+      monthlyExpenses,
+      monthlyCashFlow,
+      annualCashFlow,
+      cashOnCashReturn,
+      annualRunningCosts: Math.round(monthlyExpenses * 12 * 100) / 100,
+      monthlyRunningCosts: monthlyExpenses,
+      fiveYearProjection: [],
+    }
+  }
+
   const { total: sdltAmount, breakdown: sdltBreakdown } = calculateSDLT(
     data.purchasePrice,
     data.isAdditionalProperty
@@ -337,13 +375,14 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
       ? Math.round((annualCashFlow / totalCapitalRequired) * 10000) / 100
       : 0
 
-  // 5-year projection
+  // 5-year projection — use user-supplied capitalGrowthRate (default 4%, clamped 0–30%)
+  const capitalGrowthRate = Math.min(Math.max(data.capitalGrowthRate ?? 4, 0), 30)
   const fiveYearProjection = calculateProjection(
     data.purchasePrice,
     annualRent,
     annualCashFlow,
     mortgageAmount,
-    3,
+    capitalGrowthRate,
     data.annualRentIncrease
   )
 
@@ -387,4 +426,83 @@ export function formatCurrency(value: number): string {
  */
 export function formatPercent(value: number): string {
   return `${value.toFixed(2)}%`
+}
+
+/**
+ * Calculate deal score from cash-on-cash ROI (%).
+ *
+ * Bands (linear interpolation within each):
+ *   ROI ≥ 20%        → 100
+ *   15% ≤ ROI < 20%  → 75 – 100
+ *   10% ≤ ROI < 15%  → 50 – 75
+ *   5%  ≤ ROI < 10%  → 25 – 50
+ *   0%  ≤ ROI < 5%   → 0  – 25
+ *   ROI < 0%         → 0
+ */
+export function calculateDealScore(cashOnCashReturn: number): number {
+  if (cashOnCashReturn >= 20) return 100
+  if (cashOnCashReturn >= 15) return Math.round(75 + ((cashOnCashReturn - 15) / 5) * 25)
+  if (cashOnCashReturn >= 10) return Math.round(50 + ((cashOnCashReturn - 10) / 5) * 25)
+  if (cashOnCashReturn >= 5)  return Math.round(25 + ((cashOnCashReturn - 5)  / 5) * 25)
+  if (cashOnCashReturn >= 0)  return Math.round((cashOnCashReturn / 5) * 25)
+  return 0
+}
+
+/**
+ * Estimate refurbishment cost based on floor area and condition.
+ * Rates are per sq metre, adjusted for London postcodes and property type.
+ *
+ * Condition → mid-tier cost/sqft (2024-25 UK benchmarks, Checkatrade / BRRR):
+ *   excellent  →  £0     (move-in ready, no refurb)
+ *   good       →  £18    (light: redecoration, some flooring/fixtures)
+ *   fair       →  £35    (medium: new kitchen + bathroom, full redecoration)
+ *   needs-work →  £60    (full: kitchen, bathroom, rewire, replumb, damp, windows)
+ */
+export function estimateRefurbCost(
+  sqft: number,
+  condition: string,
+  propertyType: string,
+  postcode?: string
+): number {
+  if (!sqft || sqft <= 0) return 0
+
+  // Mid-tier cost per sqft aligned with backend get_refurb_estimate tiers
+  const costPerSqft: Record<string, number> = {
+    excellent: 0,
+    good: 18,
+    fair: 35,
+    "needs-work": 60,
+  }
+
+  const base = costPerSqft[condition] ?? 35
+
+  // Property type multipliers (detached/bungalow cost more; flats less)
+  const typeMultipliers: Record<string, number> = {
+    flat: 0.85,
+    house: 0.95,
+    commercial: 1.0,
+  }
+  const typeMultiplier = typeMultipliers[propertyType] ?? 0.95
+
+  // Regional multipliers from postcode prefix — matches backend REGION_MULT table
+  const pc = (postcode ?? "").toUpperCase().replace(/\s/g, "")
+  const REGION_MULT: Record<string, number> = {
+    EC: 1.50, WC: 1.50, W1: 1.50, SW1: 1.50, SE1: 1.45, N1: 1.40,
+    SW: 1.35, W: 1.35, NW: 1.30, E: 1.30,
+    N: 1.25, SE: 1.25, KT: 1.25, TW: 1.25,
+    BR: 1.20, CR: 1.20, RM: 1.20, HA: 1.20, UB: 1.20,
+    SM: 1.20, WD: 1.15, EN: 1.15, IG: 1.15, DA: 1.15,
+    GU: 1.20, RH: 1.20, SL: 1.15, AL: 1.15, OX: 1.15,
+    RG: 1.15, HP: 1.10, CM: 1.10, BN: 1.10, TN: 1.10, ME: 1.05, CT: 1.05,
+    B: 0.95, CV: 0.92, LE: 0.92, NG: 0.90, DE: 0.90, ST: 0.90,
+    M: 0.90, L: 0.88, LS: 0.88, S: 0.87, NE: 0.87, HU: 0.85,
+    PR: 0.87, BB: 0.85, BL: 0.85, OL: 0.85,
+    EH: 0.90, G: 0.88, AB: 0.85, CF: 0.85, SA: 0.82,
+  }
+  // Match longest prefix first to avoid 'N' shadowing 'NW'
+  const areaMultiplier = Object.keys(REGION_MULT)
+    .sort((a, b) => b.length - a.length)
+    .reduce((mult, prefix) => pc.startsWith(prefix) ? REGION_MULT[prefix] : mult, 1.0)
+
+  return Math.round(sqft * base * typeMultiplier * areaMultiplier)
 }

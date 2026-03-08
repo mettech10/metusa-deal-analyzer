@@ -10,7 +10,7 @@ export interface PropertyFormData {
   purchasePrice: number
   propertyType: PropertyType
   investmentType: InvestmentType
-  sqm?: number
+  sqft?: number
   bedrooms: number
   condition: PropertyCondition
 
@@ -32,6 +32,20 @@ export interface PropertyFormData {
   bridgingTermMonths?: number // typically 3-18 months
   bridgingArrangementFee?: number // % of loan
   bridgingExitFee?: number // % of loan
+
+  // BRR / Flip
+  arv?: number // After Repair Value
+
+  // HMO
+  roomCount?: number    // number of lettable rooms
+  avgRoomRate?: number  // average monthly rent per room
+
+  // Rent-to-SA (R2SA)
+  saMonthlySARevenue?: number // expected gross monthly SA revenue
+  saSetupCosts?: number       // one-off setup / furnishing costs
+
+  // Projections — user-supplied assumptions
+  capitalGrowthRate?: number  // annual property appreciation %, default 4
 
   // Rental Income
   monthlyRent: number

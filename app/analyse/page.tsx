@@ -1,9 +1,28 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
+import Link from "next/link"
+import Image from "next/image"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { PropertyForm } from "@/components/analyse/property-form"
+import { AnalysisResults } from "@/components/analyse/analysis-results"
+import { RecentDeals } from "@/components/analyse/recent-deals"
+import { calculateAll, calculateDealScore } from "@/lib/calculations"
+import type { PropertyFormData, CalculationResults } from "@/lib/types"
+import {
+  BarChart3,
+  ArrowLeft,
+  Link2,
+  ClipboardEdit,
+  Loader2,
+  ExternalLink,
+  FileDown,
+} from "lucide-react"
 
 // Helper to format analysis results from backend
-function formatAnalysisResults(r: Record<string, any>): string {
+// overridePostcode: use the user's actual form postcode instead of any AI-hallucinated one
+function formatAnalysisResults(r: Record<string, any>, overridePostcode?: string): string {
   const verdict = r.verdict || 'N/A'
   const score = r.deal_score || 0
   const label = r.deal_score_label || 'N/A'
@@ -29,7 +48,7 @@ function formatAnalysisResults(r: Record<string, any>): string {
   formatted += `📍 PROPERTY\n`
   formatted += `─`.repeat(55) + `\n`
   formatted += `  Address: ${r.address || 'N/A'}\n`
-  formatted += `  Postcode: ${r.postcode || 'N/A'}\n`
+  formatted += `  Postcode: ${overridePostcode || r.postcode || 'N/A'}\n`
   formatted += `  Council: ${r.location?.council || 'Unknown'}\n`
   formatted += `  Purchase Price: £${r.purchase_price || 'N/A'}\n\n`
   
@@ -51,15 +70,33 @@ function formatAnalysisResults(r: Record<string, any>): string {
   
   // ARTICLE 4 SECTION
   if (r.article_4) {
-    formatted += `⚖️  ARTICLE 4\n`
+    formatted += `⚖️  ARTICLE 4 & PLANNING\n`
     formatted += `─`.repeat(55) + `\n`
     if (r.article_4.is_article_4) {
-      formatted += `  🔴 THIS AREA IS UNDER ARTICLE 4\n`
+      formatted += `  🔴 ARTICLE 4 DIRECTION IN FORCE\n`
       formatted += `  ${r.article_4.note || ''}\n`
-      formatted += `  ${r.article_4.advice || ''}\n`
+      formatted += `  ${r.article_4.advice || 'Planning permission required for HMO conversion.'}\n`
+    } else if (r.article_4.known === false) {
+      formatted += `  🟡 ARTICLE 4 STATUS UNCONFIRMED\n`
+      formatted += `  ${r.article_4.note || 'Not in our database — verify with local council.'}\n`
+      formatted += `  ${r.article_4.advice || 'Check with local planning authority before any HMO conversion.'}\n`
     } else {
-      formatted += `  🟢 THIS AREA IS NOT UNDER ARTICLE 4\n`
-      formatted += `  ${r.article_4.advice || 'No restrictions - permitted development applies'}\n`
+      formatted += `  🟢 NO ARTICLE 4 RESTRICTIONS\n`
+      formatted += `  ${r.article_4.advice || 'Permitted Development applies — no planning permission needed for HMO (up to 6 people).'}\n`
+    }
+    // HMO licensing guidance (shown when strategy is HMO)
+    if (r.article_4.hmo_guidance) {
+      formatted += `\n  💡 HMO GUIDANCE:\n`
+      r.article_4.hmo_guidance.split('. ').filter((s: string) => s.trim()).forEach((line: string) => {
+        formatted += `    → ${line.trim()}${line.trim().endsWith('.') ? '' : '.'}\n`
+      })
+    }
+    // Social housing alternative (shown when Article 4 and HMO strategy)
+    if (r.article_4.social_housing_suggestion) {
+      formatted += `\n  🏠 ALTERNATIVE — SOCIAL/SUPPORTED HOUSING (C3→C3b):\n`
+      r.article_4.social_housing_suggestion.split('. ').filter((s: string) => s.trim()).forEach((line: string) => {
+        formatted += `    → ${line.trim()}${line.trim().endsWith('.') ? '' : '.'}\n`
+      })
     }
     formatted += `\n`
   }
@@ -97,20 +134,21 @@ function formatAnalysisResults(r: Record<string, any>): string {
     formatted += `🔨 REFURBISHMENT COSTS (per sq meter)\n`
     formatted += `─`.repeat(55) + `\n`
     const ref = r.refurb_estimates
-    if (ref.light) formatted += `  • Light (cosmetic): £${ref.light.total} (£${ref.light.per_sqm}/sqm)\n`
-    if (ref.medium) formatted += `  • Medium (kitchen/bath): £${ref.medium.total} (£${ref.medium.per_sqm}/sqm)\n`
-    if (ref.heavy) formatted += `  • Heavy (full refurb): £${ref.heavy.total} (£${ref.heavy.per_sqm}/sqm)\n`
-    if (ref.structural) formatted += `  • Structural: £${ref.structural.total} (£${ref.structural.per_sqm}/sqm)\n`
+    if (ref.light) formatted += `  • Light (cosmetic): £${ref.light.total} (£${ref.light.per_sqft_mid ?? ref.light.per_sqm}/sqft)\n`
+    if (ref.medium) formatted += `  • Medium (kitchen/bath): £${ref.medium.total} (£${ref.medium.per_sqft_mid ?? ref.medium.per_sqm}/sqft)\n`
+    if (ref.heavy) formatted += `  • Heavy (full refurb): £${ref.heavy.total} (£${ref.heavy.per_sqft_mid ?? ref.heavy.per_sqm}/sqft)\n`
+    if (ref.structural) formatted += `  • Structural: £${ref.structural.total} (£${ref.structural.per_sqft_mid ?? ref.structural.per_sqm}/sqft)\n`
     formatted += `\n`
   }
   
   // COMPARABLE SOLD PRICES TABLE
-  if (r.comparable_sales && r.comparable_sales.length > 0) {
+  if ((r.sold_comparables || r.comparable_sales)?.length > 0) {
+    const sales = r.sold_comparables || r.comparable_sales
     formatted += `📈 COMPARABLE SOLD PRICES\n`
     formatted += `─`.repeat(75) + `\n`
     formatted += `  ${'Address'.padEnd(25)} ${'Price'.padStart(12)} ${'Type'.padEnd(15)} ${'Date'.padStart(12)}\n`
     formatted += `  ${'─'.repeat(75)}\n`
-    r.comparable_sales.slice(0, 5).forEach((sale: any) => {
+    sales.slice(0, 5).forEach((sale: any) => {
       const addr = (sale.address || 'N/A').substring(0, 22).padEnd(25)
       const price = `£${(sale.price || 0).toLocaleString()}`.padStart(12)
       const type = (sale.type || 'N/A').padEnd(15)
@@ -119,16 +157,17 @@ function formatAnalysisResults(r: Record<string, any>): string {
     })
     formatted += `\n`
   }
-  
+
   // COMPARABLE RENT PRICES TABLE
-  if (r.comparable_rents && r.comparable_rents.length > 0) {
+  if ((r.rent_comparables || r.comparable_rents)?.length > 0) {
+    const rents = r.rent_comparables || r.comparable_rents
     formatted += `🏠 COMPARABLE RENTAL PRICES\n`
     formatted += `─`.repeat(75) + `\n`
     formatted += `  ${'Address'.padEnd(25)} ${'Rent'.padStart(12)} ${'Type'.padEnd(15)} ${'Beds'.padStart(6)}\n`
     formatted += `  ${'─'.repeat(75)}\n`
-    r.comparable_rents.slice(0, 5).forEach((rent: any) => {
+    rents.slice(0, 5).forEach((rent: any) => {
       const addr = (rent.address || 'N/A').substring(0, 22).padEnd(25)
-      const price = `£${(rent.rent || 0).toLocaleString()}/mo`.padStart(12)
+      const price = `£${(rent.monthly_rent || rent.rent || 0).toLocaleString()}/mo`.padStart(12)
       const type = (rent.type || 'N/A').padEnd(15)
       const beds = (rent.bedrooms || 'N/A').toString().padStart(6)
       formatted += `  ${addr} ${price} ${type} ${beds}\n`
@@ -136,54 +175,48 @@ function formatAnalysisResults(r: Record<string, any>): string {
     formatted += `\n`
   }
   
-  // STRENGTHS
+  // STRENGTHS — handle both new string[] arrays and legacy '<br>' strings
   if (r.ai_strengths) {
     formatted += `✅ STRENGTHS\n`
     formatted += `─`.repeat(55) + `\n`
-    const strengths = r.ai_strengths.split('<br>').filter((s: string) => s.trim())
-    strengths.slice(0, 3).forEach((s: string) => {
-      formatted += `  • ${s.trim().substring(0, 60)}\n`
+    const strengths: string[] = Array.isArray(r.ai_strengths)
+      ? r.ai_strengths
+      : String(r.ai_strengths).split('<br>').filter((s: string) => s.trim())
+    strengths.slice(0, 4).forEach((s: string) => {
+      formatted += `  • ${s.replace(/^[•\-]\s*/, '').trim().substring(0, 80)}\n`
     })
     formatted += `\n`
   }
-  
-  // RISKS
+
+  // RISKS — handle both new string[] arrays and legacy '<br>' strings
   if (r.ai_risks) {
     formatted += `⚠️  RISKS\n`
     formatted += `─`.repeat(55) + `\n`
-    const risks = r.ai_risks.split('<br>').filter((s: string) => s.trim())
-    risks.slice(0, 3).forEach((s: string) => {
-      formatted += `  • ${s.trim().substring(0, 60)}\n`
+    const risks: string[] = Array.isArray(r.ai_risks)
+      ? r.ai_risks
+      : String(r.ai_risks).split('<br>').filter((s: string) => s.trim())
+    risks.slice(0, 4).forEach((s: string) => {
+      formatted += `  • ${s.replace(/^[•\-]\s*/, '').trim().substring(0, 80)}\n`
     })
     formatted += `\n`
   }
-  
-  // NEXT STEPS
-  if (r.next_steps && r.next_steps.length > 0) {
+
+  // NEXT STEPS — ai_next_steps is now an array; also check legacy next_steps
+  const nextSteps: string[] = Array.isArray(r.ai_next_steps)
+    ? r.ai_next_steps
+    : Array.isArray(r.next_steps)
+      ? r.next_steps
+      : []
+  if (nextSteps.length > 0) {
     formatted += `📋 NEXT STEPS\n`
     formatted += `─`.repeat(55) + `\n`
-    r.next_steps.slice(0, 5).forEach((step: string) => {
+    nextSteps.slice(0, 5).forEach((step: string) => {
       formatted += `  → ${step}\n`
     })
   }
   
   return formatted
 }
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { PropertyForm } from "@/components/analyse/property-form"
-import { AnalysisResults } from "@/components/analyse/analysis-results"
-import { calculateAll } from "@/lib/calculations"
-import type { PropertyFormData, CalculationResults } from "@/lib/types"
-import Image from "next/image"
-import {
-  ArrowLeft,
-  Link2,
-  ClipboardEdit,
-  Loader2,
-  ExternalLink,
-} from "lucide-react"
 
 type InputMode = "url" | "manual"
 
@@ -214,6 +247,11 @@ export default function AnalysePage() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => null)
+          if (errData?.code === "subscription_required") {
+            throw new Error(
+              "🔒 An active subscription is required to run analyses. Please upgrade your plan."
+            )
+          }
           throw new Error(
             errData?.error || "Analysis failed. Please try again."
           )
@@ -253,8 +291,9 @@ export default function AnalysePage() {
             const parsed = JSON.parse(analysis)
             if (parsed.results) {
               parsedResults = parsed.results
-              // Format for text display
-              analysis = formatAnalysisResults(parsed.results)
+              // Format for text display; pass user's postcode so AI can't override it
+              const userPostcode = (body.propertyData as Record<string, any>)?.postcode as string | undefined
+              analysis = formatAnalysisResults(parsed.results, userPostcode)
             } else if (parsed.success && parsed.message) {
               analysis = parsed.message
             }
@@ -398,6 +437,7 @@ export default function AnalysePage() {
           purchasePrice: Number(scraped.purchasePrice) || 0,
           propertyType: scraped.propertyType || "house",
           bedrooms: Number(scraped.bedrooms) || 3,
+          ...(scraped.sqft ? { sqft: Number(scraped.sqft) } : {}),
         }
 
         // Transition to manual form with pre-filled data
@@ -417,8 +457,67 @@ export default function AnalysePage() {
     [listingUrl]
   )
 
+  // Track last-saved analysis so we don't double-save on re-renders
+  const savedKeyRef = useRef<string | null>(null)
+  // Ref to always have the latest aiText synchronously in effects
+  const aiTextRef = useRef("")
+  useEffect(() => { aiTextRef.current = aiText }, [aiText])
+
+  // Auto-save to Supabase after AI analysis finishes (aiLoading → false with content)
+  const [recentDealsVersion, setRecentDealsVersion] = useState(0)
+  useEffect(() => {
+    // Only fire when AI loading just completed and we have data
+    if (aiLoading || !aiText || !formData) return
+
+    // Build a unique key for this analysis to prevent double-saves
+    const key = `${formData.address}|${formData.purchasePrice}|${aiText.length}`
+    if (savedKeyRef.current === key) return
+    savedKeyRef.current = key
+
+    // Extract score from AI text
+    const scoreMatch = aiText.match(/SCORE:\s*(\d+)/i) || aiText.match(/⭐ SCORE:\s*(\d+)/i)
+    const dealScore = scoreMatch ? parseInt(scoreMatch[1]) : null
+
+    fetch("/api/analyses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        address: formData.address || "Unknown",
+        postcode: formData.postcode || null,
+        investment_type: formData.investmentType || "btl",
+        purchase_price: formData.purchasePrice || 0,
+        deal_score: dealScore,
+        monthly_cashflow: results?.monthlyCashFlow ?? null,
+        annual_cashflow: results?.annualCashFlow ?? null,
+        gross_yield: results?.grossYield ?? null,
+        form_data: formData,
+        results: results,
+        ai_text: aiText,
+      }),
+    })
+      .then((r) => {
+        if (r.ok) setRecentDealsVersion((v) => v + 1)
+      })
+      .catch(() => {
+        // Not logged in or DB error — silently skip, saving is best-effort
+      })
+  }, [aiLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const hasResults = (results && formData) || aiText
   const isProcessing = isLoading || aiLoading
+
+  // Restore a saved analysis from the Recent Deals panel
+  const handleLoadSavedDeal = useCallback(
+    (savedFormData: PropertyFormData, savedResults: CalculationResults, savedAiText: string) => {
+      setFormData(savedFormData)
+      setResults(savedResults)
+      setAiText(savedAiText)
+      setError(null)
+      setInputMode("manual")
+      savedKeyRef.current = null // allow re-save if user triggers a new analysis
+    },
+    []
+  )
 
   const resetAll = () => {
     setResults(null)
@@ -428,6 +527,417 @@ export default function AnalysePage() {
     setAiText("")
     setPrefillData(null)
     setScrapedFromUrl(false)
+    savedKeyRef.current = null
+  }
+
+  const handleSavePDF = () => {
+    if (!aiText && !formData) return
+
+    const fd = formData
+    const res = results
+    const address = fd?.address || "Unknown Address"
+    const postcode = fd?.postcode || ""
+    const date = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+
+    // Helper formatters
+    const gbp = (n: number) => `£${Math.round(n).toLocaleString("en-GB")}`
+    const pct = (n: number) => `${n.toFixed(2)}%`
+    const na = (v: unknown) => (v !== undefined && v !== null && v !== 0 && v !== "" ? String(v) : "—")
+
+    // Strategy label
+    const strategyLabels: Record<string, string> = {
+      btl: "Buy-to-Let (BTL)", brr: "Buy Refurbish Refinance (BRR)",
+      hmo: "HMO", flip: "Flip", r2sa: "Rent-to-SA (R2SA)", development: "Development",
+    }
+    const conditionLabels: Record<string, string> = {
+      excellent: "Excellent", good: "Good", fair: "Fair", "needs-work": "Needs Work",
+    }
+    const strategy = strategyLabels[fd?.investmentType || "btl"] || "BTL"
+    const condition = conditionLabels[fd?.condition || "good"] || "Good"
+    const propType = (fd?.propertyType || "house").charAt(0).toUpperCase() + (fd?.propertyType || "house").slice(1)
+
+    // ROI-based deal score (matches the on-screen scoring formula)
+    const score = calculateDealScore(results?.cashOnCashReturn ?? 0)
+    const scoreColor = score >= 75 ? "#16a34a" : score >= 50 ? "#0ea5e9" : score >= 25 ? "#f59e0b" : "#dc2626"
+    const scoreLabel = score >= 100 ? "Excellent Deal" : score >= 75 ? "Good Deal" : score >= 50 ? "Fair Deal" : score >= 25 ? "Below Average" : "Poor Deal"
+
+    // Extract AI text sections for summary/strengths/risks
+    const extractSection = (label: string) => {
+      const rx = new RegExp(`${label}[:\\s]+([\\s\\S]*?)(?=\\n[\\n✅⚠️📋🔨📈🏠🎯]|$)`, "i")
+      const m = aiText.match(rx)
+      return m ? m[1].trim().replace(/^\s*[-•→]\s*/gm, "• ").substring(0, 600) : ""
+    }
+    const aiSummary = extractSection("SUMMARY|DEAL SUMMARY|OVERVIEW")
+    const aiStrengths = extractSection("STRENGTH")
+    const aiRisks = extractSection("RISK")
+    const aiNextSteps = extractSection("NEXT STEP")
+
+    // Refurb estimates from aiText
+    const lightMatch = aiText.match(/Light[^:]*:\s*£([\d,]+)/)
+    const mediumMatch = aiText.match(/Medium[^:]*:\s*£([\d,]+)/)
+    const heavyMatch = aiText.match(/Heavy[^:]*:\s*£([\d,]+)/)
+
+    // 5-year projection table rows
+    const projRows = res?.fiveYearProjection?.map(y =>
+      `<tr>
+        <td>Year ${y.year}</td>
+        <td>${gbp(y.propertyValue)}</td>
+        <td>${gbp(y.equity)}</td>
+        <td>${gbp(y.annualCashFlow)}</td>
+        <td>${gbp(y.cumulativeCashFlow)}</td>
+        <td>${gbp(y.totalReturn)}</td>
+      </tr>`
+    ).join("") || ""
+
+    // SDLT breakdown rows
+    const sdltRows = res?.sdltBreakdown?.map(b =>
+      `<tr><td>${b.band}</td><td>${gbp(b.tax)}</td></tr>`
+    ).join("") || ""
+
+    // Score ring SVG (inline)
+    const scoreRingSvg = score !== null ? `
+      <div style="position:relative;width:110px;height:110px;margin:0 auto 8px;">
+        <svg width="110" height="110" style="transform:rotate(-90deg)">
+          <circle cx="55" cy="55" r="46" fill="none" stroke="#e5e7eb" stroke-width="10"/>
+          <circle cx="55" cy="55" r="46" fill="none" stroke="${scoreColor}" stroke-width="10"
+            stroke-linecap="round"
+            stroke-dasharray="${(score / 100) * 2 * Math.PI * 46} ${2 * Math.PI * 46}"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;">
+          <span style="font-size:22px;font-weight:700;color:${scoreColor}">${score}%</span>
+          <span style="font-size:9px;color:#999">/100</span>
+        </div>
+      </div>
+      <div style="text-align:center;font-size:11px;font-weight:600;color:${scoreColor};margin-bottom:4px">${scoreLabel}</div>
+    ` : ""
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Deal Report — ${address}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a1a2e;background:#fff}
+  .page{padding:28px 32px;page-break-after:always;break-after:page}
+  .page:last-child{page-break-after:auto;break-after:auto}
+  /* ── HEADER ── */
+  .rpt-header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a2e;padding-bottom:12px;margin-bottom:18px}
+  .rpt-title{font-size:20px;font-weight:700;letter-spacing:.3px}
+  .rpt-sub{font-size:10px;color:#555;margin-top:3px}
+  .rpt-badge{background:#1a1a2e;color:#fff;font-size:8px;letter-spacing:1px;padding:2px 8px;border-radius:2px;text-transform:uppercase;margin-top:6px;display:inline-block}
+  /* ── SECTION TITLES ── */
+  .sec-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1a1a2e;border-left:4px solid #4f46e5;padding-left:8px;margin:18px 0 10px}
+  /* ── PROPERTY DETAIL GRID ── */
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+  .detail-item{background:#f8f8fc;border:1px solid #e8e8f0;border-radius:4px;padding:8px 10px}
+  .detail-label{font-size:9px;text-transform:uppercase;color:#888;letter-spacing:.5px;margin-bottom:2px}
+  .detail-value{font-size:13px;font-weight:700;color:#1a1a2e}
+  /* ── HEADLINE FIGURES ── */
+  .figures-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+  .fig-card{border:1px solid #e8e8f0;border-radius:6px;padding:10px;text-align:center;background:#fff}
+  .fig-card.accent{background:#4f46e5;color:#fff;border-color:#4f46e5}
+  .fig-card.green{background:#16a34a;color:#fff;border-color:#16a34a}
+  .fig-card.amber{background:#f59e0b;color:#fff;border-color:#f59e0b}
+  .fig-label{font-size:8px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;opacity:.75}
+  .fig-value{font-size:16px;font-weight:700}
+  .fig-card.accent .fig-label,.fig-card.green .fig-label,.fig-card.amber .fig-label{opacity:.85}
+  /* ── TABLE ── */
+  table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px}
+  th{background:#1a1a2e;color:#fff;padding:5px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.4px}
+  td{padding:5px 8px;border-bottom:1px solid #f0f0f0}
+  tr:nth-child(even) td{background:#f9f9fb}
+  .td-right{text-align:right;font-weight:600}
+  /* ── TWO-COL LAYOUT ── */
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  /* ── AI TEXT ── */
+  .ai-block{background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px;margin-bottom:12px}
+  .ai-block-title{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#4f46e5;font-weight:700;margin-bottom:6px}
+  .ai-text{font-size:10px;line-height:1.6;color:#333;white-space:pre-wrap}
+  /* ── SCORE SECTION ── */
+  .score-banner{display:flex;align-items:center;gap:20px;background:#f8f8fc;border:1px solid #e8e8f0;border-radius:8px;padding:14px 16px;margin-bottom:14px}
+  /* ── FOOTER ── */
+  .rpt-footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-size:8px;color:#aaa;text-align:center}
+  @media print{.page{padding:16px 20px;page-break-after:always;break-after:page}.page:last-child{page-break-after:auto;break-after:auto}}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════
+     PAGE 1 · DEAL SUMMARY
+     ════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">Property Investment Report</div>
+      <div class="rpt-sub">${address}${postcode ? " · " + postcode : ""}</div>
+      <div class="rpt-sub">Generated: ${date}</div>
+      <span class="rpt-badge">Metalyzi · AI Deal Analyser</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:9px;color:#888;margin-bottom:4px">Strategy</div>
+      <div style="font-size:13px;font-weight:700;color:#4f46e5">${strategy}</div>
+    </div>
+  </div>
+
+  <!-- Score banner -->
+  ${score !== null ? `
+  <div class="score-banner">
+    ${scoreRingSvg}
+    <div>
+      <div style="font-size:16px;font-weight:700;color:${scoreColor}">${scoreLabel}</div>
+      <div style="font-size:10px;color:#555;margin-top:4px">AI Deal Score: ${score}/100</div>
+      ${aiSummary ? `<div style="font-size:10px;color:#333;margin-top:8px;max-width:480px;line-height:1.5">${aiSummary.substring(0, 280)}</div>` : ""}
+    </div>
+  </div>` : ""}
+
+  <!-- Property details -->
+  <div class="sec-title">Headline Details</div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">Property Type</div><div class="detail-value">${propType}</div></div>
+    <div class="detail-item"><div class="detail-label">Bedrooms</div><div class="detail-value">${na(fd?.bedrooms)} bed</div></div>
+    <div class="detail-item"><div class="detail-label">Internal Area</div><div class="detail-value">${fd?.sqft ? fd.sqft + " sqft" : "—"}</div></div>
+    <div class="detail-item"><div class="detail-label">Condition</div><div class="detail-value">${condition}</div></div>
+    <div class="detail-item"><div class="detail-label">Strategy</div><div class="detail-value">${strategy}</div></div>
+    <div class="detail-item"><div class="detail-label">Purchase Type</div><div class="detail-value">${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</div></div>
+  </div>
+
+  <!-- Headline figures -->
+  <div class="sec-title">Headline Deal Figures</div>
+  <div class="figures-grid">
+    <div class="fig-card accent"><div class="fig-label">Purchase Price</div><div class="fig-value">${gbp(fd?.purchasePrice || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Stamp Duty</div><div class="fig-value">${gbp(res?.sdltAmount || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Legal &amp; Survey</div><div class="fig-value">${gbp((fd?.legalFees || 0) + (fd?.surveyCosts || 0))}</div></div>
+    <div class="fig-card"><div class="fig-label">Refurb Budget</div><div class="fig-value">${gbp(fd?.refurbishmentBudget || 0)}</div></div>
+    <div class="fig-card accent"><div class="fig-label">Total Money In</div><div class="fig-value">${gbp(res?.totalCapitalRequired || 0)}</div></div>
+    <div class="fig-card ${(res?.monthlyCashFlow || 0) >= 0 ? "green" : ""}"><div class="fig-label">Monthly Cashflow</div><div class="fig-value">${gbp(res?.monthlyCashFlow || 0)}</div></div>
+    <div class="fig-card green"><div class="fig-label">Annual Cashflow</div><div class="fig-value">${gbp(res?.annualCashFlow || 0)}</div></div>
+    <div class="fig-card ${(res?.grossYield || 0) >= 6 ? "green" : "amber"}"><div class="fig-label">Gross Yield</div><div class="fig-value">${pct(res?.grossYield || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Net Yield</div><div class="fig-value">${pct(res?.netYield || 0)}</div></div>
+    <div class="fig-card ${(res?.cashOnCashReturn || 0) >= 10 ? "green" : ""}"><div class="fig-label">Cash-on-Cash ROI</div><div class="fig-value">${pct(res?.cashOnCashReturn || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Monthly Income</div><div class="fig-value">${gbp(res?.monthlyIncome || 0)}</div></div>
+    <div class="fig-card"><div class="fig-label">Monthly Expenses</div><div class="fig-value">${gbp(res?.monthlyExpenses || 0)}</div></div>
+  </div>
+
+  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · metalyzi.com · For informational purposes only. Always seek professional financial and legal advice.</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     PAGE 2 · DEAL ANALYSER — FINANCIAL BREAKDOWN
+     ════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">Deal Analyser · Financial Breakdown</div>
+      <div class="rpt-sub">${address} · ${strategy}</div>
+    </div>
+    <span class="rpt-badge">Metalyzi</span>
+  </div>
+
+  <div class="two-col">
+    <!-- Purchase Costs -->
+    <div>
+      <div class="sec-title" style="margin-top:0">Purchase Costs</div>
+      <table>
+        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
+        <tr><td>Purchase Price</td><td class="td-right">${gbp(fd?.purchasePrice || 0)}</td></tr>
+        <tr><td>Deposit (${fd?.depositPercentage || 25}%)</td><td class="td-right">${gbp(res?.depositAmount || 0)}</td></tr>
+        <tr><td>Mortgage Amount</td><td class="td-right">${gbp(res?.mortgageAmount || 0)}</td></tr>
+        <tr><td>Stamp Duty (SDLT)</td><td class="td-right">${gbp(res?.sdltAmount || 0)}</td></tr>
+        <tr><td>Legal Fees</td><td class="td-right">${gbp(fd?.legalFees || 0)}</td></tr>
+        <tr><td>Survey Costs</td><td class="td-right">${gbp(fd?.surveyCosts || 0)}</td></tr>
+        ${fd?.refurbishmentBudget ? `<tr><td>Refurbishment</td><td class="td-right">${gbp(fd.refurbishmentBudget)}</td></tr>` : ""}
+        ${fd?.investmentType === "brr" && fd?.arv ? `<tr><td>After Repair Value (ARV)</td><td class="td-right">${gbp(fd.arv)}</td></tr>` : ""}
+        <tr style="font-weight:700"><td><strong>Total Capital Required</strong></td><td class="td-right"><strong>${gbp(res?.totalCapitalRequired || 0)}</strong></td></tr>
+      </table>
+
+      ${fd?.investmentType === "brr" && fd?.arv ? `
+      <div class="sec-title">BRR — Money Left In</div>
+      <table>
+        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
+        <tr><td>After Repair Value (ARV)</td><td class="td-right">${gbp(fd.arv)}</td></tr>
+        <tr><td>New Mortgage (75% ARV)</td><td class="td-right">${gbp(fd.arv * 0.75)}</td></tr>
+        <tr><td>Total Money In</td><td class="td-right">${gbp(res?.totalCapitalRequired || 0)}</td></tr>
+        <tr><td>Money Pulled Out</td><td class="td-right">${gbp(Math.max(0, fd.arv * 0.75 - (res?.totalCapitalRequired || 0)))}</td></tr>
+        <tr style="font-weight:700"><td><strong>Money Left In</strong></td><td class="td-right"><strong>${gbp(Math.max(0, (res?.totalCapitalRequired || 0) - fd.arv * 0.75))}</strong></td></tr>
+        <tr><td>Equity Created</td><td class="td-right">${gbp(Math.max(0, fd.arv - (res?.totalCapitalRequired || 0)))}</td></tr>
+      </table>` : ""}
+
+      ${fd?.investmentType === "hmo" && fd?.roomCount && fd?.avgRoomRate ? `
+      <div class="sec-title">HMO Room Details</div>
+      <table>
+        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
+        <tr><td>Number of Rooms</td><td class="td-right">${fd.roomCount}</td></tr>
+        <tr><td>Avg Room Rate</td><td class="td-right">${gbp(fd.avgRoomRate)}/month</td></tr>
+        <tr><td>Total HMO Income</td><td class="td-right">${gbp(fd.roomCount * fd.avgRoomRate)}/month</td></tr>
+        <tr><td>Annual HMO Income</td><td class="td-right">${gbp(fd.roomCount * fd.avgRoomRate * 12)}/year</td></tr>
+      </table>` : ""}
+    </div>
+
+    <!-- Monthly P&L -->
+    <div>
+      <div class="sec-title" style="margin-top:0">Monthly P&amp;L</div>
+      <table>
+        <tr><th>Item</th><th style="text-align:right">Amount</th></tr>
+        <tr><td>Rental Income</td><td class="td-right">${gbp(res?.monthlyIncome || 0)}</td></tr>
+        ${fd?.voidWeeks ? `<tr><td>Void Allowance (${fd.voidWeeks} wks)</td><td class="td-right" style="color:#dc2626">-${gbp(((fd.monthlyRent || 0) * fd.voidWeeks) / 52)}</td></tr>` : ""}
+        <tr><td style="border-top:1px solid #ddd">Mortgage Payment</td><td class="td-right" style="border-top:1px solid #ddd">-${gbp(res?.monthlyMortgagePayment || 0)}</td></tr>
+        ${fd?.managementFeePercent ? `<tr><td>Management (${fd.managementFeePercent}%)</td><td class="td-right">-${gbp((res?.monthlyIncome || 0) * (fd.managementFeePercent / 100))}</td></tr>` : ""}
+        ${fd?.insurance ? `<tr><td>Insurance</td><td class="td-right">-${gbp(fd.insurance / 12)}/mo</td></tr>` : ""}
+        ${fd?.maintenance ? `<tr><td>Maintenance</td><td class="td-right">-${gbp(fd.maintenance / 12)}/mo</td></tr>` : ""}
+        ${fd?.groundRent ? `<tr><td>Ground Rent</td><td class="td-right">-${gbp(fd.groundRent / 12)}/mo</td></tr>` : ""}
+        ${fd?.bills ? `<tr><td>Bills</td><td class="td-right">-${gbp(fd.bills / 12)}/mo</td></tr>` : ""}
+        <tr><td><strong>Total Expenses</strong></td><td class="td-right"><strong>-${gbp(res?.monthlyExpenses || 0)}</strong></td></tr>
+        <tr style="font-size:13px;font-weight:700;color:${(res?.monthlyCashFlow || 0) >= 0 ? "#16a34a" : "#dc2626"}">
+          <td><strong>Net Monthly Cashflow</strong></td>
+          <td class="td-right"><strong>${gbp(res?.monthlyCashFlow || 0)}</strong></td>
+        </tr>
+        <tr style="font-weight:700"><td>Annual Cashflow</td><td class="td-right">${gbp(res?.annualCashFlow || 0)}</td></tr>
+      </table>
+
+      <div class="sec-title">Returns</div>
+      <table>
+        <tr><th>Metric</th><th style="text-align:right">Value</th></tr>
+        <tr><td>Gross Yield</td><td class="td-right">${pct(res?.grossYield || 0)}</td></tr>
+        <tr><td>Net Yield</td><td class="td-right">${pct(res?.netYield || 0)}</td></tr>
+        <tr><td>Cash-on-Cash ROI</td><td class="td-right">${pct(res?.cashOnCashReturn || 0)}</td></tr>
+        <tr><td>Interest Rate</td><td class="td-right">${pct(fd?.interestRate || 0)}</td></tr>
+        ${fd?.mortgageTerm ? `<tr><td>Mortgage Term</td><td class="td-right">${fd.mortgageTerm} years</td></tr>` : ""}
+      </table>
+
+      ${sdltRows ? `
+      <div class="sec-title">SDLT Breakdown</div>
+      <table>
+        <tr><th>Band</th><th style="text-align:right">Tax</th></tr>
+        ${sdltRows}
+        <tr style="font-weight:700"><td>Total SDLT</td><td class="td-right">${gbp(res?.sdltAmount || 0)}</td></tr>
+      </table>` : ""}
+    </div>
+  </div>
+
+  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · For informational purposes only.</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     PAGE 3 · PROPERTY DETAILS, REFURB & 5-YEAR PROJECTION
+     ════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">Property Details &amp; Refurb</div>
+      <div class="rpt-sub">${address}</div>
+    </div>
+    <span class="rpt-badge">Metalyzi</span>
+  </div>
+
+  <div class="sec-title" style="margin-top:0">Property Information</div>
+  <table style="margin-bottom:18px">
+    <tr><th>Field</th><th>Detail</th></tr>
+    <tr><td>Full Address</td><td>${address}</td></tr>
+    <tr><td>Postcode</td><td>${postcode || "—"}</td></tr>
+    <tr><td>Property Type</td><td>${propType}</td></tr>
+    <tr><td>Bedrooms</td><td>${na(fd?.bedrooms)}</td></tr>
+    <tr><td>Internal Area</td><td>${fd?.sqft ? fd.sqft + " sqft" : "—"}</td></tr>
+    <tr><td>Condition</td><td>${condition}</td></tr>
+    <tr><td>Investment Strategy</td><td>${strategy}</td></tr>
+    <tr><td>Purchase Type</td><td>${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</td></tr>
+    ${fd?.investmentType !== "r2sa" ? `<tr><td>Additional Property Surcharge</td><td>${fd?.isAdditionalProperty ? "Yes (5% applied)" : "No"}</td></tr>` : ""}
+  </table>
+
+  <!-- Refurb estimates -->
+  <div class="sec-title">Refurb &amp; Furnishing Estimate</div>
+  <table style="margin-bottom:18px">
+    <tr><th>Refurb Level</th><th style="text-align:right">Estimated Cost</th><th>Description</th></tr>
+    <tr>
+      <td><strong>Light (Cosmetic)</strong></td>
+      <td class="td-right">${lightMatch ? `£${lightMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 18) : "—"}</td>
+      <td style="color:#555;font-size:9px">Redecorate, carpets, minor fixtures</td>
+    </tr>
+    <tr>
+      <td><strong>Medium (Standard)</strong></td>
+      <td class="td-right">${mediumMatch ? `£${mediumMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 35) : "—"}</td>
+      <td style="color:#555;font-size:9px">New kitchen, bathroom, replastering</td>
+    </tr>
+    <tr>
+      <td><strong>Heavy (Full Refurb)</strong></td>
+      <td class="td-right">${heavyMatch ? `£${heavyMatch[1]}` : fd?.sqft ? gbp(fd.sqft * 60) : "—"}</td>
+      <td style="color:#555;font-size:9px">Rewire, new heating, full internal strip-out</td>
+    </tr>
+    <tr>
+      <td><strong>Budgeted Refurb</strong></td>
+      <td class="td-right" style="color:#4f46e5;font-weight:700">${gbp(fd?.refurbishmentBudget || 0)}</td>
+      <td style="color:#555;font-size:9px">As entered in deal analysis</td>
+    </tr>
+  </table>
+
+  <!-- 5-year projection -->
+  ${projRows ? `
+  <div class="sec-title">5-Year Investment Projection</div>
+  <div style="font-size:9px;color:#888;margin-bottom:6px">Assumes 3% annual capital growth &amp; ${fd?.annualRentIncrease || 2}% rent increase per year</div>
+  <table>
+    <tr>
+      <th>Year</th>
+      <th style="text-align:right">Property Value</th>
+      <th style="text-align:right">Equity</th>
+      <th style="text-align:right">Annual CF</th>
+      <th style="text-align:right">Cumulative CF</th>
+      <th style="text-align:right">Total Return</th>
+    </tr>
+    ${projRows}
+  </table>` : ""}
+
+  <div class="rpt-footer">Metalyzi · AI Property Deal Analyser · For informational purposes only. Projections are estimates only and not guaranteed.</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     PAGE 4 · AI ANALYSIS
+     ════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">AI Investment Analysis</div>
+      <div class="rpt-sub">${address} · Powered by Metalyzi AI</div>
+    </div>
+    <span class="rpt-badge">Metalyzi</span>
+  </div>
+
+  ${aiStrengths ? `
+  <div class="ai-block">
+    <div class="ai-block-title">✅ Strengths</div>
+    <div class="ai-text">${aiStrengths}</div>
+  </div>` : ""}
+
+  ${aiRisks ? `
+  <div class="ai-block">
+    <div class="ai-block-title">⚠️ Risks &amp; Concerns</div>
+    <div class="ai-text">${aiRisks}</div>
+  </div>` : ""}
+
+  ${aiNextSteps ? `
+  <div class="ai-block">
+    <div class="ai-block-title">📋 Recommended Next Steps</div>
+    <div class="ai-text">${aiNextSteps}</div>
+  </div>` : ""}
+
+  <div class="sec-title">Full AI Analysis</div>
+  <div style="background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px">
+    <pre style="font-family:'Courier New',monospace;font-size:9.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#222">${aiText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre>
+  </div>
+
+  <div class="rpt-footer">This report was generated by Metalyzi (metalyzi.com) on ${date}. It is for informational purposes only. Always seek independent financial and legal advice before making any property investment decision. Past performance is not a reliable indicator of future results.</div>
+</div>
+
+</body>
+</html>`
+
+    const win = window.open("", "_blank", "width=1000,height=800")
+    if (!win) {
+      alert("Please allow pop-ups for this site to download the PDF.")
+      return
+    }
+    win.document.write(html)
+    win.document.close()
+    win.onload = () => { win.print() }
   }
 
   return (
@@ -467,6 +977,13 @@ export default function AnalysePage() {
             manually.
           </p>
         </div>
+
+        {/* Recent Deals — shown only when not viewing a current analysis */}
+        {!hasResults && !isProcessing && (
+          <div className="mb-8">
+            <RecentDeals key={recentDealsVersion} onLoad={handleLoadSavedDeal} />
+          </div>
+        )}
 
         {/* Input Mode Selector -- hidden once we have results */}
         {!hasResults && (
@@ -595,12 +1112,26 @@ export default function AnalysePage() {
         {/* Results view */}
         {hasResults && (
           <div className="flex flex-col gap-6">
-            {/* New analysis button */}
-            <div className="flex items-center gap-3">
+            {/* Results toolbar */}
+            <div className="flex flex-wrap items-center gap-3">
               <Button variant="outline" size="sm" onClick={resetAll}>
                 <ArrowLeft className="size-3.5" />
                 New Analysis
               </Button>
+
+              {/* Save as PDF — available once analysis text is ready */}
+              {aiText && !aiLoading && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSavePDF}
+                  className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+                >
+                  <FileDown className="size-3.5" />
+                  Save as PDF
+                </Button>
+              )}
+
               {formData?.address && (
                 <span className="text-sm text-muted-foreground">
                   Showing results for{" "}

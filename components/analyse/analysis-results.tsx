@@ -28,7 +28,7 @@ import {
   Line,
 } from "recharts"
 import type { PropertyFormData, CalculationResults } from "@/lib/types"
-import { formatCurrency, formatPercent } from "@/lib/calculations"
+import { formatCurrency, formatPercent, calculateDealScore } from "@/lib/calculations"
 import {
   TrendingUp,
   TrendingDown,
@@ -95,7 +95,12 @@ function MetricCard({
 }
 
 function parseAIAnalysis(text: string) {
-  const dealScoreMatch = text.match(/Deal Score:\s*(\d+)/i)
+  // Match all score formats the backend uses:
+  // "Deal Score: 77", "⭐ SCORE:  77/100", "SCORE: 77"
+  const dealScoreMatch =
+    text.match(/Deal Score:\s*(\d+)/i) ||
+    text.match(/⭐\s*SCORE:\s*(\d+)/i) ||
+    text.match(/SCORE:\s*(\d+)/i)
   const score = dealScoreMatch ? parseInt(dealScoreMatch[1], 10) : null
 
   const sections: { heading: string; content: string }[] = []
@@ -135,6 +140,8 @@ export function AnalysisResults({
   aiLoading,
 }: AnalysisResultsProps) {
   const parsedAI = parseAIAnalysis(aiText)
+  // Use the AI score when available; fall back to ROI-based score while AI is loading
+  const dealScore = parsedAI.score ?? calculateDealScore(results.cashOnCashReturn)
 
   // Cash flow chart data
   const cashFlowData = [
@@ -167,6 +174,11 @@ export function AnalysisResults({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Deal Score — ROI-based, visible immediately (no AI wait) */}
+      <div className="flex flex-col items-center gap-1 py-4">
+        <DealScore score={dealScore} />
+      </div>
+
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
@@ -315,7 +327,7 @@ export function AnalysisResults({
             <CardHeader>
               <CardTitle className="text-base">5-Year Projection</CardTitle>
               <CardDescription>
-                Assuming 3% capital growth and {data.annualRentIncrease}% rent
+                Assuming {data.capitalGrowthRate ?? 4}% capital growth and {data.annualRentIncrease}% rent
                 increase
               </CardDescription>
             </CardHeader>
@@ -437,13 +449,6 @@ export function AnalysisResults({
             </div>
           ) : (
             <div className="flex flex-col gap-6">
-              {/* Deal Score */}
-              {parsedAI.score !== null && (
-                <div className="flex justify-center">
-                  <DealScore score={parsedAI.score} />
-                </div>
-              )}
-
               {/* AI Text */}
               <div className="prose prose-sm prose-invert max-w-none">
                 {parsedAI.sections.length > 0 ? (
