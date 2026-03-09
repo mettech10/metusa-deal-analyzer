@@ -524,13 +524,31 @@ PDF_CONFIG = {
     'enable-local-file-access': None
 }
 
-def calculate_stamp_duty(price, second_property=True):
+def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
     """
     Calculate UK stamp duty for England & NI
     Updated for 2024/2025 rates including 5% surcharge for additional properties
     """
-    # Thresholds (as of 2024)
-    if not second_property:
+    if first_time_buyer:
+        # First-time buyer relief (England/NI, 2024/2025)
+        # 0% up to £425,000; 5% on £425,001–£625,000; standard rates above £625k
+        if price <= 425000:
+            return 0
+        elif price <= 625000:
+            return (price - 425000) * 0.05
+        else:
+            # No FTB relief above £625k — standard rates apply
+            if price <= 125000:
+                return 0
+            elif price <= 250000:
+                return (price - 125000) * 0.02
+            elif price <= 925000:
+                return 2500 + ((price - 250000) * 0.05)
+            elif price <= 1500000:
+                return 36250 + ((price - 925000) * 0.10)
+            else:
+                return 93750 + ((price - 1500000) * 0.12)
+    elif not second_property:
         # Standard residential rates (England, effective from Oct 2022)
         if price <= 125000:
             return 0
@@ -1278,7 +1296,9 @@ def analyze_deal(data):
         postcode = ""  # Clear invalid postcode rather than error
     
     # Purchase costs
-    stamp_duty = calculate_stamp_duty(purchase_price)
+    buyer_type = data.get('buyerType', 'second_home')
+    is_first_time = buyer_type == 'first_time'
+    stamp_duty = calculate_stamp_duty(purchase_price, second_property=not is_first_time, first_time_buyer=is_first_time)
     legal_fees = float(data.get('legalFees', 1500))
     valuation_fee = float(data.get('valuationFee', 500))
     arrangement_fee = float(data.get('arrangementFee', 1995))
