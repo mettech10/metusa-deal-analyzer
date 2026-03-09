@@ -323,7 +323,7 @@ export default function AnalysePage() {
             monthlyRent: parseFloat(parsedResults.monthly_rent?.toString().replace(/[^0-9.]/g, '')) || 0,
             depositPercentage: parseFloat(parsedResults.deposit_pct) || 25,
             interestRate: parseFloat(parsedResults.interest_rate) || 3.75,
-            isAdditionalProperty: true,
+            buyerType: 'additional',
             purchaseType: 'mortgage',
             mortgageType: 'interest-only',
             mortgageTerm: 25,
@@ -841,7 +841,7 @@ export default function AnalysePage() {
     <tr><td>Condition</td><td>${condition}</td></tr>
     <tr><td>Investment Strategy</td><td>${strategy}</td></tr>
     <tr><td>Purchase Type</td><td>${(fd?.purchaseType || "mortgage").replace("-", " ").replace(/\b\w/g, c => c.toUpperCase())}</td></tr>
-    ${fd?.investmentType !== "r2sa" ? `<tr><td>Additional Property Surcharge</td><td>${fd?.isAdditionalProperty ? "Yes (5% applied)" : "No"}</td></tr>` : ""}
+    ${fd?.investmentType !== "r2sa" ? `<tr><td>Buyer Type</td><td>${fd?.buyerType === "first-time" ? "First-Time Buyer" : "Second Home / Investment (5% surcharge)"}</td></tr>` : ""}
   </table>
 
   <!-- Refurb estimates -->

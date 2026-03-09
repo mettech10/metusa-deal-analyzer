@@ -15,7 +15,7 @@ export interface PropertyFormData {
   condition: PropertyCondition
 
   // Purchase Costs
-  isAdditionalProperty: boolean
+  buyerType: "first-time" | "additional"
   refurbishmentBudget: number
   legalFees: number
   surveyCosts: number

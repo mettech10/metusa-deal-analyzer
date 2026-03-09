@@ -7,7 +7,6 @@ import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -28,7 +27,7 @@ const schema = z.object({
   sqft: z.coerce.number().min(0).optional(),
   bedrooms: z.coerce.number().min(0).max(20),
   condition: z.enum(["excellent", "good", "fair", "needs-work"]),
-  isAdditionalProperty: z.boolean(),
+  buyerType: z.enum(["first-time", "additional"]),
   refurbishmentBudget: z.coerce.number().min(0),
   legalFees: z.coerce.number().min(0),
   surveyCosts: z.coerce.number().min(0),
@@ -100,7 +99,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     sqft: undefined,
     bedrooms: 3,
     condition: "good",
-    isAdditionalProperty: true,
+    buyerType: "additional",
     refurbishmentBudget: 0,
     legalFees: 1500,
     surveyCosts: 500,
@@ -296,17 +295,24 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
         <div className="flex flex-col gap-4">
           <h3 className="text-base font-semibold text-foreground">Purchase Costs</h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2 flex items-center gap-3">
-              <Controller
-                control={control}
-                name="isAdditionalProperty"
-                render={({ field }) => (
-                  <Switch checked={field.value} onCheckedChange={field.onChange} id="additional" />
-                )}
-              />
-              <Label htmlFor="additional" className="text-sm text-foreground cursor-pointer">
-                Additional property (5% SDLT surcharge)
-              </Label>
+            <div className="sm:col-span-2">
+              <FormField label="Buyer Type" hint="Affects Stamp Duty Land Tax (SDLT) calculation">
+                <Controller
+                  control={control}
+                  name="buyerType"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="additional">Second Home / Investment (5% SDLT surcharge)</SelectItem>
+                        <SelectItem value="first-time">First-Time Buyer (0% up to £425k, 5% on £425k–£625k)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </FormField>
             </div>
             <FormField label="Refurbishment Budget" hint={sqftValue ? "Auto-estimated from size & condition — edit to override" : "Enter manually or set floor size + condition above"}>
               <div className="relative">

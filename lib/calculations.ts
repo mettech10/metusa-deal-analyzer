@@ -6,9 +6,33 @@ import type { PropertyFormData, CalculationResults, YearProjection } from "./typ
  */
 export function calculateSDLT(
   price: number,
-  isAdditional: boolean
+  buyerType: "first-time" | "additional"
 ): { total: number; breakdown: { band: string; tax: number }[] } {
-  const surcharge = isAdditional ? 0.05 : 0
+  // First-time buyer relief: 0% up to £425k, 5% on £425k–£625k, standard above £625k
+  // (relief removed entirely if price > £625,000)
+  if (buyerType === "first-time" && price <= 625000) {
+    const bands = [
+      { threshold: 425000, rate: 0, label: "Up to 425,000" },
+      { threshold: 625000, rate: 0.05, label: "425,001 - 625,000" },
+    ]
+    let remaining = price
+    let total = 0
+    const breakdown: { band: string; tax: number }[] = []
+    let prevThreshold = 0
+    for (const band of bands) {
+      const taxable = Math.min(remaining, band.threshold - prevThreshold)
+      if (taxable <= 0) break
+      const tax = taxable * band.rate
+      if (tax > 0) breakdown.push({ band: band.label, tax: Math.round(tax) })
+      total += tax
+      remaining -= taxable
+      prevThreshold = band.threshold
+    }
+    return { total: Math.round(total), breakdown }
+  }
+
+  // Standard / additional property rates
+  const surcharge = buyerType === "additional" ? 0.05 : 0
 
   const bands = [
     { threshold: 125000, rate: 0, label: "Up to 125,000" },
@@ -43,7 +67,7 @@ export function calculateSDLT(
   }
 
   // If additional property and price > 0, there's always at least the surcharge on the first band
-  if (isAdditional && price > 0 && price <= 125000) {
+  if (buyerType === "additional" && price > 0 && price <= 125000) {
     const tax = price * surcharge
     total = tax
     breakdown.length = 0
@@ -248,7 +272,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
 
   const { total: sdltAmount, breakdown: sdltBreakdown } = calculateSDLT(
     data.purchasePrice,
-    data.isAdditionalProperty
+    data.buyerType
   )
 
   // Deposit & Mortgage

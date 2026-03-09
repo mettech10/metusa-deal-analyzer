@@ -227,6 +227,8 @@ export async function POST(req: Request) {
       saSetupCosts: Number(propertyData.saSetupCosts) || 5000,
       // Projection assumption
       capitalGrowthRate: Number(propertyData.capitalGrowthRate) || 4,
+      // Buyer type for SDLT
+      buyerType: propertyData.buyerType || 'additional',
     }
     console.log("[v0] FLASK PROXY: Sending flattened payload:", aiPayload)
     const aiRes = await sendToFlask("/ai-analyze", aiPayload)
