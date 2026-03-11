@@ -8,17 +8,17 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --primary: #1B1F3B;
-            --primary-light: #2d3561;
-            --accent: #D4AF37;
-            --text: #f1f5f9;
+            --primary: #141726;
+            --primary-light: #1a1e35;
+            --accent: #2dd4bf;
+            --text: #f0f1f7;
             --text-muted: #94a3b8;
-            --bg: #0f1223;
-            --card: #1a1f3a;
-            --border: #2d3561;
+            --bg: #0d0f1e;
+            --card: #141726;
+            --border: #22273f;
             --danger: #ef4444;
-            --warning: #f59e0b;
-            --success: #10b981;
+            --warning: #eab308;
+            --success: #22c55e;
         }
         body {
             font-family: 'Inter', sans-serif;
@@ -38,7 +38,7 @@
             left: -50%;
             width: 200%;
             height: 200%;
-            background: radial-gradient(ellipse at 50% 30%, rgba(212,175,55,0.06) 0%, transparent 60%);
+            background: radial-gradient(ellipse at 50% 30%, rgba(45,212,191,0.06) 0%, transparent 60%);
             pointer-events: none;
         }
         .login-box {
@@ -83,7 +83,7 @@
         }
         .alert-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
         .alert-warning { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); color: #fcd34d; }
-        .alert-info { background: rgba(212,175,55,0.12); border: 1px solid rgba(212,175,55,0.3); color: var(--accent); }
+        .alert-info { background: rgba(45,212,191,0.12); border: 1px solid rgba(45,212,191,0.3); color: var(--accent); }
         .form-group { margin-bottom: 20px; }
         label { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
         input[type="text"], input[type="password"] {
@@ -100,13 +100,13 @@
         }
         input[type="text"]:focus, input[type="password"]:focus {
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(212,175,55,0.15);
+            box-shadow: 0 0 0 3px rgba(45,212,191,0.15);
         }
         .btn-login {
             width: 100%;
             padding: 13px;
             background: var(--accent);
-            color: #1a1a2e;
+            color: #0d0f1e;
             border: none;
             border-radius: 8px;
             font-size: 15px;
