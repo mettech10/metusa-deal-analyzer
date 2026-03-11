@@ -9,7 +9,7 @@ import { PropertyForm } from "@/components/analyse/property-form"
 import { AnalysisResults } from "@/components/analyse/analysis-results"
 import { RecentDeals } from "@/components/analyse/recent-deals"
 import { calculateAll, calculateDealScore } from "@/lib/calculations"
-import type { PropertyFormData, CalculationResults } from "@/lib/types"
+import type { PropertyFormData, CalculationResults, BackendResults } from "@/lib/types"
 import {
   BarChart3,
   ArrowLeft,
@@ -229,6 +229,7 @@ export default function AnalysePage() {
   const [error, setError] = useState<string | null>(null)
   const [aiText, setAiText] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
+  const [backendData, setBackendData] = useState<BackendResults | null>(null)
   const [prefillData, setPrefillData] = useState<Partial<PropertyFormData> | null>(null)
   const [scrapedFromUrl, setScrapedFromUrl] = useState(false)
 
@@ -281,16 +282,23 @@ export default function AnalysePage() {
         // Handle JSON response
         const data = await res.json()
 
-        // Extract AI analysis text -- our API returns { aiAnalysis: "..." }
+        // Extract AI analysis text -- our API returns { aiAnalysis: "...", structured: {...} }
         let analysis = data.aiAnalysis || ""
         let parsedResults = null
 
-        // Try to parse JSON response
-        if (analysis && typeof analysis === 'string') {
+        // Store structured backend data if returned directly
+        if (data.structured) {
+          setBackendData(data.structured as BackendResults)
+          parsedResults = data.structured
+          const userPostcode = (body.propertyData as Record<string, any>)?.postcode as string | undefined
+          analysis = formatAnalysisResults(data.structured, userPostcode)
+        } else if (analysis && typeof analysis === 'string') {
+          // Fallback: parse JSON-stringified response from older API format
           try {
             const parsed = JSON.parse(analysis)
             if (parsed.results) {
               parsedResults = parsed.results
+              setBackendData(parsed.results as BackendResults)
               // Format for text display; pass user's postcode so AI can't override it
               const userPostcode = (body.propertyData as Record<string, any>)?.postcode as string | undefined
               analysis = formatAnalysisResults(parsed.results, userPostcode)
@@ -525,6 +533,7 @@ export default function AnalysePage() {
     setListingUrl("")
     setError(null)
     setAiText("")
+    setBackendData(null)
     setPrefillData(null)
     setScrapedFromUrl(false)
     savedKeyRef.current = null
@@ -1148,6 +1157,7 @@ export default function AnalysePage() {
                 results={results}
                 aiText={aiText}
                 aiLoading={aiLoading}
+                backendData={backendData}
               />
             ) : (
               /* URL mode -- AI text only (no structured data from backend) */

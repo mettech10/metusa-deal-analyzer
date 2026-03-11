@@ -177,10 +177,14 @@ export async function POST(req: Request) {
 
     try {
       const aiData = await aiRes.json()
-      return Response.json({ aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData) })
+      const structured = aiData.results || null
+      return Response.json({
+        aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData),
+        structured,
+      })
     } catch {
       const text = await aiRes.text()
-      return Response.json({ aiAnalysis: text })
+      return Response.json({ aiAnalysis: text, structured: null })
     }
   }
 
@@ -240,10 +244,14 @@ export async function POST(req: Request) {
     try {
       const aiData = await aiRes.json()
       console.log("[v0] FLASK PROXY: AI response keys:", Object.keys(aiData))
-      return Response.json({ aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData) })
+      const structured = aiData.results || null
+      return Response.json({
+        aiAnalysis: aiData.analysis || aiData.text || aiData.response || aiData.result || JSON.stringify(aiData),
+        structured,
+      })
     } catch {
       const text = await aiRes.text()
-      return Response.json({ aiAnalysis: text })
+      return Response.json({ aiAnalysis: text, structured: null })
     }
   }
 

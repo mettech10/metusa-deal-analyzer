@@ -159,3 +159,80 @@ export interface HouseValuation {
   source?: string
   note?: string
 }
+
+// Full structured response from the Flask /ai-analyze endpoint
+export interface BackendResults {
+  verdict?: "PROCEED" | "REVIEW" | "AVOID"
+  deal_score?: number
+  deal_score_label?: string
+  gross_yield?: number
+  net_yield?: number
+  monthly_cashflow?: number
+  cash_on_cash?: number
+  stamp_duty?: number
+  deposit_amount?: number
+  loan_amount?: number
+  monthly_mortgage?: number
+  interest_rate?: number
+  purchase_price?: number
+  address?: string
+  postcode?: string
+  location?: {
+    country?: string
+    region?: string
+    council?: string
+  }
+  article_4?: {
+    is_article_4: boolean
+    known?: boolean
+    note?: string
+    advice?: string
+    hmo_guidance?: string
+    social_housing_suggestion?: string
+    council?: string
+  }
+  strategy_recommendations?: {
+    BTL?: { suitable: boolean; note: string }
+    HMO?: { suitable: boolean; note: string }
+    BRR?: { suitable: boolean; note: string }
+    FLIP?: { suitable: boolean; note: string }
+    SOCIAL_HOUSING?: { suitable: boolean; note: string }
+    R2SA?: { suitable: boolean; note: string }
+  }
+  refurb_estimates?: {
+    light?: { total: number; per_sqft_mid?: number; per_sqm?: number }
+    medium?: { total: number; per_sqft_mid?: number; per_sqm?: number }
+    heavy?: { total: number; per_sqft_mid?: number; per_sqm?: number }
+    structural?: { total: number; per_sqft_mid?: number; per_sqm?: number }
+  }
+  ai_strengths?: string[]
+  ai_risks?: string[]
+  ai_area?: string
+  ai_next_steps?: string[]
+  ai_verdict?: string
+  sold_comparables?: Array<{
+    address: string
+    price: number
+    bedrooms: number
+    date: string
+    type: string
+    source?: string
+  }>
+  rent_comparables?: Array<{
+    address: string
+    monthly_rent: number
+    bedrooms?: number
+    type?: string
+    source?: string
+    confidence?: string
+  }>
+  house_valuation?: {
+    estimate: number
+    confidence: string
+    range?: { low: number; high: number }
+    source?: string
+    note?: string
+  }
+  avg_sold_price?: number
+  market_source?: string
+}
