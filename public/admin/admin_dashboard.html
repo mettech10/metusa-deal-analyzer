@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard — Metusa Deal Analyzer</title>
+    <title>Admin Dashboard — Metalyzi Deal Analyzer</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -260,7 +260,7 @@
     <div class="sidebar-brand">
         <div class="brand-icon">📊</div>
         <div>
-            <div class="brand-name">Metusa</div>
+            <div class="brand-name">Metalyzi</div>
             <div class="brand-sub">Admin Dashboard</div>
         </div>
     </div>
@@ -284,9 +284,9 @@
     </div>
     <div class="sidebar-footer">
         <div class="user-info">
-            <div class="user-avatar">{{ username[0]|upper }}</div>
+            <div class="user-avatar">A</div>
             <div>
-                <div class="user-name">{{ username }}</div>
+                <div class="user-name">admin</div>
                 <div class="user-role">Administrator</div>
             </div>
         </div>
@@ -455,7 +455,7 @@
                 </div>
                 <div class="system-item">
                     <div class="system-label">Session Timeout</div>
-                    <div class="system-value warning">{{ timeout_minutes }}m inactivity</div>
+                    <div class="system-value warning">30m inactivity</div>
                 </div>
                 <div class="system-item">
                     <div class="system-label">Total Errors Logged</div>
@@ -650,8 +650,21 @@
         return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // ── Session Check ──
+    if (sessionStorage.getItem('adminLoggedIn') !== 'true') {
+        window.location.href = '/admin/login';
+    }
+
+    // ── Logout Function ──
+    function logout() {
+        sessionStorage.removeItem('adminLoggedIn');
+        sessionStorage.removeItem('adminUser');
+        window.location.href = '/admin/login';
+    }
+    document.querySelector('.btn-logout').addEventListener('click', logout);
+
     // ── Session timeout warning ──
-    const SESSION_TIMEOUT_MS = {{ timeout_minutes }} * 60 * 1000;
+    const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
     let _lastActivity = Date.now();
 
     function keepAlive() {
@@ -669,7 +682,7 @@
         const bar = document.getElementById('timeout-bar');
         const warnAt = SESSION_TIMEOUT_MS - 2 * 60 * 1000; // warn 2 min before
         if (idle > SESSION_TIMEOUT_MS) {
-            window.location = '/admin/login?timeout=1';
+            window.location.href = '/admin/login';
         } else if (idle > warnAt) {
             bar.style.display = 'block';
         } else {
