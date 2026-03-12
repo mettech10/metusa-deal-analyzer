@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metusa Deal Analyzer | AI-Powered Property Investment Analysis</title>
+    <meta name="description" content="Analyse UK property deals in 60 seconds. AI-powered yield, cashflow, risk, and area analysis for BTL, HMO, BRR, and Flip strategies.">
+    <link rel="canonical" href="https://analyzer.metusaproperty.co.uk/">
+    <!-- OpenGraph -->
+    <meta property="og:type"        content="website">
+    <meta property="og:url"         content="https://analyzer.metusaproperty.co.uk/">
+    <meta property="og:title"       content="Metusa Deal Analyzer — Analyse Property Deals in 60 Seconds">
+    <meta property="og:description" content="AI-powered UK property deal analysis. Instant yield, cashflow, risk, and area reports for BTL, HMO, BRR, and Flip strategies.">
+    <meta property="og:site_name"   content="Metusa Deal Analyzer">
+    <!-- Twitter Card -->
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="Metusa Deal Analyzer — AI Property Analysis">
+    <meta name="twitter:description" content="Analyse UK property deals in 60 seconds. Yield, cashflow, risk and area data — instantly.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' rx='9' fill='%231B1F3B'/><rect x='5' y='9' width='5' height='27' rx='1' fill='%23D4AF37'/><rect x='11' y='24' width='5' height='12' rx='1' fill='%23D4AF37'/><rect x='17' y='15' width='5' height='21' rx='1' fill='%23D4AF37'/><rect x='23' y='24' width='5' height='12' rx='1' fill='%23D4AF37'/><rect x='29' y='9' width='5' height='27' rx='1' fill='%23D4AF37'/></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #1B1F3B;
+            --primary-light: #2d3561;
+            --accent: #D4AF37;
+            --accent-light: #f0d878;
+            --text: #1a1a2e;
+            --text-light: #64748b;
+            --bg: #ffffff;
+            --bg-light: #f8fafc;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        /* Floating Decorations */
+        .floating-elements {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+        .float-item {
+            position: absolute;
+            opacity: 0.04;
+            animation: float 20s infinite ease-in-out;
+            font-size: 80px;
+        }
+        .float-item:nth-child(1) { top: 10%; left: 5%; animation-delay: 0s; }
+        .float-item:nth-child(2) { top: 20%; right: 10%; animation-delay: 2s; font-size: 60px; }
+        .float-item:nth-child(3) { top: 60%; left: 8%; animation-delay: 4s; font-size: 70px; }
+        .float-item:nth-child(4) { top: 70%; right: 5%; animation-delay: 6s; font-size: 90px; }
+        .float-item:nth-child(5) { top: 40%; left: 15%; animation-delay: 8s; font-size: 50px; }
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(5deg); }
+        }
+        /* Navbar */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 60px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            border-bottom: 1px solid var(--border);
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            text-decoration: none;
+        }
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 40px;
+        }
+        .nav-links a {
+            color: var(--text-light);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: color 0.3s ease;
+        }
+        .nav-links a:hover { color: var(--primary); }
+        .nav-buttons {
+            display: flex;
+            gap: 16px;
+        }
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-outline {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--border);
+        }
+        .btn-outline:hover {
+            border-color: var(--primary);
+            background: var(--bg-light);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(27, 31, 59, 0.3);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(27, 31, 59, 0.4);
+        }
+        .btn-accent {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+            color: var(--primary);
+            box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+        }
+        .btn-accent:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(212, 175, 55, 0.4);
+        }
+        /* Hero */
+        .hero {
+            padding: 160px 60px 100px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 20px;
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(212, 175, 55, 0.2) 100%);
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            border-radius: 50px;
+            font-size: 0.9rem;
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 30px;
+        }
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            color: var(--primary);
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .hero h1 span {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--primary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--text-light);
+            max-width: 600px;
+            margin: 0 auto 50px;
+            line-height: 1.7;
+        }
+        /* Search Box */
+        .search-container {
+            max-width: 800px;
+            margin: 0 auto 30px;
+            background: white;
+            border-radius: 20px;
+            padding: 8px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border);
+        }
+        .search-box {
+            display: flex;
+            gap: 8px;
+        }
+        .search-input-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            background: var(--bg-light);
+            border-radius: 14px;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .search-input-wrapper:focus-within {
+            border-color: var(--accent);
+            background: white;
+        }
+        .search-icon {
+            font-size: 1.3rem;
+            margin-right: 12px;
+            opacity: 0.5;
+        }
+        .search-input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            padding: 18px 0;
+            font-size: 1rem;
+            outline: none;
+            color: var(--text);
+        }
+        .search-input::placeholder { color: var(--text-light); }
+        .search-btn {
+            padding: 18px 36px;
+            border-radius: 14px;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+        .search-alt {
+            color: var(--text-light);
+            font-size: 0.9rem;
+            margin-top: 16px;
+        }
+        .search-alt a {
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+            border-bottom: 1px solid var(--accent);
+        }
+        /* Stats */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 60px;
+            margin-top: 60px;
+            padding: 40px;
+        }
+        .stat { text-align: center; }
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            display: block;
+        }
+        .stat-label {
+            font-size: 0.95rem;
+            color: var(--text-light);
+            margin-top: 4px;
+        }
+        /* Features */
+        .features {
+            padding: 100px 60px;
+            background: var(--bg-light);
+            position: relative;
+            z-index: 1;
+        }
+        .section-header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .section-header h2 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            margin-bottom: 16px;
+        }
+        .section-header p {
+            font-size: 1.1rem;
+            color: var(--text-light);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        @media (max-width: 900px) {
+            .features-grid { grid-template-columns: 1fr; }
+            .navbar { padding: 16px 24px; }
+            .nav-links { display: none; }
+            .hero { padding: 120px 24px 60px; }
+            .hero h1 { font-size: 2.5rem; }
+            .search-box { flex-direction: column; }
+            .features, .stats { padding: 60px 24px; flex-direction: column; gap: 30px; }
+        }
+        .feature-card {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 20px;
+            text-align: center;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            border-color: var(--accent);
+        }
+        .feature-icon {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, var(--bg-light) 0%, white 100%);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin: 0 auto 24px;
+            border: 2px solid var(--border);
+            transition: all 0.3s ease;
+        }
+        .feature-card:hover .feature-icon {
+            border-color: var(--accent);
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, white 100%);
+        }
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+        .feature-card p {
+            color: var(--text-light);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+        /* How It Works */
+        .how-it-works {
+            padding: 100px 60px;
+            position: relative;
+            z-index: 1;
+        }
+        .steps {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+            flex-wrap: wrap;
+        }
+        .step {
+            flex: 1;
+            min-width: 280px;
+            text-align: center;
+            padding: 40px;
+        }
+        .step-number {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            margin: 0 auto 24px;
+        }
+        .step h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 12px;
+        }
+        .step p { color: var(--text-light); }
+        /* CTA */
+        .cta {
+            padding: 100px 60px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            text-align: center;
+            position: relative;
+            z-index: 1;
+            overflow: hidden;
+        }
+        .cta::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(212, 175, 55, 0.1) 0%, transparent 70%);
+            animation: pulse 10s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .cta-content { position: relative; z-index: 1; }
+        .cta h2 {
+            font-size: 3rem;
+            font-weight: 800;
+            color: white;
+            margin-bottom: 20px;
+        }
+        .cta p {
+            font-size: 1.2rem;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 40px;
+        }
+        /* Footer */
+        .footer {
+            padding: 60px;
+            background: var(--primary);
+            color: white;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+        .footer-logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+        .footer p {
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Floating Decorations -->
+    <div class="floating-elements">
+        <div class="float-item">🏠</div>
+        <div class="float-item">📊</div>
+        <div class="float-item">🏘️</div>
+        <div class="float-item">📈</div>
+        <div class="float-item">💰</div>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="navbar">
+        <a href="#" class="logo">
+            <div class="logo-icon">
+                <!-- Metusa skyline-arc logo (white on dark background) -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 52" width="26" height="24">
+                    <!-- Small accent dash top-left -->
+                    <line x1="3" y1="14" x2="10" y2="11" stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linecap="round"/>
+                    <!-- Building 1: hollow box left -->
+                    <rect x="3" y="24" width="9" height="22" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                    <!-- Building 2: tall outline centre-left -->
+                    <rect x="15" y="10" width="5" height="36" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                    <!-- Building 3: medium outline centre -->
+                    <rect x="23" y="16" width="5" height="30" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                    <!-- Building 4 + arc: D-shape right -->
+                    <line x1="31" y1="8" x2="31" y2="46" stroke="rgba(255,255,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M31 8 Q53 8 53 27 Q53 46 31 46" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            Metusa
+        </a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#how-it-works">How It Works</a>
+            <a href="#pricing">Pricing</a>
+        </div>
+        <div class="nav-buttons">
+            <a href="#" class="btn btn-outline">Log In</a>
+            <a href="#" class="btn btn-primary">Sign Up</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-badge">
+            <span>✨</span> AI-Powered Analysis
+        </div>
+        <h1>Analyze Property Deals <br>in <span>Seconds</span></h1>
+        <p class="hero-subtitle">Over 1,000+ deals analyzed. Get instant SDLT calculations, rental yields, cash flow projections, and AI-powered investment insights.</p>
+        
+        <div class="search-container">
+            <div class="search-box">
+                <div class="search-input-wrapper">
+                    <span class="search-icon">🔗</span>
+                    <input type="url" class="search-input" id="propertyUrl" placeholder="Paste Rightmove, Zoopla, or OnTheMarket URL...">
+                </div>
+                <button class="btn btn-accent search-btn" onclick="startAnalysis()">Analyze Deal</button>
+            </div>
+        </div>
+        
+        <p class="search-alt">or <a href="/analyze">enter details manually</a></p>
+        
+        <div class="stats">
+            <div class="stat">
+                <span class="stat-number">1,000+</span>
+                <span class="stat-label">Deals Analyzed</span>
+            </div>
+            <div class="stat">
+                <span class="stat-number">98%</span>
+                <span class="stat-label">Accuracy</span>
+            </div>
+            <div class="stat">
+                <span class="stat-number">4hrs</span>
+                <span class="stat-label">Saved Per Deal</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <div class="section-header">
+            <h2>Everything You Need to Evaluate a Deal</h2>
+            <p>From SDLT to AI-powered insights, get a comprehensive analysis of any UK property investment in seconds.</p>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔗</div>
+                <h3>URL Analysis</h3>
+                <p>Paste any property listing link. Our AI automatically extracts all details.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏛️</div>
+                <h3>SDLT Calculator</h3>
+                <p>Accurate Stamp Duty calculations including the 5% surcharge for buy-to-let.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>AI Deal Score</h3>
+                <p>Smart 0-100 scoring based on yield, cashflow, ROI, and risk factors.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💰</div>
+                <h3>Cash Flow Analysis</h3>
+                <p>See your monthly and annual cash flow after all expenses.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📈</div>
+                <h3>5-Year Projection</h3>
+                <p>Long-term forecasts with rent growth and capital appreciation.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📄</div>
+                <h3>PDF Reports</h3>
+                <p>Download professional reports ready to share with investors.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-header">
+            <h2>Three Steps to a Smarter Investment</h2>
+            <p>No spreadsheets. No guesswork. Just clear, data-driven analysis.</p>
+        </div>
+        
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">01</div>
+                <h3>Enter Property Details</h3>
+                <p>Paste a URL or enter details manually. Our smart form pre-fills typical UK defaults.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">02</div>
+                <h3>AI Analyses the Deal</h3>
+                <p>Our engine calculates SDLT, yields, and cash flow. AI reviews against benchmarks.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">03</div>
+                <h3>Get Your Report</h3>
+                <p>Receive a comprehensive breakdown with charts, scores, and clear recommendations.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <div class="cta-content">
+            <h2>Ready to Analyze Your First Deal?</h2>
+            <p>Join 1,000+ property investors making smarter decisions with AI.</p>
+            <a href="/analyze" class="btn btn-accent" style="font-size: 1.1rem; padding: 18px 40px;">
+                Get Started Free
+            </a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-logo">
+            <!-- Metusa skyline-arc logo (gold on dark footer background) -->
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 52" width="30" height="28" style="flex-shrink:0">
+                <!-- Small accent dash top-left -->
+                <line x1="3" y1="14" x2="10" y2="11" stroke="#D4AF37" stroke-width="2.5" stroke-linecap="round"/>
+                <!-- Building 1: hollow box left -->
+                <rect x="3" y="24" width="9" height="22" rx="0.8" fill="none" stroke="#D4AF37" stroke-width="2"/>
+                <!-- Building 2: tall outline centre-left -->
+                <rect x="15" y="10" width="5" height="36" rx="0.8" fill="none" stroke="#D4AF37" stroke-width="2"/>
+                <!-- Building 3: medium outline centre -->
+                <rect x="23" y="16" width="5" height="30" rx="0.8" fill="none" stroke="#D4AF37" stroke-width="2"/>
+                <!-- Building 4 + arc: D-shape right -->
+                <line x1="31" y1="8" x2="31" y2="46" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+                <path d="M31 8 Q53 8 53 27 Q53 46 31 46" fill="none" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+            </svg> Metusa Deal Analyzer
+        </div>
+        <p>© 2026 Metusa Property. AI-powered property investment analysis.</p>
+    </footer>
+
+    <script>
+        function startAnalysis() {
+            const url = document.getElementById('propertyUrl').value;
+            if (url) {
+                window.location.href = '/analyze?url=' + encodeURIComponent(url);
+            } else {
+                window.location.href = '/analyze';
+            }
+        }
+    </script>
+    <script>
+        // Send JS errors to admin error log
+        window.addEventListener('error', function(e) {
+            fetch('/admin/api/report-error', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    message: e.message,
+                    source: e.filename,
+                    lineno: e.lineno,
+                    colno: e.colno,
+                    stack: e.error ? e.error.stack : '',
+                    page: window.location.pathname,
+                })
+            }).catch(function(){});
+        });
+    </script>
+</body>
+</html>

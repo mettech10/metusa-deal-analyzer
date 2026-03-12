@@ -1,0 +1,1964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyze Deal | Metusa Deal Analyzer</title>
+    <meta name="description" content="AI-powered UK property deal analysis. Get instant yield, cashflow, and risk reports for BTL, HMO, BRR, and Flip strategies.">
+    <link rel="canonical" href="https://analyzer.metusaproperty.co.uk/analyze">
+    <!-- OpenGraph -->
+    <meta property="og:type"        content="website">
+    <meta property="og:url"         content="https://analyzer.metusaproperty.co.uk/analyze">
+    <meta property="og:title"       content="Analyze Your Deal | Metusa Deal Analyzer">
+    <meta property="og:description" content="Instant AI-powered property investment analysis — yield, cashflow, risk, and area data in seconds.">
+    <meta property="og:site_name"   content="Metusa Deal Analyzer">
+    <!-- Twitter Card -->
+    <meta name="twitter:card"        content="summary">
+    <meta name="twitter:title"       content="Analyze Your Deal | Metusa Deal Analyzer">
+    <meta name="twitter:description" content="Instant AI-powered property investment analysis — yield, cashflow, risk, and area data in seconds.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' rx='9' fill='%231B1F3B'/><rect x='5' y='9' width='5' height='27' rx='1' fill='%23D4AF37'/><rect x='11' y='24' width='5' height='12' rx='1' fill='%23D4AF37'/><rect x='17' y='15' width='5' height='21' rx='1' fill='%23D4AF37'/><rect x='23' y='24' width='5' height='12' rx='1' fill='%23D4AF37'/><rect x='29' y='9' width='5' height='27' rx='1' fill='%23D4AF37'/></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #1B1F3B;
+            --primary-light: #2d3561;
+            --accent: #D4AF37;
+            --accent-light: #f0d878;
+            --text: #1a1a2e;
+            --text-light: #64748b;
+            --bg: #f8fafc;
+            --bg-white: #ffffff;
+            --border: #e2e8f0;
+            --green: #16a34a;
+            --amber: #d97706;
+            --red: #dc2626;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Navbar */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 40px;
+            background: var(--primary);
+            color: white;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: white;
+            text-decoration: none;
+        }
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .back-link {
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: white; }
+
+        /* Layout */
+        .page-wrapper {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+
+        /* Card */
+        .card {
+            background: var(--bg-white);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 28px 32px;
+            margin-bottom: 20px;
+        }
+        .card-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* URL Loader */
+        .url-row {
+            display: flex;
+            gap: 10px;
+        }
+        .url-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            color: var(--text);
+        }
+        .url-input:focus { border-color: var(--accent); }
+        .url-status {
+            font-size: 0.85rem;
+            margin-top: 8px;
+            min-height: 20px;
+        }
+        .url-status.loading { color: var(--text-light); }
+        .url-status.success { color: var(--green); }
+        .url-status.error { color: var(--red); }
+
+        /* Form */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .form-group.full { grid-column: 1 / -1; }
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+        input[type="text"],
+        input[type="number"],
+        select {
+            padding: 11px 14px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            color: var(--text);
+            background: var(--bg-white);
+        }
+        input:focus, select:focus { border-color: var(--accent); }
+        .input-prefix {
+            position: relative;
+        }
+        .input-prefix span {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+            font-weight: 600;
+            pointer-events: none;
+        }
+        .input-prefix input { padding-left: 26px; }
+        .input-suffix {
+            position: relative;
+        }
+        .input-suffix span {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+            font-weight: 600;
+            pointer-events: none;
+        }
+        .input-suffix input { padding-right: 28px; }
+
+        .section-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-light);
+            margin-bottom: 12px;
+            margin-top: 4px;
+        }
+        .divider { height: 1px; background: var(--border); margin: 16px 0; grid-column: 1 / -1; }
+
+        .cond-field { display: none; }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border: none;
+            font-family: inherit;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-accent {
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            color: var(--primary);
+        }
+        .btn-accent:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(212,175,55,0.35); }
+        .btn-accent:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(27,31,59,0.3); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-outline {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--border);
+        }
+        .btn-outline:hover { border-color: var(--primary); }
+        .btn-lg { padding: 15px 32px; font-size: 1rem; width: 100%; justify-content: center; margin-top: 8px; }
+
+        /* Results */
+        #results { display: none; }
+        .results-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 4px;
+        }
+        .verdict-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 22px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+        .verdict-PROCEED { background: #dcfce7; color: #15803d; }
+        .verdict-REVIEW  { background: #fef3c7; color: #b45309; }
+        .verdict-AVOID   { background: #fee2e2; color: #b91c1c; }
+
+        .score-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: white;
+            flex-shrink: 0;
+        }
+        .score-circle small { font-size: 0.6rem; font-weight: 600; opacity: 0.85; }
+        .score-high  { background: linear-gradient(135deg, #16a34a, #22c55e); }
+        .score-mid   { background: linear-gradient(135deg, #d97706, #f59e0b); }
+        .score-low   { background: linear-gradient(135deg, #dc2626, #ef4444); }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+        }
+        .metric-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+        }
+        .metric-label {
+            font-size: 0.78rem;
+            color: var(--text-light);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+        .metric-value.positive { color: var(--green); }
+        .metric-value.negative { color: var(--red); }
+
+        .ai-section { margin-bottom: 16px; }
+        .ai-section-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-light);
+            margin-bottom: 8px;
+        }
+        .ai-text {
+            font-size: 0.95rem;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .points-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .points-list li {
+            font-size: 0.9rem;
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: var(--bg);
+            border-left: 3px solid var(--border);
+        }
+        .points-list.strength li { border-left-color: var(--green); }
+        .points-list.risk li { border-left-color: var(--red); }
+
+        .projection-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        .projection-table th {
+            text-align: left;
+            padding: 8px 12px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid var(--border);
+        }
+        .projection-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--bg);
+            color: var(--text);
+        }
+        .projection-table tr:last-child td { border-bottom: none; }
+        .projection-table tr:nth-child(even) td { background: var(--bg); }
+
+        .pdf-btn-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+        /* Saved Analyses */
+        .saved-panel {
+            background: var(--bg-white);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .saved-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .saved-panel-header:hover { background: var(--bg); }
+        .saved-panel-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .saved-count {
+            background: var(--accent);
+            color: var(--primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+        }
+        .saved-panel-body { display: none; border-top: 1px solid var(--border); }
+        .saved-panel-body.open { display: block; }
+        .saved-list { padding: 12px; }
+        .saved-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .saved-item:hover { border-color: var(--accent); background: var(--bg); }
+        .saved-item-info { flex: 1; min-width: 0; }
+        .saved-item-address { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .saved-item-meta { font-size: 0.8rem; color: var(--text-light); margin-top: 2px; }
+        .saved-item-verdict { font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+        .saved-item-verdict.PROCEED { background: #d4edda; color: #155724; }
+        .saved-item-verdict.REVIEW  { background: #fff3cd; color: #856404; }
+        .saved-item-verdict.AVOID   { background: #f8d7da; color: #721c24; }
+        .saved-delete { background: none; border: none; cursor: pointer; color: var(--text-light); font-size: 1.1rem; padding: 4px; line-height: 1; }
+        .saved-delete:hover { color: var(--red); }
+        .saved-empty { text-align: center; padding: 24px; color: var(--text-light); font-size: 0.9rem; }
+
+        /* Crime data */
+        .crime-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
+        .crime-card { background: var(--bg); border-radius: 10px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .crime-card-num { font-size: 1.4rem; font-weight: 800; color: var(--primary); }
+        .crime-card-label { font-size: 0.75rem; color: var(--text-light); margin-top: 4px; }
+        .crime-level { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
+        .crime-level-low  { background: #d4edda; color: #155724; }
+        .crime-level-med  { background: #fff3cd; color: #856404; }
+        .crime-level-high { background: #f8d7da; color: #721c24; }
+
+        /* Loading overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(27,31,59,0.7);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .loading-overlay.active { display: flex; }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { color: white; font-weight: 600; font-size: 1rem; }
+
+        /* ── Skeleton loading ────────────────────────────────────────────── */
+        @keyframes shimmer {
+            0%   { background-position: -600px 0; }
+            100% { background-position: 600px 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+            background-size: 600px 100%;
+            animation: shimmer 1.4s infinite linear;
+            border-radius: 6px;
+        }
+        .skeleton-card {
+            background: var(--bg-white);
+            border-radius: 16px;
+            padding: 28px;
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .skeleton-line { height: 14px; margin-bottom: 10px; }
+        .skeleton-line.w-60 { width: 60%; }
+        .skeleton-line.w-80 { width: 80%; }
+        .skeleton-line.w-40 { width: 40%; }
+        .skeleton-title { height: 20px; width: 45%; margin-bottom: 18px; }
+        .skeleton-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+        .skeleton-metric { height: 70px; border-radius: 10px; }
+        #skeletonResults { display: none; }
+
+        /* ── Comparison modal ────────────────────────────────────────────── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(27,31,59,0.6);
+            z-index: 9000;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 40px 16px;
+            overflow-y: auto;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--bg-white);
+            border-radius: 20px;
+            width: 100%;
+            max-width: 900px;
+            padding: 32px;
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 16px; right: 20px;
+            background: none; border: none;
+            font-size: 1.5rem; cursor: pointer;
+            color: var(--text-light);
+        }
+        .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .compare-col-title {
+            font-weight: 700; font-size: 0.85rem; color: var(--text-light);
+            text-transform: uppercase; letter-spacing: .04em;
+            margin-bottom: 12px;
+        }
+        .compare-row {
+            display: flex; justify-content: space-between;
+            padding: 8px 0; border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+        .compare-row:last-child { border-bottom: none; }
+        .compare-row-label { color: var(--text-light); }
+        .compare-row-val   { font-weight: 600; }
+
+        /* ── Mobile improvements ─────────────────────────────────────────── */
+        @media (max-width: 640px) {
+            .form-grid { grid-template-columns: 1fr; }
+            .form-group.full { grid-column: 1; }
+            .metrics-grid { grid-template-columns: 1fr 1fr; }
+            .navbar { padding: 14px 20px; }
+            .page-wrapper { padding: 20px 14px 40px; }
+            .card { padding: 20px; }
+            .pdf-btn-row { flex-direction: column; }
+            .pdf-btn-row .btn { width: 100%; justify-content: center; }
+            .compare-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <a href="/" class="logo">
+        <div class="logo-icon">
+            <!-- Metusa skyline-arc logo (white on dark background) -->
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 52" width="24" height="22">
+                <!-- Small accent dash top-left -->
+                <line x1="3" y1="14" x2="10" y2="11" stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linecap="round"/>
+                <!-- Building 1: hollow box left -->
+                <rect x="3" y="24" width="9" height="22" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                <!-- Building 2: tall outline centre-left -->
+                <rect x="15" y="10" width="5" height="36" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                <!-- Building 3: medium outline centre -->
+                <rect x="23" y="16" width="5" height="30" rx="0.8" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+                <!-- Building 4 + arc: D-shape right -->
+                <line x1="31" y1="8" x2="31" y2="46" stroke="rgba(255,255,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+                <path d="M31 8 Q53 8 53 27 Q53 46 31 46" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </div>
+        Metusa
+    </a>
+    <a href="/" class="back-link">← Back to home</a>
+</nav>
+
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <p class="loading-text" id="loadingText">Analyzing deal...</p>
+</div>
+
+<!-- Comparison modal -->
+<div class="modal-overlay" id="compareModal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeCompare()">×</button>
+        <h2 style="font-size:1.3rem;font-weight:800;color:var(--primary);margin-bottom:20px">📊 Deal Comparison</h2>
+        <div class="compare-grid" id="compareGrid"></div>
+    </div>
+</div>
+
+<!-- Skeleton placeholder (shown during analysis) -->
+<div id="skeletonResults">
+    <div class="skeleton-card">
+        <div class="skeleton skeleton-title"></div>
+        <div class="skeleton skeleton-line w-80"></div>
+        <div class="skeleton skeleton-line w-60"></div>
+        <div class="skeleton-grid">
+            <div class="skeleton skeleton-metric"></div>
+            <div class="skeleton skeleton-metric"></div>
+            <div class="skeleton skeleton-metric"></div>
+        </div>
+    </div>
+    <div class="skeleton-card">
+        <div class="skeleton skeleton-title"></div>
+        <div class="skeleton skeleton-line w-80"></div>
+        <div class="skeleton skeleton-line w-60"></div>
+        <div class="skeleton skeleton-line w-40"></div>
+    </div>
+</div>
+
+<div class="page-wrapper">
+
+    <!-- Saved Analyses -->
+    <div class="saved-panel" id="savedPanel">
+        <div class="saved-panel-header" onclick="toggleSavedPanel()">
+            <div class="saved-panel-title">
+                📁 My Saved Analyses
+                <span class="saved-count" id="savedCount">0</span>
+            </div>
+            <span id="savedToggleArrow" style="color:var(--text-light);font-size:0.85rem">▼</span>
+        </div>
+        <div class="saved-panel-body" id="savedPanelBody">
+            <div class="saved-list" id="savedList"></div>
+        </div>
+    </div>
+
+    <!-- URL Loader -->
+    <div class="card">
+        <div class="card-title">🔗 Load from Rightmove / Zoopla / OnTheMarket</div>
+        <div class="url-row">
+            <input type="url" class="url-input" id="propertyUrl"
+                   placeholder="https://www.rightmove.co.uk/properties/...">
+            <button class="btn btn-accent" onclick="loadFromUrl()">Load Details</button>
+        </div>
+        <div class="url-status" id="urlStatus"></div>
+    </div>
+
+    <!-- Deal Form -->
+    <div class="card">
+        <div class="card-title">📋 Deal Details</div>
+        <form id="dealForm">
+            <div class="form-grid">
+
+                <div class="section-label full">Property</div>
+
+                <div class="form-group full">
+                    <label for="address">Address</label>
+                    <input type="text" id="address" name="address" placeholder="42 Oakfield Avenue, Manchester">
+                </div>
+
+                <div class="form-group">
+                    <label for="postcode">Postcode</label>
+                    <input type="text" id="postcode" name="postcode" placeholder="M14 6LT">
+                </div>
+
+                <div class="form-group">
+                    <label for="dealType">Investment Strategy</label>
+                    <select id="dealType" name="dealType">
+                        <option value="BTL">Buy-to-Let (BTL) — Long-term rental</option>
+                        <option value="HMO">HMO — Room-by-room rental</option>
+                        <option value="BRR">Buy, Refurb &amp; Refinance (BRR)</option>
+                        <option value="FLIP">Flip / Renovation — Buy &amp; sell</option>
+                        <option value="R2SA">Rent-to-SA (R2SA) — Sublet as serviced accommodation</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="bedrooms">Bedrooms</label>
+                    <select id="bedrooms" name="bedrooms">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3" selected>3</option>
+                        <option value="4">4</option>
+                        <option value="5">5+</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="property_type">Property Type</label>
+                    <select id="property_type" name="property_type">
+                        <option value="terraced">Terraced</option>
+                        <option value="semi-detached">Semi-Detached</option>
+                        <option value="detached">Detached</option>
+                        <option value="flat">Flat / Apartment</option>
+                        <option value="bungalow">Bungalow</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="floorSize">
+                        Floor Size (m²)
+                        <span id="epcSpinner" style="display:none;font-size:0.75rem;color:var(--text-light);margin-left:6px">⏳ Looking up EPC…</span>
+                        <span id="epcFound"   style="display:none;font-size:0.75rem;color:#22c55e;margin-left:6px">✓ From EPC register</span>
+                    </label>
+                    <input type="number" id="floorSize" name="internal_area" placeholder="e.g. 85" min="10" max="2000" step="1">
+                </div>
+
+                <div class="form-group">
+                    <label for="propertyCondition">Property Condition</label>
+                    <select id="propertyCondition" name="property_condition">
+                        <option value="">— Select condition —</option>
+                        <option value="needs-works">Needs Works (full refurb)</option>
+                        <option value="fair">Fair (kitchen / bathroom)</option>
+                        <option value="good">Good (cosmetic only)</option>
+                        <option value="excellent">Excellent / Move-in Ready</option>
+                    </select>
+                </div>
+
+                <!-- Refurb estimate hint — shown when floor size + condition are set -->
+                <div class="form-group full" id="refurbEstimateHint" style="display:none">
+                    <label>Estimated Refurb Cost</label>
+                    <div id="refurbEstimateDisplay" style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.9rem;color:var(--text-light)"></div>
+                </div>
+
+                <!-- Finance Type (hidden for R2SA) -->
+                <div class="form-group" id="financeTypeGroup">
+                    <label for="purchaseType">Finance Type</label>
+                    <select id="purchaseType" name="purchaseType">
+                        <option value="mortgage">Mortgage</option>
+                        <option value="bridging-loan">Bridging Loan</option>
+                        <option value="cash">Cash Purchase</option>
+                    </select>
+                </div>
+
+                <!-- Buyer Type (affects stamp duty) -->
+                <div class="form-group" id="buyerTypeGroup">
+                    <label for="buyerType">Buyer Type <span style="font-size:0.78rem;font-weight:400;color:var(--text-light)">(affects stamp duty)</span></label>
+                    <select id="buyerType" name="buyerType">
+                        <option value="second_home">Second Home / Investment</option>
+                        <option value="first_time">First-Time Buyer (£0 stamp duty up to £425k)</option>
+                    </select>
+                </div>
+
+                <div class="divider"></div>
+                <div class="section-label full">Financials</div>
+
+                <!-- Purchase Price (hidden for R2SA) -->
+                <div class="form-group" id="purchasePriceGroup">
+                    <label for="purchasePrice">Purchase Price</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="purchasePrice" name="purchasePrice" placeholder="185000">
+                    </div>
+                </div>
+
+                <!-- Monthly Rent (renamed for R2SA) -->
+                <div class="form-group" id="monthlyRentGroup">
+                    <label for="monthlyRent" id="monthlyRentLabel">Expected Monthly Rent
+                        <span id="rentLookupStatus" style="font-size:0.78rem;font-weight:400;color:var(--text-light);margin-left:6px"></span>
+                    </label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="monthlyRent" name="monthlyRent" placeholder="950">
+                    </div>
+                </div>
+
+                <!-- Deposit (hidden for Cash + R2SA) -->
+                <div class="form-group" id="depositGroup">
+                    <label for="deposit">Deposit</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="deposit" name="deposit" value="25" min="0" max="100">
+                    </div>
+                </div>
+
+                <!-- Interest Rate (Mortgage only) -->
+                <div class="form-group" id="interestRateGroup">
+                    <label for="interestRate">Interest Rate</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="interestRate" name="interestRate" value="5.5" step="0.1">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="capitalGrowthRate" title="Annual property value appreciation used in the 5-year projection">Capital Growth (annual)</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="capitalGrowthRate" name="capitalGrowthRate" value="4.0" step="0.5" min="0" max="30">
+                    </div>
+                </div>
+
+                <!-- ── Bridging Loan Details ────────────────────── -->
+                <div class="divider cond-field" id="bridgingDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="bridgingLabel" style="display:none">Bridging Loan Details</div>
+
+                <div class="form-group cond-field" id="bridgingRateGroup" style="display:none">
+                    <label for="bridgingMonthlyRate">Monthly Rate</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingMonthlyRate" name="bridgingMonthlyRate" value="0.75" step="0.05" min="0.1" max="5">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingTermGroup" style="display:none">
+                    <label for="bridgingTermMonths">Loan Term</label>
+                    <div class="input-suffix">
+                        <span>mo</span>
+                        <input type="number" id="bridgingTermMonths" name="bridgingTermMonths" value="12" min="1" max="36">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingArrangeGroup" style="display:none">
+                    <label for="bridgingArrangementFee">Arrangement Fee</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingArrangementFee" name="bridgingArrangementFee" value="1.0" step="0.1" min="0" max="5">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="bridgingExitGroup" style="display:none">
+                    <label for="bridgingExitFee">Exit Fee</label>
+                    <div class="input-suffix">
+                        <span>%</span>
+                        <input type="number" id="bridgingExitFee" name="bridgingExitFee" value="0.5" step="0.1" min="0" max="5">
+                    </div>
+                </div>
+
+                <!-- ── HMO Room Details ────────────────────────── -->
+                <div class="divider cond-field" id="hmoDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="hmoLabel" style="display:none">HMO Room Details</div>
+
+                <div class="form-group cond-field" id="roomCountGroup" style="display:none">
+                    <label for="roomCount">Number of Rooms</label>
+                    <input type="number" id="roomCount" name="roomCount" placeholder="5" min="1" max="20">
+                </div>
+
+                <div class="form-group cond-field" id="avgRoomRateGroup" style="display:none">
+                    <label for="avgRoomRate">Avg Room Rate / month</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="avgRoomRate" name="avgRoomRate" placeholder="450">
+                    </div>
+                </div>
+
+                <!-- ── BRR / Flip Details ──────────────────────── -->
+                <div class="divider cond-field" id="brrDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="brrLabel" style="display:none">BRR / Flip Details</div>
+
+                <div class="form-group cond-field" id="refurbField" style="display:none">
+                    <label for="refurbCosts">Refurb Costs</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="refurbCosts" name="refurbCosts" placeholder="12000">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="arvField" style="display:none">
+                    <label for="arv">After Repair Value (ARV)</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="arv" name="arv" placeholder="220000">
+                    </div>
+                </div>
+
+                <!-- ── Rent-to-SA Details ─────────────────────── -->
+                <div class="divider cond-field" id="r2saDivider" style="display:none"></div>
+                <div class="section-label full cond-field" id="r2saLabel" style="display:none">Serviced Accommodation Details</div>
+
+                <div class="form-group cond-field" id="saRevenueGroup" style="display:none">
+                    <label for="saMonthlySARevenue">Monthly SA Revenue</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="saMonthlySARevenue" name="saMonthlySARevenue" placeholder="2000">
+                    </div>
+                </div>
+
+                <div class="form-group cond-field" id="saSetupGroup" style="display:none">
+                    <label for="saSetupCosts">Setup / Furnishing Costs</label>
+                    <div class="input-prefix">
+                        <span>£</span>
+                        <input type="number" id="saSetupCosts" name="saSetupCosts" placeholder="5000">
+                    </div>
+                </div>
+
+            </div><!-- /.form-grid -->
+
+            <button type="submit" class="btn btn-primary btn-lg" id="analyzeBtn">
+                📊 Analyze This Deal
+            </button>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div id="results">
+
+        <!-- Verdict + Score -->
+        <div class="card">
+            <div class="results-header">
+                <div>
+                    <div style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-light);margin-bottom:8px">Investment Verdict</div>
+                    <div id="verdictBadge" class="verdict-badge"></div>
+                    <div id="riskLevel" style="font-size:0.85rem;color:var(--text-light);margin-top:8px"></div>
+                </div>
+                <div style="text-align:center">
+                    <div id="scoreCircle" class="score-circle score-mid"></div>
+                    <div id="scoreLabel" style="font-size:0.8rem;color:var(--text-light);margin-top:6px;font-weight:600"></div>
+                </div>
+            </div>
+            <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                <div id="aiVerdict" class="ai-text"></div>
+            </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="card">
+            <div class="card-title">📊 Key Metrics</div>
+            <div class="metrics-grid" id="metricsGrid"></div>
+        </div>
+
+        <!-- AI Strengths & Risks -->
+        <div class="card">
+            <div class="card-title">🔍 Deal Analysis</div>
+            <div class="form-grid">
+                <div>
+                    <div class="ai-section-title">✅ Strengths</div>
+                    <ul class="points-list strength" id="strengthsList"></ul>
+                </div>
+                <div>
+                    <div class="ai-section-title">⚠️ Risks</div>
+                    <ul class="points-list risk" id="risksList"></ul>
+                </div>
+            </div>
+            <div style="margin-top:20px">
+                <div class="ai-section-title">📍 Area Assessment</div>
+                <div id="areaText" class="ai-text"></div>
+            </div>
+            <!-- Crime data (loaded async) -->
+            <div id="crimeSection" style="display:none;margin-top:20px">
+                <div class="ai-section-title">🚔 Crime Statistics <span style="font-size:0.75rem;font-weight:400;color:var(--text-light)">(Source: data.police.uk)</span></div>
+                <div id="crimeLevel"></div>
+                <div class="crime-grid" id="crimeGrid"></div>
+            </div>
+        </div>
+
+        <!-- Next Steps -->
+        <div class="card">
+            <div class="card-title">🎯 Recommended Next Steps</div>
+            <ul class="points-list" id="nextStepsList"></ul>
+        </div>
+
+        <!-- 5-Year Projection -->
+        <div class="card" id="projectionCard" style="display:none">
+            <div class="card-title">📈 5-Year Projection</div>
+            <table class="projection-table" id="projectionTable">
+                <thead>
+                    <tr>
+                        <th>Year</th>
+                        <th>Annual Rent</th>
+                        <th>Net Income</th>
+                        <th>Property Value</th>
+                        <th>Equity</th>
+                    </tr>
+                </thead>
+                <tbody id="projectionBody"></tbody>
+            </table>
+        </div>
+
+        <!-- House Valuation -->
+        <div class="card" id="houseValuationCard" style="display:none">
+            <div class="card-title">🏠 House Valuation</div>
+            <div id="houseValuationContent"></div>
+        </div>
+
+        <!-- Sold Comparables -->
+        <div class="card" id="soldCompsCard" style="display:none">
+            <div class="card-title">🏷️ Sold Comparables <span id="soldCompsSource" style="font-size:0.75rem;font-weight:400;color:var(--text-light)"></span></div>
+            <div class="table-wrapper" style="overflow-x:auto">
+                <table class="projection-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Price</th>
+                            <th>Type</th>
+                            <th>Beds</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="soldCompsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Rent Comparables -->
+        <div class="card" id="rentCompsCard" style="display:none">
+            <div class="card-title">🔑 Rent Comparables <span id="rentCompsSource" style="font-size:0.75rem;font-weight:400;color:var(--text-light)"></span></div>
+            <div class="table-wrapper" style="overflow-x:auto">
+                <table class="projection-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Monthly Rent</th>
+                            <th>Distance</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rentCompsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Download + Save + Share -->
+        <div class="pdf-btn-row">
+            <button class="btn btn-outline" onclick="saveAnalysis()" id="saveBtn">💾 Save Analysis</button>
+            <button class="btn btn-outline" onclick="shareAnalysis()" id="shareBtn">🔗 Share</button>
+            <button class="btn btn-outline" onclick="downloadPDF()">📄 Download PDF Report</button>
+        </div>
+
+    </div><!-- /#results -->
+
+</div><!-- /.page-wrapper -->
+
+<script>
+    // ── State ──────────────────────────────────────────────────────────────
+    let lastFormData = null;
+    let lastResults  = null;
+    const STORAGE_KEY = 'metusaSavedAnalyses';
+
+    // ── On page load ───────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+        const params = new URLSearchParams(window.location.search);
+        const url = params.get('url');
+        if (url) {
+            document.getElementById('propertyUrl').value = url;
+            loadFromUrl();
+        }
+
+        document.getElementById('dealType').addEventListener('change', updateFormFields);
+        document.getElementById('purchaseType').addEventListener('change', updateFormFields);
+        updateFormFields(); // set correct initial state
+        renderSavedList();
+    });
+
+    // ── Dynamic field visibility ───────────────────────────────────────────
+    function showEl(id, visible) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+    }
+
+    function updateFormFields() {
+        const dealType     = document.getElementById('dealType').value;
+        const purchaseType = document.getElementById('purchaseType').value;
+
+        const isR2SA     = dealType === 'R2SA';
+        const isHMO      = dealType === 'HMO';
+        const isBRR      = dealType === 'BRR';
+        const isFLIP     = dealType === 'FLIP';
+        const isBridging = purchaseType === 'bridging-loan';
+        const isCash     = purchaseType === 'cash';
+
+        // Purchase price and finance type — hidden for R2SA (no purchase)
+        showEl('purchasePriceGroup', !isR2SA);
+        showEl('financeTypeGroup',   !isR2SA);
+
+        // Monthly rent — hidden for HMO (use room fields) and FLIP (no rental)
+        // Renamed to "Monthly Rent to Landlord" for R2SA
+        showEl('monthlyRentGroup', !isHMO && !isFLIP);
+        document.getElementById('monthlyRentLabel').textContent =
+            isR2SA ? 'Monthly Rent to Landlord' : 'Expected Monthly Rent';
+
+        // Deposit — hidden for cash purchase and R2SA
+        showEl('depositGroup', !isCash && !isR2SA);
+
+        // Interest rate — mortgage only, not for R2SA
+        showEl('interestRateGroup', !isBridging && !isCash && !isR2SA);
+
+        // Bridging loan detail fields
+        const showBridging = isBridging && !isR2SA;
+        showEl('bridgingDivider',   showBridging);
+        showEl('bridgingLabel',     showBridging);
+        showEl('bridgingRateGroup', showBridging);
+        showEl('bridgingTermGroup', showBridging);
+        showEl('bridgingArrangeGroup', showBridging);
+        showEl('bridgingExitGroup', showBridging);
+
+        // HMO room fields
+        showEl('hmoDivider',      isHMO);
+        showEl('hmoLabel',        isHMO);
+        showEl('roomCountGroup',  isHMO);
+        showEl('avgRoomRateGroup',isHMO);
+
+        // BRR / FLIP refurb fields
+        const showBRR = isBRR || isFLIP;
+        showEl('brrDivider',  showBRR);
+        showEl('brrLabel',    showBRR);
+        showEl('refurbField', showBRR);
+        showEl('arvField',    showBRR);
+
+        // R2SA fields
+        showEl('r2saDivider',   isR2SA);
+        showEl('r2saLabel',     isR2SA);
+        showEl('saRevenueGroup',isR2SA);
+        showEl('saSetupGroup',  isR2SA);
+    }
+
+    // ── Refurb estimate (real-time) ────────────────────────────────────────
+    // Cost per sqm by condition → refurb level
+    const REFURB_COST_PER_SQM = {
+        'needs-works': 180,
+        'fair':        100,
+        'good':         50,
+        'excellent':    25,
+    };
+    const PROP_TYPE_MULT = {
+        'terraced':      0.85,
+        'semi-detached': 0.90,
+        'detached':      1.00,
+        'flat':          0.80,
+        'bungalow':      1.10,
+    };
+    const CONDITION_LABEL = {
+        'needs-works': 'Needs Works — heavy refurb',
+        'fair':        'Fair — kitchen/bathroom refresh',
+        'good':        'Good — cosmetic only',
+        'excellent':   'Excellent — move-in ready',
+    };
+
+    function updateRefurbEstimate() {
+        const sqm       = parseFloat(document.getElementById('floorSize').value);
+        const condition = document.getElementById('propertyCondition').value;
+        const propType  = document.getElementById('property_type').value;
+        const postcode  = document.getElementById('postcode').value.trim().toUpperCase();
+        const hint      = document.getElementById('refurbEstimateHint');
+        const display   = document.getElementById('refurbEstimateDisplay');
+
+        if (!sqm || sqm < 10 || !condition) {
+            hint.style.display = 'none';
+            // Also clear refurbCosts auto-fill marker so user can see their own value
+            return;
+        }
+
+        const baseCostPerSqm = REFURB_COST_PER_SQM[condition] || 100;
+        const typeMult       = PROP_TYPE_MULT[propType] || 1.0;
+        // London premium (matches backend logic)
+        const londonPrefixes = ['SW','W1','W2','W3','W4','W5','W6','W7','W8','W9','NW'];
+        const isLondon       = londonPrefixes.some(p => postcode.startsWith(p));
+        const areaMult       = isLondon ? 1.3 : 1.0;
+
+        const costPerSqm = baseCostPerSqm * typeMult * areaMult;
+        const total      = Math.round(costPerSqm * sqm);
+        const low        = Math.round(total * 0.85);
+        const high       = Math.round(total * 1.15);
+
+        display.innerHTML = `
+            <strong style="color:var(--primary)">£${low.toLocaleString()} – £${high.toLocaleString()}</strong>
+            <span style="margin-left:8px;color:var(--text-light);font-size:0.8rem">(£${Math.round(costPerSqm)}/m² × ${sqm} m²${isLondon ? ' · London +30%' : ''})</span>
+            <br><span style="font-size:0.8rem;color:var(--text-light)">${CONDITION_LABEL[condition]}</span>
+        `;
+        hint.style.display = '';
+
+        // Auto-populate refurbCosts field if it is visible and currently empty
+        const refurbInput = document.getElementById('refurbCosts');
+        if (refurbInput && refurbInput.offsetParent !== null && !refurbInput.dataset.userEdited) {
+            refurbInput.value = total;
+        }
+    }
+
+    // Track if user has manually edited refurbCosts
+    document.addEventListener('DOMContentLoaded', () => {
+        const refurbInput = document.getElementById('refurbCosts');
+        if (refurbInput) {
+            refurbInput.addEventListener('input', () => { refurbInput.dataset.userEdited = '1'; });
+        }
+        document.getElementById('floorSize').addEventListener('input', updateRefurbEstimate);
+        document.getElementById('propertyCondition').addEventListener('change', updateRefurbEstimate);
+        document.getElementById('property_type').addEventListener('change', updateRefurbEstimate);
+        document.getElementById('postcode').addEventListener('change', updateRefurbEstimate);
+    });
+
+    // ── EPC Floor Area Lookup ──────────────────────────────────────────────
+    async function fetchEpcFloorArea(address, postcode) {
+        if (!address && !postcode) return;
+        const spinner = document.getElementById('epcSpinner');
+        const found   = document.getElementById('epcFound');
+        const field   = document.getElementById('floorSize');
+        // Only fetch if floor size is not already filled
+        if (field.value) return;
+        spinner.style.display = '';
+        found.style.display   = 'none';
+        try {
+            const resp = await fetch('/epc-lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address, postcode })
+            });
+            const json = await resp.json();
+            if (json.success && json.sqm) {
+                field.value = json.sqm;
+                found.style.display = '';
+                updateRefurbEstimate();
+            }
+        } catch (_) {}
+        finally { spinner.style.display = 'none'; }
+    }
+
+    // ── URL Scraper ────────────────────────────────────────────────────────
+    async function loadFromUrl() {
+        const url = document.getElementById('propertyUrl').value.trim();
+        const status = document.getElementById('urlStatus');
+
+        if (!url) {
+            status.textContent = 'Please paste a property URL first.';
+            status.className = 'url-status error';
+            return;
+        }
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            status.textContent = 'Please enter a full URL starting with https://';
+            status.className = 'url-status error';
+            return;
+        }
+
+        status.textContent = 'Fetching property details...';
+        status.className = 'url-status loading';
+
+        try {
+            const resp = await fetch('/extract-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const json = await resp.json();
+
+            if (json.success && json.data) {
+                const d = json.data;
+                let filled = 0;
+
+                if (d.address) { document.getElementById('address').value = d.address; filled++; }
+                if (d.postcode) { document.getElementById('postcode').value = d.postcode; filled++; }
+                if (d.price)    { document.getElementById('purchasePrice').value = d.price; filled++; }
+                if (d.bedrooms) {
+                    const sel = document.getElementById('bedrooms');
+                    const val = String(Math.min(d.bedrooms, 5));
+                    // If bedrooms > 5, use '5'
+                    sel.value = (d.bedrooms >= 5) ? '5' : val;
+                    filled++;
+                }
+                if (d.property_type) {
+                    const sel = document.getElementById('property_type');
+                    const pt = d.property_type.toLowerCase().replace(/\s+/g, '-');
+                    // Map common values
+                    const map = {
+                        'semi-detached': 'semi-detached',
+                        'semi': 'semi-detached',
+                        'detached': 'detached',
+                        'terraced': 'terraced',
+                        'flat': 'flat',
+                        'apartment': 'flat',
+                        'bungalow': 'bungalow'
+                    };
+                    if (map[pt]) { sel.value = map[pt]; filled++; }
+                }
+
+                // Floor size — use sqm from scraper if available, otherwise EPC lookup
+                const floorField = document.getElementById('floorSize');
+                if (d.sqm && d.sqm > 0) {
+                    floorField.value = d.sqm;
+                    document.getElementById('epcFound').style.display = '';
+                    document.getElementById('epcFound').textContent = '✓ From listing';
+                    filled++;
+                    updateRefurbEstimate();
+                } else {
+                    // Try EPC lookup in background
+                    fetchEpcFloorArea(d.address || '', d.postcode || '');
+                }
+
+                status.textContent = `✓ Loaded ${filled} fields from listing. Please review and fill in any missing details.`;
+                status.className = 'url-status success';
+            } else {
+                status.textContent = json.message || 'Could not extract details. Please enter manually.';
+                status.className = 'url-status error';
+            }
+        } catch (err) {
+            status.textContent = 'Network error – please enter details manually.';
+            status.className = 'url-status error';
+        }
+    }
+
+    // ── Also trigger on Enter in URL input ────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('propertyUrl').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); loadFromUrl(); }
+        });
+    });
+
+    // ── Form Submit (submit lock prevents double calls) ────────────────────
+    let _analysisInFlight = false;
+    document.getElementById('dealForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        if (_analysisInFlight) return;   // bulletproof double-submit guard
+        _analysisInFlight = true;
+
+        const btn = document.getElementById('analyzeBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span style="display:inline-flex;gap:8px;align-items:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>Analyzing…</span>';
+
+        // Show skeleton
+        document.getElementById('skeletonResults').style.display = 'block';
+        document.getElementById('results').style.display = 'none';
+
+        const formData = new FormData(this);
+        const data = {};
+        formData.forEach((val, key) => {
+            const numFields = [
+                'purchasePrice','monthlyRent','deposit','interestRate','capitalGrowthRate','bedrooms',
+                'refurbCosts','arv',
+                'bridgingMonthlyRate','bridgingTermMonths','bridgingArrangementFee','bridgingExitFee',
+                'roomCount','avgRoomRate',
+                'saMonthlySARevenue','saSetupCosts',
+                'internal_area'
+            ];
+            if (numFields.includes(key) && val !== '') {
+                data[key] = parseFloat(val);
+            } else if (val !== '') {
+                data[key] = val;
+            }
+        });
+
+        lastFormData = data;
+
+        try {
+            const resp = await fetch('/ai-analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const json = await resp.json();
+
+            if (json.success) {
+                lastResults = json.results;
+                renderResults(json.results);
+                if (data.postcode) loadCrimeData(data.postcode);
+            } else if (json.code === 'subscription_required') {
+                showError('🔒 Subscription required — upgrade your plan or pay per deal.', 'upgrade');
+            } else {
+                showError(json.message || 'Analysis failed. Please check your inputs and try again.');
+            }
+        } catch (err) {
+            showError('Network error — please check your connection and try again.');
+        } finally {
+            _analysisInFlight = false;
+            btn.disabled = false;
+            btn.innerHTML = '📊 Analyze This Deal';
+            document.getElementById('skeletonResults').style.display = 'none';
+        }
+    });
+
+    // ── Render Results ─────────────────────────────────────────────────────
+    function renderResults(r) {
+        const resultsEl = document.getElementById('results');
+        resultsEl.style.display = 'block';
+
+        // Scroll to results
+        setTimeout(() => resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+
+        // Verdict badge
+        const verdict = r.verdict || 'REVIEW';
+        const verdictIcons = { PROCEED: '✅', REVIEW: '⚠️', AVOID: '❌' };
+        const verdictBadge = document.getElementById('verdictBadge');
+        verdictBadge.textContent = `${verdictIcons[verdict] || ''} ${verdict}`;
+        verdictBadge.className = `verdict-badge verdict-${verdict}`;
+
+        // Risk level
+        document.getElementById('riskLevel').textContent = `Risk: ${r.risk_level || 'Medium'}`;
+
+        // Deal score
+        const score = r.deal_score || 0;
+        const scoreCircle = document.getElementById('scoreCircle');
+        scoreCircle.innerHTML = `${score}<small>/100</small>`;
+        scoreCircle.className = 'score-circle ' + (score >= 70 ? 'score-high' : score >= 45 ? 'score-mid' : 'score-low');
+        document.getElementById('scoreLabel').textContent = r.deal_score_label || '';
+
+        // AI verdict text
+        document.getElementById('aiVerdict').textContent = r.ai_verdict || '';
+
+        // Metrics
+        const cashflow = parseFloat(r.monthly_cashflow) || 0;
+        const isR2SA  = r.deal_type === 'R2SA';
+        const isCash  = r.purchase_type === 'cash';
+        const isBridging = r.purchase_type === 'bridging-loan';
+        const metricsGrid = document.getElementById('metricsGrid');
+
+        let metrics = [];
+        if (isR2SA && r.r2sa_metrics) {
+            const rm = r.r2sa_metrics;
+            metrics = [
+                { label: 'Rent to Landlord',  value: '£' + fmt(rm.monthly_rent_paid) + '/mo' },
+                { label: 'SA Monthly Revenue',value: '£' + fmt(rm.sa_monthly_revenue) + '/mo' },
+                { label: 'Operating Costs',   value: '£' + fmt(rm.monthly_op_costs) + '/mo' },
+                { label: 'Monthly Profit',    value: '£' + fmt(rm.monthly_profit), cls: rm.monthly_profit >= 0 ? 'positive' : 'negative' },
+                { label: 'Annual Profit',     value: '£' + fmt(rm.annual_profit) },
+                { label: 'Setup Costs',       value: '£' + fmt(rm.setup_costs) },
+                { label: 'ROI on Setup',      value: fmt(rm.r2sa_roi) + '%', cls: rm.r2sa_roi >= 50 ? 'positive' : '' },
+            ];
+        } else {
+            metrics = [
+                { label: 'Purchase Price',    value: '£' + fmt(r.purchase_price) },
+                { label: 'Stamp Duty',        value: '£' + fmt(r.stamp_duty) },
+                { label: 'Total Cash In',     value: '£' + fmt(r.total_purchase_costs) },
+                { label: 'Monthly Rent',      value: '£' + fmt(r.monthly_rent) },
+                { label: isBridging ? 'Bridging Cost (total)' : isCash ? 'Finance' : 'Monthly Mortgage',
+                  value: isBridging
+                    ? (r.bridging_loan_details ? '£' + fmt(r.bridging_loan_details.total_cost) : '–')
+                    : isCash ? 'Cash' : '£' + fmt(r.monthly_mortgage) },
+                { label: 'Monthly Cashflow',  value: '£' + Math.round(cashflow).toLocaleString(), cls: cashflow >= 0 ? 'positive' : 'negative' },
+                { label: 'Gross Yield',       value: fmt(r.gross_yield) + '%' },
+                { label: 'Net Yield',         value: fmt(r.net_yield) + '%' },
+                { label: 'Cash-on-Cash',      value: fmt(r.cash_on_cash) + '%' },
+            ];
+        }
+
+        metricsGrid.innerHTML = metrics.map(m => `
+            <div class="metric-card">
+                <div class="metric-label">${m.label}</div>
+                <div class="metric-value ${m.cls || ''}">${m.value}</div>
+            </div>`).join('');
+
+        // Bridging loan summary card (shown below metrics when applicable)
+        let bridgingEl = document.getElementById('bridgingDetails');
+        if (!bridgingEl) {
+            bridgingEl = document.createElement('div');
+            bridgingEl.id = 'bridgingDetails';
+            bridgingEl.className = 'card';
+            document.getElementById('metricsGrid').closest('.card').after(bridgingEl);
+        }
+        if (isBridging && r.bridging_loan_details) {
+            const bl = r.bridging_loan_details;
+            bridgingEl.style.display = '';
+            bridgingEl.innerHTML = `
+                <div class="card-title">🏦 Bridging Loan Summary</div>
+                <div class="metrics-grid">
+                    ${[
+                        { label: 'Loan Amount',      value: '£' + fmt(bl.loan_amount) },
+                        { label: 'Monthly Rate',     value: bl.monthly_rate + '%' },
+                        { label: 'Term',             value: bl.term_months + ' months' },
+                        { label: 'Monthly Interest', value: '£' + fmt(bl.monthly_interest) },
+                        { label: 'Total Interest',   value: '£' + fmt(bl.total_interest) },
+                        { label: 'Arrangement Fee',  value: '£' + fmt(bl.arrangement_fee) },
+                        { label: 'Exit Fee',         value: '£' + fmt(bl.exit_fee) },
+                        { label: 'Total Cost',       value: '£' + fmt(bl.total_cost), cls: 'negative' },
+                        { label: 'Approx APR',       value: bl.apr + '%' },
+                    ].map(m => `
+                        <div class="metric-card">
+                            <div class="metric-label">${m.label}</div>
+                            <div class="metric-value ${m.cls||''}">${m.value}</div>
+                        </div>`).join('')}
+                </div>`;
+        } else {
+            bridgingEl.style.display = 'none';
+        }
+
+        // Strengths — server now returns arrays; fall back to legacy string parsing
+        const strengthsList = document.getElementById('strengthsList');
+        const allStrengths = toPoints(r.ai_strengths).concat(toPoints(r.strengths));
+        strengthsList.innerHTML = allStrengths.map(s => `<li>${esc(s)}</li>`).join('') || '<li>No specific strengths identified</li>';
+
+        // Risks
+        const risksList = document.getElementById('risksList');
+        const allRisks = toPoints(r.ai_risks).concat(toPoints(r.weaknesses));
+        risksList.innerHTML = allRisks.map(s => `<li>${esc(s)}</li>`).join('') || '<li>No specific risks identified</li>';
+
+        // Area
+        document.getElementById('areaText').textContent = r.ai_area || '';
+
+        // Next steps
+        const nextStepsList = document.getElementById('nextStepsList');
+        const allSteps = toPoints(r.ai_next_steps).concat(toPoints(r.next_steps));
+        const uniqueSteps = [...new Set(allSteps)].slice(0, 8);
+        nextStepsList.innerHTML = uniqueSteps.map(s => `<li>${esc(s)}</li>`).join('') || '<li>Review the analysis above</li>';
+
+        // 5-year projection
+        const proj = r.five_year_projection;
+        if (proj && Array.isArray(proj) && proj.length > 0) {
+            document.getElementById('projectionCard').style.display = 'block';
+            document.getElementById('projectionBody').innerHTML = proj.map(y => `
+                <tr>
+                    <td><strong>Year ${y.year}</strong></td>
+                    <td>£${(y.annual_rent || 0).toLocaleString()}</td>
+                    <td>£${(y.net_income || y.annual_net || 0).toLocaleString()}</td>
+                    <td>£${(y.property_value || 0).toLocaleString()}</td>
+                    <td>£${(y.equity || 0).toLocaleString()}</td>
+                </tr>`).join('');
+        }
+
+        // House Valuation
+        const hv = r.house_valuation;
+        if (hv && hv.estimate) {
+            document.getElementById('houseValuationCard').style.display = 'block';
+            const confColor = hv.confidence === 'high' ? '#16a34a' : hv.confidence === 'medium' ? '#d97706' : '#6b7280';
+            document.getElementById('houseValuationContent').innerHTML = `
+                <div class="metrics-grid" style="margin-bottom:${hv.note ? '12px' : '0'}">
+                    <div class="metric-card">
+                        <div class="metric-label">Estimated Value</div>
+                        <div class="metric-value">£${Math.round(hv.estimate).toLocaleString()}</div>
+                    </div>
+                    ${hv.confidence ? `<div class="metric-card">
+                        <div class="metric-label">Confidence</div>
+                        <div class="metric-value" style="color:${confColor};text-transform:capitalize">${hv.confidence}</div>
+                    </div>` : ''}
+                    ${hv.range && hv.range.lower ? `<div class="metric-card">
+                        <div class="metric-label">Range</div>
+                        <div class="metric-value">£${Math.round(hv.range.lower).toLocaleString()} – £${Math.round(hv.range.upper).toLocaleString()}</div>
+                    </div>` : ''}
+                    ${hv.source ? `<div class="metric-card">
+                        <div class="metric-label">Source</div>
+                        <div class="metric-value" style="font-size:0.85rem">${esc(hv.source)}</div>
+                    </div>` : ''}
+                </div>
+                ${hv.note ? `<div style="font-size:0.82rem;color:var(--text-light);font-style:italic">${esc(hv.note)}</div>` : ''}`;
+        }
+
+        // Sold Comparables
+        const soldComps = r.sold_comparables || [];
+        if (soldComps.length > 0) {
+            document.getElementById('soldCompsCard').style.display = 'block';
+            const marketSrc = r.market_source ? `(${r.market_source})` : '';
+            document.getElementById('soldCompsSource').textContent = marketSrc;
+            document.getElementById('soldCompsBody').innerHTML = soldComps.map(s => `
+                <tr>
+                    <td>${esc(s.address || 'N/A')}</td>
+                    <td><strong>£${(s.price || 0).toLocaleString()}</strong></td>
+                    <td>${esc(s.type || 'N/A')}</td>
+                    <td>${s.bedrooms || '–'}</td>
+                    <td>${esc(s.date || 'N/A')}</td>
+                </tr>`).join('');
+        }
+
+        // Rent Comparables
+        const rentComps = r.rent_comparables || [];
+        if (rentComps.length > 0) {
+            document.getElementById('rentCompsCard').style.display = 'block';
+            document.getElementById('rentCompsSource').textContent = rentComps[0].source ? `(${rentComps[0].source})` : '';
+            document.getElementById('rentCompsBody').innerHTML = rentComps.map(rc => `
+                <tr>
+                    <td>${esc(rc.address || 'N/A')}</td>
+                    <td><strong>£${(rc.monthly_rent || 0).toLocaleString()}/mo</strong></td>
+                    <td>${rc.distance_miles != null ? rc.distance_miles + ' mi' : (rc.confidence ? 'Confidence: ' + rc.confidence : '–')}</td>
+                    <td>${esc(rc.date || 'N/A')}</td>
+                </tr>`).join('');
+        }
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function fmt(val) {
+        if (val === null || val === undefined || val === '') return '–';
+        const n = parseFloat(String(val).replace(/,/g, ''));
+        if (isNaN(n)) return String(val);
+        return n.toLocaleString('en-GB');
+    }
+
+    function esc(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // toPoints: handles both new array format and legacy <br>/bullet strings
+    function toPoints(val) {
+        if (!val) return [];
+        if (Array.isArray(val)) return val.filter(s => s && String(s).trim().length > 2);
+        // Legacy string fallback
+        return String(val)
+            .split(/<br\s*\/?>/i).join('\n')
+            .split(/\n/)
+            .map(s => s.replace(/^[•\-\d]+[\.\)]\s*/, '').trim())
+            .filter(s => s.length > 2);
+    }
+
+    // ── Error display ──────────────────────────────────────────────────────
+    function showError(msg, code) {
+        let el = document.getElementById('analysisError');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'analysisError';
+            el.style.cssText = 'margin:16px 0;padding:16px 20px;border-radius:12px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;font-weight:500;font-size:0.95rem;display:flex;justify-content:space-between;align-items:center;gap:12px';
+            document.getElementById('dealForm').after(el);
+        }
+        const upgradeLinks = code === 'upgrade'
+            ? ` <a href="https://metusaproperty.co.uk/pricing" style="color:#1B1F3B;font-weight:700;text-decoration:underline">View Plans →</a>`
+              + ` <button onclick="payPerDeal()" style="margin-left:8px;padding:4px 12px;background:#1B1F3B;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:0.9rem">Pay per deal →</button>`
+            : '';
+        el.innerHTML = `<span>${esc(msg)}${upgradeLinks}</span><button onclick="this.closest(\'#analysisError\').remove()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;color:#991b1b">×</button>`;
+        el.style.display = 'flex';
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ── Pay Per Deal ────────────────────────────────────────────────────────
+    async function payPerDeal() {
+        try {
+            const resp = await fetch('/create-checkout-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    successUrl: window.location.origin + '/analyze?payment=success',
+                    cancelUrl:  window.location.href,
+                })
+            });
+            const json = await resp.json();
+            if (json.url) {
+                window.location.href = json.url;
+            } else {
+                showError(json.error || 'Could not start checkout. Please try again.');
+            }
+        } catch (err) {
+            showError('Network error — please check your connection and try again.');
+        }
+    }
+
+    // ── PDF Download ───────────────────────────────────────────────────────
+    async function downloadPDF() {
+        if (!lastFormData) return;
+        showLoading('Generating PDF...');
+        try {
+            const resp = await fetch('/download-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lastFormData)
+            });
+            if (resp.ok) {
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'deal-analysis.pdf';
+                a.click();
+                URL.revokeObjectURL(url);
+            } else {
+                alert('PDF generation failed. This feature requires wkhtmltopdf to be installed on the server.');
+            }
+        } catch (err) {
+            alert('PDF download failed. Please try again.');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // ── Loading overlay ────────────────────────────────────────────────────
+    function showLoading(msg) {
+        document.getElementById('loadingText').textContent = msg || 'Loading...';
+        document.getElementById('loadingOverlay').classList.add('active');
+    }
+    function hideLoading() {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+
+    // ── Save Analysis ───────────────────────────────────────────────────────
+    function saveAnalysis() {
+        if (!lastFormData || !lastResults) return;
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const entry = {
+            id: Date.now(),
+            date: new Date().toISOString(),
+            address: lastFormData.address || lastFormData.postcode || 'Unknown',
+            postcode: lastFormData.postcode || '',
+            dealType: lastResults.deal_type || lastFormData.dealType || 'BTL',
+            verdict: lastResults.verdict || 'REVIEW',
+            score: lastResults.deal_score || 0,
+            grossYield: lastResults.gross_yield,
+            cashflow: lastResults.monthly_cashflow,
+            purchasePrice: lastFormData.purchasePrice,
+            formData: lastFormData,
+            results: lastResults,
+        };
+        saved.unshift(entry);
+        // Keep max 20 saved analyses
+        if (saved.length > 20) saved.pop();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        renderSavedList();
+        const btn = document.getElementById('saveBtn');
+        btn.textContent = '✅ Saved!';
+        setTimeout(() => { btn.innerHTML = '💾 Save Analysis'; }, 2000);
+    }
+
+    // ── Load saved analyses list ────────────────────────────────────────────
+    function renderSavedList() {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const count = document.getElementById('savedCount');
+        const list  = document.getElementById('savedList');
+        count.textContent = saved.length;
+
+        if (saved.length === 0) {
+            list.innerHTML = '<div class="saved-empty">No saved analyses yet.<br>Run an analysis and click "Save Analysis" to save it here.</div>';
+            return;
+        }
+
+        list.innerHTML = saved.map((e, idx) => {
+            const d = new Date(e.date);
+            const dateStr = d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+            const yieldStr = e.grossYield ? ` · ${parseFloat(e.grossYield).toFixed(1)}% yield` : '';
+            const cfStr    = e.cashflow !== undefined ? ` · £${Math.round(e.cashflow)}/mo` : '';
+            const canCompare = saved.length > 1;
+            return `
+            <div class="saved-item" onclick="loadSavedAnalysis(${e.id})">
+                <div class="saved-item-info">
+                    <div class="saved-item-address">${esc(e.address)}</div>
+                    <div class="saved-item-meta">${dateStr} · ${e.dealType}${yieldStr}${cfStr}</div>
+                </div>
+                <span class="saved-item-verdict ${e.verdict}">${e.verdict}</span>
+                ${canCompare ? `<button class="saved-delete" onclick="openCompareMenu(event,${e.id})" title="Compare" style="font-size:0.8rem;color:var(--primary)">⚖</button>` : ''}
+                <button class="saved-delete" onclick="deleteSaved(event,${e.id})" title="Delete">×</button>
+            </div>`;
+        }).join('');
+    }
+
+    function toggleSavedPanel() {
+        const body  = document.getElementById('savedPanelBody');
+        const arrow = document.getElementById('savedToggleArrow');
+        const open  = body.classList.toggle('open');
+        arrow.textContent = open ? '▲' : '▼';
+    }
+
+    function deleteSaved(event, id) {
+        event.stopPropagation();
+        if (!confirm('Delete this saved analysis? This cannot be undone.')) return;
+        let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        saved = saved.filter(e => e.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        renderSavedList();
+    }
+
+    function loadSavedAnalysis(id) {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const entry = saved.find(e => e.id === id);
+        if (!entry) return;
+        // Populate form fields
+        const fd = entry.formData;
+        const fields = ['address','postcode','dealType','purchaseType','purchasePrice',
+            'monthlyRent','deposit','interestRate','capitalGrowthRate','bedrooms','property_type',
+            'refurbCosts','arv','bridgingMonthlyRate','bridgingTermMonths',
+            'bridgingArrangementFee','bridgingExitFee','roomCount','avgRoomRate',
+            'saMonthlySARevenue','saSetupCosts'];
+        fields.forEach(f => {
+            const el = document.getElementById(f);
+            if (el && fd[f] !== undefined) el.value = fd[f];
+        });
+        updateFormFields();
+        // Show results
+        lastFormData = fd;
+        lastResults  = entry.results;
+        renderResults(entry.results);
+        document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ── Share Analysis ──────────────────────────────────────────────────────
+    function shareAnalysis() {
+        if (!lastFormData) return;
+        const url = new URL(window.location.href);
+        url.searchParams.set('shared', '1');
+        // Encode key params for sharing
+        if (lastFormData.address)       url.searchParams.set('addr', lastFormData.address);
+        if (lastFormData.postcode)      url.searchParams.set('pc',   lastFormData.postcode);
+        if (lastFormData.dealType)      url.searchParams.set('dt',   lastFormData.dealType);
+        if (lastFormData.purchasePrice) url.searchParams.set('pp',   lastFormData.purchasePrice);
+        if (lastFormData.monthlyRent)   url.searchParams.set('mr',   lastFormData.monthlyRent);
+        const shareUrl = url.toString();
+
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                const btn = document.getElementById('shareBtn');
+                btn.textContent = '✅ Link Copied!';
+                setTimeout(() => { btn.innerHTML = '🔗 Share'; }, 2500);
+            });
+        } else {
+            prompt('Copy this link to share:', shareUrl);
+        }
+    }
+
+    // ── Load shared params on page load ────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+        const p = new URLSearchParams(window.location.search);
+        if (p.get('shared') === '1') {
+            if (p.get('addr')) document.getElementById('address').value = p.get('addr');
+            if (p.get('pc'))   document.getElementById('postcode').value = p.get('pc');
+            if (p.get('dt'))   document.getElementById('dealType').value = p.get('dt');
+            if (p.get('pp'))   document.getElementById('purchasePrice').value = p.get('pp');
+            if (p.get('mr'))   document.getElementById('monthlyRent').value = p.get('mr');
+            updateFormFields();
+        }
+    });
+
+    // ── PropertyData Direct: Rent Lookup ───────────────────────────────────
+    let _rentLookupTimer = null;
+
+    async function lookupRentalValuation() {
+        const postcode = document.getElementById('postcode').value.trim().toUpperCase();
+        const bedrooms = parseInt(document.getElementById('bedrooms').value) || 3;
+        const rentInput = document.getElementById('monthlyRent');
+        const statusEl  = document.getElementById('rentLookupStatus');
+        const dealType  = document.getElementById('dealType').value;
+
+        // Only auto-fill for rental strategies, not FLIP
+        if (!postcode || postcode.length < 5 || dealType === 'FLIP') return;
+        // Don't overwrite a value the user has typed
+        if (rentInput.dataset.userEdited) return;
+
+        statusEl.textContent = 'Looking up rent…';
+        try {
+            const resp = await fetch('/api/propertydata/rental-valuation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postcode, bedrooms })
+            });
+            if (!resp.ok) { statusEl.textContent = ''; return; }
+            const json = await resp.json();
+            if (!json.success) { statusEl.textContent = ''; return; }
+
+            // Support PropertyData shape (data.estimate.monthly) and Land Registry shape (data.estimated_monthly_rent)
+            const d = json.data || {};
+            const monthly = d.estimate?.monthly ?? d.estimated_monthly_rent ?? null;
+            if (monthly && !rentInput.dataset.userEdited) {
+                rentInput.value = Math.round(monthly);
+                statusEl.textContent = `(est. from ${json.source || 'market data'})`;
+            } else {
+                statusEl.textContent = '';
+            }
+        } catch (e) {
+            statusEl.textContent = '';
+        }
+    }
+
+    function scheduleRentLookup() {
+        clearTimeout(_rentLookupTimer);
+        _rentLookupTimer = setTimeout(lookupRentalValuation, 600);
+    }
+
+    // Trigger lookup when postcode or bedrooms change
+    document.getElementById('postcode').addEventListener('change', scheduleRentLookup);
+    document.getElementById('bedrooms').addEventListener('change', scheduleRentLookup);
+
+    // Mark rent as user-edited so we don't overwrite their input
+    document.getElementById('monthlyRent').addEventListener('input', function() {
+        this.dataset.userEdited = '1';
+        document.getElementById('rentLookupStatus').textContent = '';
+    });
+
+    // ── Crime Data ──────────────────────────────────────────────────────────
+    async function loadCrimeData(postcode) {
+        try {
+            const resp = await fetch('/api/crime', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postcode })
+            });
+            if (!resp.ok) return;
+            const json = await resp.json();
+            if (!json.success) return;
+            renderCrimeData(json.data);
+        } catch (e) {
+            // Silently fail — crime data is supplementary
+        }
+    }
+
+    function renderCrimeData(data) {
+        const section = document.getElementById('crimeSection');
+        const grid    = document.getElementById('crimeGrid');
+        const lvlEl   = document.getElementById('crimeLevel');
+
+        if (!data || !data.categories) return;
+        section.style.display = 'block';
+
+        const total = data.total_crimes || 0;
+        const level = data.crime_level || 'Unknown';
+        const cls   = level === 'Low' ? 'crime-level-low' : level === 'Medium' ? 'crime-level-med' : 'crime-level-high';
+
+        lvlEl.innerHTML = `
+            <div style="margin-bottom:10px">
+                Total crimes (last month near area): <strong>${total.toLocaleString()}</strong>
+                <span class="crime-level ${cls}">${level} Crime Area</span>
+            </div>`;
+
+        const topCats = Object.entries(data.categories)
+            .sort((a,b) => b[1] - a[1])
+            .slice(0, 6);
+
+        grid.innerHTML = topCats.map(([cat, count]) => `
+            <div class="crime-card">
+                <div class="crime-card-num">${count}</div>
+                <div class="crime-card-label">${cat.replace(/-/g,' ')}</div>
+            </div>`).join('');
+    }
+
+    // ── Deal Comparison ────────────────────────────────────────────────────
+    function openCompareMenu(event, id) {
+        event.stopPropagation();
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const others = saved.filter(e => e.id !== id);
+        if (!others.length) return;
+
+        // If only one other deal, compare directly
+        if (others.length === 1) {
+            const a = saved.find(e => e.id === id);
+            showComparison(a, others[0]);
+            return;
+        }
+
+        // Prompt user to pick which deal to compare against
+        const names = others.map((e, i) => `${i + 1}. ${e.address} (${e.dealType} · ${e.verdict})`).join('\n');
+        const choice = prompt(`Compare against which deal? Enter number:\n\n${names}`);
+        const idx = parseInt(choice) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= others.length) return;
+        const a = saved.find(e => e.id === id);
+        showComparison(a, others[idx]);
+    }
+
+    function showComparison(a, b) {
+        const ar = a.results || {};
+        const br = b.results || {};
+
+        function row(label, va, vb, higherIsBetter = true) {
+            const an = parseFloat(String(va).replace(/,/g,'')) || 0;
+            const bn = parseFloat(String(vb).replace(/,/g,'')) || 0;
+            const aWin = higherIsBetter ? an >= bn : an <= bn;
+            const aStyle = (an !== 0 && bn !== 0 && aWin)  ? 'color:var(--green);font-weight:700' : '';
+            const bStyle = (an !== 0 && bn !== 0 && !aWin) ? 'color:var(--green);font-weight:700' : '';
+            return `<div class="compare-row"><span class="compare-row-label">${label}</span><span class="compare-row-val" style="${aStyle}">${va}</span><span class="compare-row-val" style="${bStyle}">${vb}</span></div>`;
+        }
+
+        const f = v => v !== undefined && v !== null ? '£' + fmt(v) : '–';
+        const p = v => v !== undefined && v !== null ? parseFloat(v).toFixed(1) + '%' : '–';
+
+        document.getElementById('compareGrid').innerHTML = `
+            <div>
+                <div class="compare-col-title">Deal A</div>
+                <div style="font-weight:700;margin-bottom:12px">${esc(a.address)}</div>
+                <span class="saved-item-verdict ${a.verdict}">${a.verdict}</span>
+            </div>
+            <div>
+                <div class="compare-col-title">Deal B</div>
+                <div style="font-weight:700;margin-bottom:12px">${esc(b.address)}</div>
+                <span class="saved-item-verdict ${b.verdict}">${b.verdict}</span>
+            </div>
+            <div style="grid-column:1/-1">
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0;margin-top:20px">
+                    <div class="compare-row"><span class="compare-row-label" style="font-weight:700">Metric</span><span style="font-weight:700;font-size:0.8rem;color:var(--text-light)">Deal A</span><span style="font-weight:700;font-size:0.8rem;color:var(--text-light)">Deal B</span></div>
+                    ${[
+                        ['Deal Score', ar.deal_score + '/100', br.deal_score + '/100', true],
+                        ['Gross Yield', p(ar.gross_yield), p(br.gross_yield), true],
+                        ['Net Yield', p(ar.net_yield), p(br.net_yield), true],
+                        ['Monthly Cashflow', f(ar.monthly_cashflow), f(br.monthly_cashflow), true],
+                        ['Cash-on-Cash', p(ar.cash_on_cash), p(br.cash_on_cash), true],
+                        ['Purchase Price', f(ar.purchase_price), f(br.purchase_price), false],
+                        ['Total Cash In', f(ar.total_purchase_costs), f(br.total_purchase_costs), false],
+                        ['Strategy', ar.deal_type || a.dealType, br.deal_type || b.dealType, null],
+                    ].map(r => r[3] === null
+                        ? `<div class="compare-row"><span class="compare-row-label">${r[0]}</span><span class="compare-row-val">${r[1]}</span><span class="compare-row-val">${r[2]}</span></div>`
+                        : row(r[0], r[1], r[2], r[3])
+                    ).join('')}
+                </div>
+            </div>`;
+
+        document.getElementById('compareModal').classList.add('open');
+    }
+
+    function closeCompare() {
+        document.getElementById('compareModal').classList.remove('open');
+    }
+    // Close modal on overlay click
+    document.getElementById('compareModal').addEventListener('click', function(e) {
+        if (e.target === this) closeCompare();
+    });
+
+    // Send JS errors to admin error log
+    window.addEventListener('error', function(e) {
+        fetch('/admin/api/report-error', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                message: e.message,
+                source: e.filename,
+                lineno: e.lineno,
+                colno: e.colno,
+                stack: e.error ? e.error.stack : '',
+                page: window.location.pathname,
+            })
+        }).catch(function(){});
+    });
+</script>
+</body>
+</html>
