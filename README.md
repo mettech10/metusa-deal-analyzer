@@ -365,3 +365,4 @@ For support, email uche@metusaproperty.co.uk or open an issue on GitHub.
 ---
 
 **Ready to analyze your first deal?** Run `./run.sh` and open http://localhost:5000 🚀
+

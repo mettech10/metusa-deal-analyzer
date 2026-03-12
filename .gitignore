@@ -48,6 +48,7 @@ uploads/
 *.log
 .env
 .env.local
+.env*.local
 
 # Database
 *.db
@@ -58,3 +59,13 @@ uploads/
 tmp/
 temp/
 *.tmp
+
+# v0 runtime files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# Node / Next.js
+node_modules/
+.next/
+tsconfig.tsbuildinfo
