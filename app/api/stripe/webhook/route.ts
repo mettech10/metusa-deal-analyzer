@@ -1,5 +1,6 @@
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import { sendSubscriptionReceiptEmail } from '@/lib/brevo-email'
 
 /**
  * POST /api/stripe/webhook
@@ -56,6 +57,12 @@ export async function POST(req: Request) {
             { onConflict: 'email' },
           )
         if (error) console.error('[Stripe Webhook] Supabase upsert error:', error)
+
+        // Send receipt email
+        const amount = session.amount_total != null
+          ? `${session.currency?.toUpperCase()} ${(session.amount_total / 100).toFixed(2)}`
+          : 'N/A'
+        sendSubscriptionReceiptEmail(session.customer_email, 'pay_per_deal', amount).catch(console.error)
       }
       break
     }
@@ -88,6 +95,16 @@ export async function POST(req: Request) {
           { onConflict: 'email' },
         )
       if (error) console.error('[Stripe Webhook] Supabase upsert error:', error)
+
+      // Send receipt email only on new subscription creation
+      if (event.type === 'customer.subscription.created' && status === 'active') {
+        const price = sub.items.data[0]?.price
+        const unitAmount = price?.unit_amount ?? 0
+        const currency = price?.currency?.toUpperCase() ?? 'GBP'
+        const interval = price?.recurring?.interval ?? 'month'
+        const amount = `${currency} ${(unitAmount / 100).toFixed(2)}/${interval}`
+        sendSubscriptionReceiptEmail(email, 'subscription', amount).catch(console.error)
+      }
       break
     }
 

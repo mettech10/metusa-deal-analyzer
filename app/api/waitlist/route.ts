@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { sendWaitlistWelcomeEmail } from "@/lib/brevo-email"
 
 // Brevo API integration
 async function addToBrevo(email: string) {
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Add to Brevo
+    // Add to Brevo contacts and send welcome email (fire-and-forget)
     let brevoResult = null
     try {
       brevoResult = await addToBrevo(email)
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
     } catch (err) {
       console.error("[Brevo] Sync failed:", err)
     }
+    sendWaitlistWelcomeEmail(email).catch(console.error)
 
     return NextResponse.json(
       {
