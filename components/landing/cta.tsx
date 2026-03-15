@@ -53,8 +53,8 @@ export function CTA() {
                 transition={{ duration: 0.6, delay: 0.4 }}
                 viewport={{ once: true }}
               >
-                Join the waitlist for exclusive early access and 30% off the launch price.
-                Be the first to analyse deals like a pro.
+                Join the waitlist for exclusive early access to AI-powered property deal analysis.
+                Be the first to transform how you evaluate investment opportunities.
               </motion.p>
 
               <motion.div 

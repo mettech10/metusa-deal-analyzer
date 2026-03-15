@@ -83,7 +83,7 @@ export default function WaitlistPage() {
                   Join the Waitlist
                 </h1>
                 <p className="mt-3 text-muted-foreground">
-                  Get early access to Metalyzi plus <span className="text-primary font-semibold">30% off</span> the launch price.
+                  Get early access to Metalyzi and be the first to experience AI-powered property deal analysis.
                 </p>
               </div>
 
@@ -95,19 +95,19 @@ export default function WaitlistPage() {
                 <ul className="space-y-2.5 text-sm text-muted-foreground">
                   <li className="flex items-start gap-2">
                     <CheckCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-                    <span>Early access before public launch</span>
+                    <span>Early access 48 hours before public launch</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-                    <span>30% discount on all products</span>
+                    <span>Direct input on product features and roadmap</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-                    <span>Free property deal review (founding members)</span>
+                    <span>Sample deal analysis reports and guides</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-                    <span>Exclusive tips & strategies newsletter</span>
+                    <span>Exclusive property investment insights newsletter</span>
                   </li>
                 </ul>
               </div>
