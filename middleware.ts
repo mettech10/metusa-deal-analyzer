@@ -1,10 +1,31 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
+// Secret key for developer access
+const DEV_SECRET = "metalyzi2026"
 
-  // Allow list - these paths are accessible
+export function middleware(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl
+
+  // Check for dev access key in URL
+  const hasDevKey = searchParams.get("dev") === DEV_SECRET
+
+  // If dev key is present, set a cookie and allow access
+  if (hasDevKey) {
+    const response = NextResponse.next()
+    response.cookies.set("dev_access", DEV_SECRET, {
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    })
+    return response
+  }
+
+  // Check if dev cookie is present
+  const devCookie = request.cookies.get("dev_access")?.value
+  const hasDevCookie = devCookie === DEV_SECRET
+
+  // Allow list - these paths are always accessible
   const allowedPaths = [
     "/waitlist",
     "/coming-soon",
@@ -28,6 +49,11 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/static/") ||
     pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/)
   ) {
+    return NextResponse.next()
+  }
+
+  // If has dev cookie, allow access to everything
+  if (hasDevCookie) {
     return NextResponse.next()
   }
 
