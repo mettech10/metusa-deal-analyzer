@@ -1,15 +1,36 @@
 services:
+  # Next.js frontend (Metalyzi UI + Brevo transactional emails)
   - type: web
-    name: metusa-deal-analyzer
-    runtime: python
+    name: metusa-deal-analyzer-web
+    runtime: node
     plan: free
-    buildCommand: apt-get install -y wkhtmltopdf && pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.0"
-      - key: FLASK_ENV
+      - key: NODE_VERSION
+        value: "20"
+      - key: BREVO_SENDER_EMAIL
+        value: noreply@metalyzi.co.uk
+      - key: BREVO_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SCRAPINGBEE_API_KEY
+        sync: false
+      - key: BACKEND_API_URL
+        value: https://metusa-deal-analyzer.onrender.com
+      - key: NEXT_PUBLIC_PADDLE_ENV
         value: production
-      - key: FLASK_DEBUG
-        value: "false"
+      - key: NEXT_PUBLIC_PADDLE_CLIENT_TOKEN
+        sync: false
+      - key: NEXT_PUBLIC_PADDLE_PRICE_PAY_PER_DEAL
+        sync: false
+      - key: NEXT_PUBLIC_PADDLE_PRICE_PRO
+        sync: false
+      - key: NEXT_PUBLIC_PADDLE_PRICE_UNLIMITED
+        sync: false
+      - key: PADDLE_WEBHOOK_SECRET
+        sync: false
