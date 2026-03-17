@@ -6,8 +6,47 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowRight, Sparkles } from "lucide-react"
 import { motion } from "framer-motion"
 import { HeroText, PulseElement } from "@/components/animations"
+import { useEffect, useState, useRef } from "react"
+
+function AnimatedCounter({ target }: { target: number }) {
+  const [display, setDisplay] = useState(Math.max(0, target - 20))
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const start = Math.max(0, target - 20)
+    const duration = 1200 // ms
+    const startTime = performance.now()
+
+    const tick = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplay(Math.round(start + (target - start) * eased))
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(tick)
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [target])
+
+  return <>{display.toLocaleString()}+</>
+}
 
 export function Hero() {
+  const [dealCount, setDealCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch("/api/stats/deal-count")
+      .then((r) => r.json())
+      .then((d) => setDealCount(d.count ?? 10))
+      .catch(() => setDealCount(10))
+  }, [])
+
   return (
     <section className="relative overflow-hidden">
       {/* Grid background - Original */}
@@ -104,7 +143,7 @@ export function Hero() {
           className="mt-20 grid w-full max-w-3xl grid-cols-1 gap-8 rounded-xl border border-border/50 bg-card/50 px-8 py-6 backdrop-blur-sm sm:grid-cols-3"
         >
           {[
-            { value: "10,000+", label: "Deals Analysed" },
+            { value: dealCount !== null ? <AnimatedCounter target={dealCount} /> : "…", label: "Deals Analysed" },
             { value: "98%", label: "Calculation Accuracy" },
             { value: "4+ hrs", label: "Saved Per Deal" },
           ].map((stat, i) => (
