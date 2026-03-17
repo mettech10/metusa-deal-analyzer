@@ -94,32 +94,85 @@ function baseTemplate(content: string): string {
 }
 
 function waitlistEmailHtml(): string {
-  return baseTemplate(`
-    <h1 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#ffffff;line-height:1.3;">
-      You're on the waitlist! 🎉
-    </h1>
-    <p style="margin:0 0 24px;font-size:15px;color:#9ca3af;line-height:1.6;">
-      Thanks for joining the Metalyzi waitlist. We'll let you know as soon as early access opens up.
-    </p>
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Welcome to Metalyzi</title>
+</head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#0f0f0f;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f0f0f;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background-color:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a;overflow:hidden;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#111;padding:28px 36px;border-bottom:1px solid #2a2a2a;">
+              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Metalyzi</span>
+              <span style="font-size:13px;color:#6b7280;margin-left:8px;">AI Property Analysis</span>
+            </td>
+          </tr>
+          
+          <!-- Content -->
+          <tr>
+            <td style="padding:36px;">
+              <h1 style="margin:0 0 8px;font-size:28px;font-weight:700;color:#ffffff;line-height:1.3;">
+                You're on the waitlist! 🎉
+              </h1>
+              <p style="margin:0 0 28px;font-size:15px;color:#9ca3af;line-height:1.6;">
+                Thanks for joining the Metalyzi waitlist. You're now part of a community that's transforming how property deals are analysed in the UK.
+              </p>
 
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #2a2a2a;border-radius:8px;margin-bottom:28px;">
-      <tr>
-        <td style="padding:20px 24px;">
-          <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">What's coming</p>
-          <ul style="margin:0;padding:0 0 0 18px;color:#d1d5db;font-size:14px;line-height:2;">
-            <li>AI-powered property deal analysis</li>
-            <li>Instant cashflow &amp; yield calculations</li>
-            <li>Comparable sales &amp; rental data</li>
-            <li>Smart deal scoring system</li>
-          </ul>
-        </td>
-      </tr>
-    </table>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#111;border:1px solid #2a2a2a;border-radius:8px;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">What Metalyzi does</p>
+                    <ul style="margin:0;padding:0 0 0 18px;color:#d1d5db;font-size:14px;line-height:2;">
+                      <li>Analyse any UK property deal in seconds</li>
+                      <li>Instant SDLT, mortgage & cashflow calculations</li>
+                      <li>AI-powered investment recommendations</li>
+                      <li>Comparable sales & rental data</li>
+                      <li>Smart deal scoring & risk assessment</li>
+                    </ul>
+                  </td>
+                </tr>
+              </table>
 
-    <p style="margin:0;font-size:14px;color:#6b7280;line-height:1.6;">
-      We'll be in touch soon. In the meantime, feel free to reply to this email if you have any questions.
-    </p>
-  `)
+              <p style="margin:0 0 20px;font-size:14px;color:#9ca3af;line-height:1.6;">
+                No more spreadsheets. No more guesswork. Just clear, data-driven insights that help you make confident investment decisions.
+              </p>
+
+              <p style="margin:0 0 20px;font-size:14px;color:#9ca3af;line-height:1.6;">
+                <strong style="color:#ffffff;">Timeline:</strong><br />
+                Q2 2026 — Private beta access<br />
+                Q3 2026 — Public launch
+              </p>
+
+              <p style="margin:0;font-size:14px;color:#9ca3af;line-height:1.6;">
+                We'll be in touch soon with your early access invitation.
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 36px 28px;border-top:1px solid #2a2a2a;">
+              <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;">
+                You're receiving this email because you interacted with Metalyzi.<br />
+                © ${new Date().getFullYear()} Metalyzi. All rights reserved.
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
 }
 
 function signUpWelcomeEmailHtml(name?: string): string {
