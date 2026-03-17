@@ -63,6 +63,7 @@ export async function POST(req: Request) {
     form_data,
     results,
     ai_text,
+    backend_data,
   } = body
 
   const { data, error } = await supabase
@@ -80,6 +81,7 @@ export async function POST(req: Request) {
       form_data,
       results,
       ai_text,
+      backend_data,
     })
     .select("id")
     .single()

@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { PropertyFormData, CalculationResults } from "@/lib/types"
+import type { PropertyFormData, CalculationResults, BackendResults } from "@/lib/types"
 
 interface SavedAnalysis {
   id: string
@@ -25,7 +25,7 @@ interface SavedAnalysis {
 }
 
 interface RecentDealsProps {
-  onLoad?: (formData: PropertyFormData, results: CalculationResults, aiText: string) => void
+  onLoad?: (formData: PropertyFormData, results: CalculationResults, aiText: string, backendData: BackendResults | null) => void
 }
 
 const strategyLabel: Record<string, string> = {
@@ -106,7 +106,7 @@ export function RecentDeals({ onLoad }: RecentDealsProps) {
       if (!res.ok) return
       const data = await res.json()
       if (data.form_data && data.results) {
-        onLoad(data.form_data as PropertyFormData, data.results as CalculationResults, data.ai_text || "")
+        onLoad(data.form_data as PropertyFormData, data.results as CalculationResults, data.ai_text || "", (data.backend_data as BackendResults) || null)
       }
     } catch {
       // silently skip

@@ -1110,33 +1110,229 @@ export function AnalysisResults({
         )}
       </Tabs>
 
-      {/* ── SDLT Breakdown ──────────────────────────────────────────── */}
-      {results.sdltBreakdown.length > 0 && (
+      {/* ── Full Financial Breakdown ─────────────────────────────────── */}
+      {data.investmentType !== "r2sa" && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">SDLT Breakdown</CardTitle>
+            <CardTitle className="text-base">Full Financial Breakdown</CardTitle>
+            <CardDescription>Complete breakdown of all costs, income and returns</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              {results.sdltBreakdown.map((band) => (
-                <div
-                  key={band.band}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <span className="text-muted-foreground">{band.band}</span>
-                  <span className="font-medium text-foreground">
-                    {formatCurrency(band.tax)}
-                  </span>
+          <CardContent className="flex flex-col gap-5">
+
+            {/* ── Acquisition Costs ──────────────────────────────────── */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Acquisition Costs</p>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Purchase Price</span>
+                  <span className="font-semibold text-foreground">{formatCurrency(data.purchasePrice)}</span>
                 </div>
-              ))}
-              <Separator className="my-1" />
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-foreground">Total SDLT</span>
-                <span className="font-bold text-foreground">
-                  {formatCurrency(results.sdltAmount)}
-                </span>
+
+                {/* SDLT with band detail */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    SDLT{data.buyerType === "first-time" ? " (first-time buyer)" : " (incl. 5% surcharge)"}
+                  </span>
+                  <span className="font-medium text-foreground">{formatCurrency(results.sdltAmount)}</span>
+                </div>
+                {results.sdltBreakdown.length > 0 && (
+                  <div className="ml-4 flex flex-col gap-1 rounded-md bg-muted/30 px-3 py-2">
+                    {results.sdltBreakdown.map((band) => (
+                      <div key={band.band} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Band: {band.band}</span>
+                        <span className="text-foreground">{formatCurrency(band.tax)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Legal Fees</span>
+                  <span className="font-medium text-foreground">{formatCurrency(data.legalFees)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Survey Costs</span>
+                  <span className="font-medium text-foreground">{formatCurrency(data.surveyCosts)}</span>
+                </div>
+                {data.refurbishmentBudget > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Refurbishment Budget</span>
+                    <span className="font-medium text-foreground">{formatCurrency(data.refurbishmentBudget)}</span>
+                  </div>
+                )}
+                <Separator className="my-1" />
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Total Purchase Cost</span>
+                  <span className="font-semibold text-foreground">{formatCurrency(results.totalPurchaseCost)}</span>
+                </div>
               </div>
             </div>
+
+            {/* ── Financing ──────────────────────────────────────────── */}
+            {data.purchaseType !== "cash" && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Financing</p>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Deposit ({data.depositPercentage}%)</span>
+                    <span className="font-medium text-foreground">{formatCurrency(results.depositAmount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {data.purchaseType === "bridging-loan" ? "Bridging Loan" : "Mortgage Amount"}
+                    </span>
+                    <span className="font-medium text-foreground">{formatCurrency(results.mortgageAmount)}</span>
+                  </div>
+                  {data.purchaseType === "bridging-loan" && results.bridgingLoanDetails ? (
+                    <>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Monthly Interest ({data.bridgingMonthlyRate ?? 0.75}%/mo)</span>
+                        <span className="font-medium text-foreground">{formatCurrency(results.bridgingLoanDetails.monthlyInterest)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Total Interest ({results.bridgingLoanDetails.termMonths} months)</span>
+                        <span className="font-medium text-foreground">{formatCurrency(results.bridgingLoanDetails.totalInterest)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Arrangement Fee</span>
+                        <span className="font-medium text-foreground">{formatCurrency(results.bridgingLoanDetails.arrangementFee)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Exit Fee</span>
+                        <span className="font-medium text-foreground">{formatCurrency(results.bridgingLoanDetails.exitFee)}</span>
+                      </div>
+                      <Separator className="my-1" />
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Total Bridging Cost</span>
+                        <span className="font-semibold text-foreground">{formatCurrency(results.bridgingLoanDetails.totalCost)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    results.monthlyMortgagePayment > 0 && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Monthly Mortgage ({data.interestRate}% {data.mortgageType})</span>
+                        <span className="font-medium text-foreground">{formatCurrency(results.monthlyMortgagePayment)}</span>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Total Capital Required ─────────────────────────────── */}
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-foreground">Total Capital Required</span>
+                <span className="text-lg font-bold text-primary">{formatCurrency(results.totalCapitalRequired)}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Deposit + SDLT + legal + survey{data.refurbishmentBudget > 0 ? " + refurb" : ""}
+              </p>
+            </div>
+
+            {/* ── Monthly Income & Expenses ───────────────────────────── */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Monthly Income & Expenses</p>
+              <div className="flex flex-col gap-1.5">
+                {/* Income */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Gross Monthly Rent</span>
+                  <span className="font-medium text-success">+{formatCurrency(data.monthlyRent)}</span>
+                </div>
+                {data.voidWeeks > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Void Allowance ({data.voidWeeks} weeks/yr)</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round((data.monthlyRent * data.voidWeeks) / 52))}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Effective Monthly Income</span>
+                  <span className="font-semibold text-foreground">{formatCurrency(results.monthlyIncome)}</span>
+                </div>
+
+                <Separator className="my-1" />
+
+                {/* Expenses */}
+                {results.monthlyMortgagePayment > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Mortgage Payment</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(results.monthlyMortgagePayment)}</span>
+                  </div>
+                )}
+                {data.managementFeePercent > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Management Fee ({data.managementFeePercent}%)</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round(data.monthlyRent * (data.managementFeePercent / 100)))}</span>
+                  </div>
+                )}
+                {data.insurance > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Insurance</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round(data.insurance / 12))}</span>
+                  </div>
+                )}
+                {data.maintenance > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Maintenance</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round(data.maintenance / 12))}</span>
+                  </div>
+                )}
+                {data.groundRent > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Ground Rent</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round(data.groundRent / 12))}</span>
+                  </div>
+                )}
+                {data.bills > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Bills</span>
+                    <span className="font-medium text-destructive">-{formatCurrency(Math.round(data.bills / 12))}</span>
+                  </div>
+                )}
+
+                <Separator className="my-1" />
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Total Monthly Expenses</span>
+                  <span className="font-semibold text-destructive">-{formatCurrency(results.monthlyExpenses)}</span>
+                </div>
+
+                <Separator className="my-1" />
+
+                {/* Cash Flow */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold text-foreground">Monthly Cash Flow</span>
+                  <span className={`text-base font-bold ${results.monthlyCashFlow >= 0 ? "text-success" : "text-destructive"}`}>
+                    {results.monthlyCashFlow >= 0 ? "+" : ""}{formatCurrency(results.monthlyCashFlow)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold text-foreground">Annual Cash Flow</span>
+                  <span className={`font-bold ${results.annualCashFlow >= 0 ? "text-success" : "text-destructive"}`}>
+                    {results.annualCashFlow >= 0 ? "+" : ""}{formatCurrency(results.annualCashFlow)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Returns ─────────────────────────────────────────────── */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Returns</p>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Gross Yield</span>
+                  <span className={`font-semibold ${results.grossYield >= 6 ? "text-success" : "text-foreground"}`}>{formatPercent(results.grossYield)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Net Yield</span>
+                  <span className={`font-semibold ${results.netYield >= 4 ? "text-success" : "text-foreground"}`}>{formatPercent(results.netYield)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Cash-on-Cash ROI</span>
+                  <span className={`font-semibold ${results.cashOnCashReturn >= 5 ? "text-success" : "text-foreground"}`}>{formatPercent(results.cashOnCashReturn)}</span>
+                </div>
+              </div>
+            </div>
+
           </CardContent>
         </Card>
       )}
