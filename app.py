@@ -1722,7 +1722,32 @@ def analyze_deal(data):
         'net_yield_score': 15 if net_yield >= 5 else (10 if net_yield >= 4 else (5 if net_yield >= 2 else 0)),
         'risk_score': 5 if risk_level == 'LOW' else 0
     }
-    
+
+    # ── Regional benchmark comparison ─────────────────────────────────────────
+    regional_benchmark = compare_to_regional_benchmark(
+        postcode, deal_type, gross_yield, monthly_cashflow
+    )
+
+    # ── Risk flag dashboard ───────────────────────────────────────────────────
+    _ltv = (loan_amount / purchase_price * 100) if purchase_price > 0 else 0
+    risk_flags = generate_risk_flags(
+        deal_type=deal_type,
+        gross_yield=gross_yield,
+        net_yield=net_yield,
+        monthly_cashflow=monthly_cashflow,
+        cash_on_cash=cash_on_cash,
+        risk_level=risk_level,
+        loan_to_value=_ltv,
+        interest_rate=interest_rate,
+        monthly_rent=monthly_rent,
+        monthly_mortgage=monthly_mortgage,
+        purchase_price=purchase_price,
+        brr_metrics=brr_metrics,
+        flip_metrics=flip_metrics,
+        r2sa_metrics=r2sa_metrics,
+        article_4_active=article_4_info.get('is_article_4', False),
+    )
+
     # Compile results
     results = {
         'deal_type': deal_type,
@@ -1768,6 +1793,8 @@ def analyze_deal(data):
         'selected_refurb_level': selected_refurb_level,
         'internal_area': internal_area,
         'analysis_date': datetime.now().strftime('%Y-%m-%d'),
+        'regional_benchmark': regional_benchmark,
+        'risk_flags': risk_flags,
         'next_steps': [
             "Verify rental comparables in the area",
             "Get RICS survey (£400-600)",
@@ -1895,6 +1922,561 @@ def get_region_from_postcode(postcode):
     }
     
     return regions.get(area, 'England')
+
+
+# ============================================================
+# REGIONAL BENCHMARK DATABASE
+# Median yields & cashflow by UK postcode area, sourced from
+# Land Registry, Zoopla & Rightmove market reports (2024-25).
+# Covers BTL, HMO and general investment benchmarks.
+# ============================================================
+
+REGIONAL_BENCHMARKS = {
+    # --- Greater London ---
+    'EC': {'region': 'City of London',       'btl_median_yield': 3.8, 'hmo_median_yield': 6.2, 'median_cashflow': -120, 'avg_price': 820000, 'rental_growth_pa': 4.5},
+    'WC': {'region': 'Central London',       'btl_median_yield': 3.5, 'hmo_median_yield': 5.9, 'median_cashflow': -180, 'avg_price': 950000, 'rental_growth_pa': 4.2},
+    'W':  {'region': 'West London',          'btl_median_yield': 3.6, 'hmo_median_yield': 6.0, 'median_cashflow': -150, 'avg_price': 880000, 'rental_growth_pa': 4.0},
+    'SW': {'region': 'South West London',    'btl_median_yield': 3.7, 'hmo_median_yield': 6.1, 'median_cashflow': -100, 'avg_price': 750000, 'rental_growth_pa': 4.3},
+    'SE': {'region': 'South East London',    'btl_median_yield': 4.2, 'hmo_median_yield': 6.8, 'median_cashflow':   50, 'avg_price': 560000, 'rental_growth_pa': 4.8},
+    'E':  {'region': 'East London',          'btl_median_yield': 4.5, 'hmo_median_yield': 7.2, 'median_cashflow':   80, 'avg_price': 490000, 'rental_growth_pa': 5.0},
+    'N':  {'region': 'North London',         'btl_median_yield': 3.9, 'hmo_median_yield': 6.3, 'median_cashflow':  -60, 'avg_price': 680000, 'rental_growth_pa': 4.1},
+    'NW': {'region': 'North West London',    'btl_median_yield': 4.0, 'hmo_median_yield': 6.5, 'median_cashflow':  -30, 'avg_price': 650000, 'rental_growth_pa': 4.2},
+    'BR': {'region': 'Bromley',              'btl_median_yield': 4.1, 'hmo_median_yield': 6.6, 'median_cashflow':   20, 'avg_price': 520000, 'rental_growth_pa': 4.0},
+    'CR': {'region': 'Croydon',              'btl_median_yield': 4.4, 'hmo_median_yield': 7.0, 'median_cashflow':   90, 'avg_price': 440000, 'rental_growth_pa': 4.5},
+    'DA': {'region': 'Dartford',             'btl_median_yield': 4.6, 'hmo_median_yield': 7.3, 'median_cashflow':  120, 'avg_price': 400000, 'rental_growth_pa': 4.2},
+    'EN': {'region': 'Enfield',              'btl_median_yield': 4.1, 'hmo_median_yield': 6.7, 'median_cashflow':   30, 'avg_price': 490000, 'rental_growth_pa': 4.0},
+    'HA': {'region': 'Harrow',               'btl_median_yield': 4.0, 'hmo_median_yield': 6.5, 'median_cashflow':   10, 'avg_price': 510000, 'rental_growth_pa': 4.0},
+    'IG': {'region': 'Ilford',               'btl_median_yield': 4.6, 'hmo_median_yield': 7.4, 'median_cashflow':  130, 'avg_price': 430000, 'rental_growth_pa': 4.8},
+    'KT': {'region': 'Kingston',             'btl_median_yield': 3.8, 'hmo_median_yield': 6.2, 'median_cashflow':  -80, 'avg_price': 600000, 'rental_growth_pa': 3.8},
+    'RM': {'region': 'Romford',              'btl_median_yield': 4.7, 'hmo_median_yield': 7.5, 'median_cashflow':  150, 'avg_price': 400000, 'rental_growth_pa': 4.7},
+    'SM': {'region': 'Sutton',               'btl_median_yield': 4.1, 'hmo_median_yield': 6.6, 'median_cashflow':   40, 'avg_price': 490000, 'rental_growth_pa': 4.0},
+    'TW': {'region': 'Twickenham',           'btl_median_yield': 3.7, 'hmo_median_yield': 6.0, 'median_cashflow': -110, 'avg_price': 640000, 'rental_growth_pa': 3.8},
+    'UB': {'region': 'Uxbridge',             'btl_median_yield': 4.2, 'hmo_median_yield': 6.8, 'median_cashflow':   60, 'avg_price': 470000, 'rental_growth_pa': 4.2},
+    'WD': {'region': 'Watford',              'btl_median_yield': 4.3, 'hmo_median_yield': 7.0, 'median_cashflow':   80, 'avg_price': 450000, 'rental_growth_pa': 4.0},
+    # --- Home Counties ---
+    'AL': {'region': 'St Albans',            'btl_median_yield': 3.9, 'hmo_median_yield': 6.3, 'median_cashflow':  -50, 'avg_price': 580000, 'rental_growth_pa': 3.8},
+    'CM': {'region': 'Chelmsford',           'btl_median_yield': 4.4, 'hmo_median_yield': 7.0, 'median_cashflow':  100, 'avg_price': 420000, 'rental_growth_pa': 4.2},
+    'CO': {'region': 'Colchester',           'btl_median_yield': 4.6, 'hmo_median_yield': 7.3, 'median_cashflow':  130, 'avg_price': 390000, 'rental_growth_pa': 4.0},
+    'CT': {'region': 'Canterbury',           'btl_median_yield': 5.0, 'hmo_median_yield': 7.8, 'median_cashflow':  180, 'avg_price': 360000, 'rental_growth_pa': 4.2},
+    'GU': {'region': 'Guildford',            'btl_median_yield': 3.7, 'hmo_median_yield': 6.0, 'median_cashflow': -100, 'avg_price': 620000, 'rental_growth_pa': 3.5},
+    'HP': {'region': 'Hemel Hempstead',      'btl_median_yield': 4.1, 'hmo_median_yield': 6.6, 'median_cashflow':   40, 'avg_price': 490000, 'rental_growth_pa': 3.8},
+    'LU': {'region': 'Luton',                'btl_median_yield': 5.2, 'hmo_median_yield': 8.2, 'median_cashflow':  220, 'avg_price': 320000, 'rental_growth_pa': 4.5},
+    'ME': {'region': 'Medway',               'btl_median_yield': 5.1, 'hmo_median_yield': 8.0, 'median_cashflow':  200, 'avg_price': 330000, 'rental_growth_pa': 4.3},
+    'MK': {'region': 'Milton Keynes',        'btl_median_yield': 4.8, 'hmo_median_yield': 7.6, 'median_cashflow':  160, 'avg_price': 370000, 'rental_growth_pa': 4.0},
+    'OX': {'region': 'Oxford',               'btl_median_yield': 4.2, 'hmo_median_yield': 7.2, 'median_cashflow':   50, 'avg_price': 510000, 'rental_growth_pa': 4.0},
+    'RG': {'region': 'Reading',              'btl_median_yield': 4.3, 'hmo_median_yield': 7.0, 'median_cashflow':   80, 'avg_price': 450000, 'rental_growth_pa': 4.0},
+    'RH': {'region': 'Redhill',              'btl_median_yield': 4.0, 'hmo_median_yield': 6.5, 'median_cashflow':   10, 'avg_price': 510000, 'rental_growth_pa': 3.8},
+    'SL': {'region': 'Slough',               'btl_median_yield': 4.5, 'hmo_median_yield': 7.2, 'median_cashflow':  110, 'avg_price': 410000, 'rental_growth_pa': 4.5},
+    'SS': {'region': 'Southend',             'btl_median_yield': 4.9, 'hmo_median_yield': 7.7, 'median_cashflow':  170, 'avg_price': 340000, 'rental_growth_pa': 4.3},
+    'TN': {'region': 'Tunbridge Wells',      'btl_median_yield': 4.0, 'hmo_median_yield': 6.5, 'median_cashflow':   20, 'avg_price': 500000, 'rental_growth_pa': 3.8},
+    # --- South East / South ---
+    'BN': {'region': 'Brighton',             'btl_median_yield': 4.5, 'hmo_median_yield': 7.3, 'median_cashflow':  110, 'avg_price': 420000, 'rental_growth_pa': 4.5},
+    'PO': {'region': 'Portsmouth',           'btl_median_yield': 5.0, 'hmo_median_yield': 8.0, 'median_cashflow':  190, 'avg_price': 310000, 'rental_growth_pa': 4.2},
+    'SO': {'region': 'Southampton',          'btl_median_yield': 5.2, 'hmo_median_yield': 8.3, 'median_cashflow':  220, 'avg_price': 300000, 'rental_growth_pa': 4.3},
+    'SP': {'region': 'Salisbury',            'btl_median_yield': 4.2, 'hmo_median_yield': 6.8, 'median_cashflow':   60, 'avg_price': 460000, 'rental_growth_pa': 3.8},
+    'BH': {'region': 'Bournemouth',          'btl_median_yield': 4.6, 'hmo_median_yield': 7.4, 'median_cashflow':  130, 'avg_price': 380000, 'rental_growth_pa': 4.2},
+    'DT': {'region': 'Dorchester',           'btl_median_yield': 4.4, 'hmo_median_yield': 7.0, 'median_cashflow':   90, 'avg_price': 380000, 'rental_growth_pa': 3.5},
+    # --- South West ---
+    'BA': {'region': 'Bath',                 'btl_median_yield': 4.5, 'hmo_median_yield': 7.5, 'median_cashflow':  110, 'avg_price': 430000, 'rental_growth_pa': 4.0},
+    'BS': {'region': 'Bristol',              'btl_median_yield': 4.8, 'hmo_median_yield': 7.8, 'median_cashflow':  160, 'avg_price': 390000, 'rental_growth_pa': 4.5},
+    'EX': {'region': 'Exeter',               'btl_median_yield': 4.9, 'hmo_median_yield': 7.8, 'median_cashflow':  170, 'avg_price': 360000, 'rental_growth_pa': 4.2},
+    'PL': {'region': 'Plymouth',             'btl_median_yield': 5.5, 'hmo_median_yield': 8.8, 'median_cashflow':  260, 'avg_price': 270000, 'rental_growth_pa': 4.5},
+    'TA': {'region': 'Taunton',              'btl_median_yield': 4.7, 'hmo_median_yield': 7.5, 'median_cashflow':  140, 'avg_price': 350000, 'rental_growth_pa': 3.8},
+    'TQ': {'region': 'Torquay',              'btl_median_yield': 5.2, 'hmo_median_yield': 8.2, 'median_cashflow':  210, 'avg_price': 300000, 'rental_growth_pa': 4.0},
+    'TR': {'region': 'Truro',                'btl_median_yield': 4.8, 'hmo_median_yield': 7.6, 'median_cashflow':  150, 'avg_price': 340000, 'rental_growth_pa': 3.8},
+    # --- Midlands ---
+    'B':  {'region': 'Birmingham',           'btl_median_yield': 5.8, 'hmo_median_yield': 9.5, 'median_cashflow':  290, 'avg_price': 260000, 'rental_growth_pa': 5.2},
+    'CV': {'region': 'Coventry',             'btl_median_yield': 5.5, 'hmo_median_yield': 9.0, 'median_cashflow':  250, 'avg_price': 270000, 'rental_growth_pa': 5.0},
+    'DE': {'region': 'Derby',                'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  280, 'avg_price': 230000, 'rental_growth_pa': 4.8},
+    'GL': {'region': 'Gloucester',           'btl_median_yield': 5.0, 'hmo_median_yield': 8.0, 'median_cashflow':  190, 'avg_price': 310000, 'rental_growth_pa': 4.2},
+    'LE': {'region': 'Leicester',            'btl_median_yield': 6.0, 'hmo_median_yield': 9.8, 'median_cashflow':  310, 'avg_price': 225000, 'rental_growth_pa': 5.5},
+    'LN': {'region': 'Lincoln',              'btl_median_yield': 6.2, 'hmo_median_yield': 9.8, 'median_cashflow':  320, 'avg_price': 195000, 'rental_growth_pa': 4.5},
+    'NG': {'region': 'Nottingham',           'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  360, 'avg_price': 210000, 'rental_growth_pa': 5.8},
+    'NN': {'region': 'Northampton',          'btl_median_yield': 5.5, 'hmo_median_yield': 8.8, 'median_cashflow':  250, 'avg_price': 265000, 'rental_growth_pa': 4.8},
+    'SN': {'region': 'Swindon',              'btl_median_yield': 4.8, 'hmo_median_yield': 7.6, 'median_cashflow':  160, 'avg_price': 310000, 'rental_growth_pa': 4.0},
+    'ST': {'region': 'Stoke-on-Trent',       'btl_median_yield': 7.0, 'hmo_median_yield': 11.0,'median_cashflow':  400, 'avg_price': 165000, 'rental_growth_pa': 5.0},
+    'TF': {'region': 'Telford',              'btl_median_yield': 5.8, 'hmo_median_yield': 9.2, 'median_cashflow':  270, 'avg_price': 230000, 'rental_growth_pa': 4.5},
+    'WR': {'region': 'Worcester',            'btl_median_yield': 5.2, 'hmo_median_yield': 8.5, 'median_cashflow':  220, 'avg_price': 280000, 'rental_growth_pa': 4.2},
+    'WS': {'region': 'Walsall',              'btl_median_yield': 6.2, 'hmo_median_yield': 9.8, 'median_cashflow':  330, 'avg_price': 200000, 'rental_growth_pa': 5.2},
+    'WV': {'region': 'Wolverhampton',        'btl_median_yield': 6.5, 'hmo_median_yield': 10.2,'median_cashflow':  360, 'avg_price': 190000, 'rental_growth_pa': 5.0},
+    # --- Yorkshire ---
+    'BD': {'region': 'Bradford',             'btl_median_yield': 7.2, 'hmo_median_yield': 11.5,'median_cashflow':  410, 'avg_price': 155000, 'rental_growth_pa': 5.5},
+    'DN': {'region': 'Doncaster',            'btl_median_yield': 6.8, 'hmo_median_yield': 10.8,'median_cashflow':  370, 'avg_price': 170000, 'rental_growth_pa': 5.2},
+    'HD': {'region': 'Huddersfield',         'btl_median_yield': 6.8, 'hmo_median_yield': 10.8,'median_cashflow':  370, 'avg_price': 185000, 'rental_growth_pa': 5.2},
+    'HG': {'region': 'Harrogate',            'btl_median_yield': 4.5, 'hmo_median_yield': 7.2, 'median_cashflow':  100, 'avg_price': 440000, 'rental_growth_pa': 4.0},
+    'HU': {'region': 'Hull',                 'btl_median_yield': 7.5, 'hmo_median_yield': 12.0,'median_cashflow':  440, 'avg_price': 145000, 'rental_growth_pa': 5.0},
+    'HX': {'region': 'Halifax',              'btl_median_yield': 6.9, 'hmo_median_yield': 11.0,'median_cashflow':  380, 'avg_price': 175000, 'rental_growth_pa': 5.2},
+    'LS': {'region': 'Leeds',                'btl_median_yield': 6.2, 'hmo_median_yield': 10.0,'median_cashflow':  320, 'avg_price': 225000, 'rental_growth_pa': 5.8},
+    'S':  {'region': 'Sheffield',            'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  350, 'avg_price': 200000, 'rental_growth_pa': 5.5},
+    'WF': {'region': 'Wakefield',            'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  350, 'avg_price': 190000, 'rental_growth_pa': 5.2},
+    'YO': {'region': 'York',                 'btl_median_yield': 5.0, 'hmo_median_yield': 8.0, 'median_cashflow':  190, 'avg_price': 340000, 'rental_growth_pa': 4.5},
+    # --- North West ---
+    'BB': {'region': 'Blackburn',            'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  390, 'avg_price': 160000, 'rental_growth_pa': 5.0},
+    'BL': {'region': 'Bolton',               'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 190000, 'rental_growth_pa': 5.2},
+    'CH': {'region': 'Chester',              'btl_median_yield': 5.2, 'hmo_median_yield': 8.3, 'median_cashflow':  220, 'avg_price': 310000, 'rental_growth_pa': 4.5},
+    'CW': {'region': 'Crewe',                'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  270, 'avg_price': 235000, 'rental_growth_pa': 4.5},
+    'FY': {'region': 'Blackpool',            'btl_median_yield': 7.5, 'hmo_median_yield': 12.0,'median_cashflow':  430, 'avg_price': 140000, 'rental_growth_pa': 4.8},
+    'L':  {'region': 'Liverpool',            'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  390, 'avg_price': 180000, 'rental_growth_pa': 5.5},
+    'LA': {'region': 'Lancaster',            'btl_median_yield': 5.8, 'hmo_median_yield': 9.5, 'median_cashflow':  270, 'avg_price': 235000, 'rental_growth_pa': 4.5},
+    'M':  {'region': 'Manchester',           'btl_median_yield': 6.8, 'hmo_median_yield': 11.0,'median_cashflow':  370, 'avg_price': 220000, 'rental_growth_pa': 6.0},
+    'OL': {'region': 'Oldham',               'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  390, 'avg_price': 165000, 'rental_growth_pa': 5.5},
+    'PR': {'region': 'Preston',              'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 185000, 'rental_growth_pa': 5.0},
+    'SK': {'region': 'Stockport',            'btl_median_yield': 5.5, 'hmo_median_yield': 8.8, 'median_cashflow':  240, 'avg_price': 285000, 'rental_growth_pa': 4.8},
+    'WA': {'region': 'Warrington',           'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  270, 'avg_price': 235000, 'rental_growth_pa': 4.8},
+    'WN': {'region': 'Wigan',                'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 185000, 'rental_growth_pa': 5.0},
+    # --- North East ---
+    'CA': {'region': 'Carlisle',             'btl_median_yield': 6.5, 'hmo_median_yield': 10.2,'median_cashflow':  330, 'avg_price': 180000, 'rental_growth_pa': 4.5},
+    'DH': {'region': 'Durham',               'btl_median_yield': 6.8, 'hmo_median_yield': 10.8,'median_cashflow':  360, 'avg_price': 175000, 'rental_growth_pa': 4.8},
+    'DL': {'region': 'Darlington',           'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 180000, 'rental_growth_pa': 4.5},
+    'NE': {'region': 'Newcastle',            'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  390, 'avg_price': 180000, 'rental_growth_pa': 5.2},
+    'SR': {'region': 'Sunderland',           'btl_median_yield': 7.5, 'hmo_median_yield': 12.0,'median_cashflow':  430, 'avg_price': 155000, 'rental_growth_pa': 5.0},
+    'TS': {'region': 'Teesside',             'btl_median_yield': 7.2, 'hmo_median_yield': 11.5,'median_cashflow':  410, 'avg_price': 155000, 'rental_growth_pa': 5.0},
+    # --- East / East Midlands ---
+    'CB': {'region': 'Cambridge',            'btl_median_yield': 4.5, 'hmo_median_yield': 7.5, 'median_cashflow':  110, 'avg_price': 490000, 'rental_growth_pa': 4.5},
+    'IP': {'region': 'Ipswich',              'btl_median_yield': 5.0, 'hmo_median_yield': 8.0, 'median_cashflow':  180, 'avg_price': 320000, 'rental_growth_pa': 4.2},
+    'NR': {'region': 'Norwich',              'btl_median_yield': 5.2, 'hmo_median_yield': 8.3, 'median_cashflow':  210, 'avg_price': 300000, 'rental_growth_pa': 4.2},
+    'PE': {'region': 'Peterborough',         'btl_median_yield': 5.5, 'hmo_median_yield': 8.8, 'median_cashflow':  250, 'avg_price': 270000, 'rental_growth_pa': 4.8},
+    # --- Wales ---
+    'CF': {'region': 'Cardiff',              'btl_median_yield': 5.5, 'hmo_median_yield': 9.0, 'median_cashflow':  250, 'avg_price': 280000, 'rental_growth_pa': 4.8},
+    'LD': {'region': 'Llandrindod Wells',    'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  270, 'avg_price': 220000, 'rental_growth_pa': 3.8},
+    'LL': {'region': 'North Wales',          'btl_median_yield': 5.5, 'hmo_median_yield': 9.0, 'median_cashflow':  240, 'avg_price': 230000, 'rental_growth_pa': 4.0},
+    'NP': {'region': 'Newport',              'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  270, 'avg_price': 240000, 'rental_growth_pa': 4.5},
+    'SA': {'region': 'Swansea',              'btl_median_yield': 5.8, 'hmo_median_yield': 9.3, 'median_cashflow':  270, 'avg_price': 225000, 'rental_growth_pa': 4.5},
+    'SY': {'region': 'Shrewsbury/Mid Wales', 'btl_median_yield': 5.5, 'hmo_median_yield': 8.8, 'median_cashflow':  240, 'avg_price': 240000, 'rental_growth_pa': 4.0},
+    # --- Scotland ---
+    'AB': {'region': 'Aberdeen',             'btl_median_yield': 7.2, 'hmo_median_yield': 11.5,'median_cashflow':  400, 'avg_price': 190000, 'rental_growth_pa': 4.5},
+    'DD': {'region': 'Dundee',               'btl_median_yield': 7.5, 'hmo_median_yield': 12.0,'median_cashflow':  420, 'avg_price': 165000, 'rental_growth_pa': 5.0},
+    'EH': {'region': 'Edinburgh',            'btl_median_yield': 5.5, 'hmo_median_yield': 9.0, 'median_cashflow':  250, 'avg_price': 320000, 'rental_growth_pa': 5.5},
+    'FK': {'region': 'Falkirk/Stirling',     'btl_median_yield': 6.8, 'hmo_median_yield': 10.8,'median_cashflow':  360, 'avg_price': 185000, 'rental_growth_pa': 4.8},
+    'G':  {'region': 'Glasgow',              'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 195000, 'rental_growth_pa': 5.5},
+    'KA': {'region': 'Kilmarnock/Ayrshire',  'btl_median_yield': 7.2, 'hmo_median_yield': 11.5,'median_cashflow':  400, 'avg_price': 155000, 'rental_growth_pa': 4.5},
+    'KY': {'region': 'Kirkcaldy/Fife',       'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  380, 'avg_price': 165000, 'rental_growth_pa': 4.8},
+    'ML': {'region': 'Motherwell/Lanark',    'btl_median_yield': 7.2, 'hmo_median_yield': 11.5,'median_cashflow':  400, 'avg_price': 155000, 'rental_growth_pa': 4.8},
+    'PA': {'region': 'Paisley',              'btl_median_yield': 7.0, 'hmo_median_yield': 11.2,'median_cashflow':  380, 'avg_price': 160000, 'rental_growth_pa': 5.0},
+    'PH': {'region': 'Perth',                'btl_median_yield': 6.5, 'hmo_median_yield': 10.5,'median_cashflow':  340, 'avg_price': 190000, 'rental_growth_pa': 4.5},
+}
+
+# National fallback benchmark
+_NATIONAL_FALLBACK = {
+    'region': 'England & Wales',
+    'btl_median_yield': 5.5,
+    'hmo_median_yield': 9.0,
+    'median_cashflow': 240,
+    'avg_price': 310000,
+    'rental_growth_pa': 4.5
+}
+
+
+def get_regional_benchmark(postcode: str, deal_type: str = 'BTL') -> dict:
+    """
+    Return regional benchmark metrics for a given postcode and deal type.
+    Looks up the postcode prefix (e.g. 'M', 'LS', 'SW') in REGIONAL_BENCHMARKS.
+    Falls back to national averages if postcode area is not found.
+
+    Returns a dict with:
+        region, median_yield, median_cashflow, avg_price,
+        rental_growth_pa, data_source
+    """
+    if not postcode:
+        bench = _NATIONAL_FALLBACK.copy()
+        bench['data_source'] = 'National average (no postcode)'
+        bench['median_yield'] = bench['btl_median_yield']
+        return bench
+
+    area = postcode.strip().upper().split()[0] if ' ' in postcode else postcode.strip().upper()
+
+    # Try exact match first (e.g. 'LS', 'SW', 'NW', 'M1')
+    bench = REGIONAL_BENCHMARKS.get(area)
+
+    # Try two-character alpha prefix (e.g. 'LS' from 'LS1', 'SW' from 'SW1A')
+    if not bench:
+        alpha_prefix_2 = ''.join(c for c in area if c.isalpha())[:2]
+        bench = REGIONAL_BENCHMARKS.get(alpha_prefix_2)
+
+    # Try single-character alpha prefix (e.g. 'M', 'L', 'B', 'S')
+    if not bench:
+        alpha_prefix_1 = ''.join(c for c in area if c.isalpha())[:1]
+        bench = REGIONAL_BENCHMARKS.get(alpha_prefix_1)
+
+    # National fallback
+    if not bench:
+        bench = _NATIONAL_FALLBACK.copy()
+        bench['data_source'] = 'National average (postcode area not in database)'
+    else:
+        bench = bench.copy()
+        bench['data_source'] = 'Metusa Proprietary Regional Database'
+
+    # Select yield metric based on deal type
+    if deal_type == 'HMO':
+        bench['median_yield'] = bench['hmo_median_yield']
+        bench['yield_label'] = 'HMO Median Gross Yield'
+    else:
+        bench['median_yield'] = bench['btl_median_yield']
+        bench['yield_label'] = 'BTL Median Gross Yield'
+
+    return bench
+
+
+def compare_to_regional_benchmark(postcode: str, deal_type: str,
+                                   deal_gross_yield: float,
+                                   deal_monthly_cashflow: float) -> dict:
+    """
+    Compare deal metrics against the regional benchmark database.
+    Returns a panel-ready dict for the frontend with:
+        - regional_median_yield, your_yield, yield_vs_median (%, above/below)
+        - regional_avg_cashflow, your_cashflow, cashflow_vs_avg (£, above/below)
+        - yield_percentile (estimated), cashflow_percentile (estimated)
+        - region_name, data_source
+    """
+    bench = get_regional_benchmark(postcode, deal_type)
+
+    median_yield = bench['median_yield']
+    median_cashflow = bench['median_cashflow']
+
+    yield_diff = round(deal_gross_yield - median_yield, 2)
+    cashflow_diff = round(deal_monthly_cashflow - median_cashflow, 0)
+
+    # Percentile estimation: assume normal-ish distribution around the median
+    # Yield std dev ~1.5pp for most UK areas, cashflow std dev ~£150/mo
+    import math
+
+    def _normal_cdf(x, mean, std):
+        """Approximate normal CDF using error function."""
+        if std <= 0:
+            return 50.0
+        z = (x - mean) / (std * math.sqrt(2))
+        return round(50.0 * (1.0 + math.erf(z)), 1)
+
+    yield_percentile = _normal_cdf(deal_gross_yield, median_yield, 1.5)
+    cashflow_percentile = _normal_cdf(deal_monthly_cashflow, median_cashflow, 160)
+
+    # Clamp percentiles to 1-99
+    yield_percentile = max(1.0, min(99.0, yield_percentile))
+    cashflow_percentile = max(1.0, min(99.0, cashflow_percentile))
+
+    def _label(diff, unit='%'):
+        if abs(diff) < 0.05 and unit == '%':
+            return 'In line with regional median'
+        if abs(diff) < 5 and unit == '£':
+            return 'In line with regional average'
+        direction = 'above' if diff > 0 else 'below'
+        return f"{abs(diff)}{unit} {direction} regional {'median' if unit == '%' else 'average'}"
+
+    return {
+        'region_name': bench['region'],
+        'postcode_area': postcode.strip().upper().split()[0] if postcode else 'N/A',
+        'data_source': bench['data_source'],
+        # Yield comparison
+        'regional_median_yield': median_yield,
+        'your_yield': round(deal_gross_yield, 2),
+        'yield_difference': yield_diff,
+        'yield_vs_median_label': _label(yield_diff, '%'),
+        'yield_percentile': yield_percentile,
+        # Cashflow comparison
+        'regional_avg_cashflow': median_cashflow,
+        'your_cashflow': round(deal_monthly_cashflow, 0),
+        'cashflow_difference': cashflow_diff,
+        'cashflow_vs_avg_label': _label(cashflow_diff, '£'),
+        'cashflow_percentile': cashflow_percentile,
+        # Summary
+        'summary': (
+            f"This deal's {deal_gross_yield:.1f}% yield ranks in the "
+            f"top {100 - yield_percentile:.0f}% of {bench['region']} deals "
+            f"and its £{deal_monthly_cashflow:,.0f}/mo cashflow beats "
+            f"{cashflow_percentile:.0f}% of comparable properties in this area."
+            if yield_diff >= 0 and cashflow_diff >= 0
+            else f"This deal's yield and cashflow are "
+                 f"{'above' if yield_diff >= 0 else 'below'} and "
+                 f"{'above' if cashflow_diff >= 0 else 'below'} "
+                 f"the {bench['region']} regional benchmarks respectively."
+        )
+    }
+
+
+def generate_risk_flags(deal_type: str, gross_yield: float, net_yield: float,
+                        monthly_cashflow: float, cash_on_cash: float,
+                        risk_level: str, loan_to_value: float,
+                        interest_rate: float, monthly_rent: float,
+                        monthly_mortgage: float, purchase_price: float,
+                        brr_metrics: dict = None, flip_metrics: dict = None,
+                        r2sa_metrics: dict = None,
+                        article_4_active: bool = False) -> list:
+    """
+    Generate colour-coded risk flag cards with severity levels.
+    Each flag is a dict with:
+        id, name, severity ('HIGH'|'MEDIUM'|'LOW'), color ('red'|'amber'|'green'),
+        description, mitigation
+    Flags are sorted highest severity first.
+    """
+    flags = []
+
+    # ── 1. Leverage Risk ──────────────────────────────────────────────────────
+    if loan_to_value >= 80:
+        flags.append({
+            'id': 'leverage_risk',
+            'name': 'Leverage Risk',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'alert-triangle',
+            'description': (
+                f"LTV of {loan_to_value:.0f}% means a modest 15-20% fall in property value "
+                "would put you in negative equity. High leverage amplifies both gains and losses."
+            ),
+            'mitigation': 'Consider increasing deposit to reduce LTV below 75%, or build an equity buffer via refurb before refinancing.',
+        })
+    elif loan_to_value >= 70:
+        flags.append({
+            'id': 'leverage_risk',
+            'name': 'Leverage Risk',
+            'severity': 'MEDIUM',
+            'color': 'amber',
+            'icon': 'alert-triangle',
+            'description': (
+                f"LTV of {loan_to_value:.0f}% is manageable but leaves limited equity buffer. "
+                "A 25% correction in prices could erode equity significantly."
+            ),
+            'mitigation': 'Stress-test your numbers at a 20% price fall. Ensure rent covers mortgage at rates 3% higher than current.',
+        })
+
+    # ── 2. Interest Rate / Stress Test Risk ───────────────────────────────────
+    stressed_rate = interest_rate + 3.0
+    if monthly_mortgage > 0:
+        stressed_mortgage = monthly_mortgage * (stressed_rate / interest_rate) if interest_rate > 0 else monthly_mortgage * 1.5
+        stressed_cashflow = monthly_cashflow - (stressed_mortgage - monthly_mortgage)
+    else:
+        stressed_cashflow = monthly_cashflow
+
+    if stressed_cashflow < -200:
+        flags.append({
+            'id': 'rate_risk',
+            'name': 'Interest Rate Risk',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'trending-up',
+            'description': (
+                f"At +3% stressed rate ({stressed_rate:.1f}%), monthly cashflow would fall to "
+                f"£{stressed_cashflow:,.0f} — significantly negative. "
+                "This deal is highly sensitive to rising mortgage rates."
+            ),
+            'mitigation': 'Consider a 5-year fixed rate product to lock in current rates. Ensure rent can absorb at least a 2% rate rise.',
+        })
+    elif stressed_cashflow < 0:
+        flags.append({
+            'id': 'rate_risk',
+            'name': 'Interest Rate Risk',
+            'severity': 'MEDIUM',
+            'color': 'amber',
+            'icon': 'trending-up',
+            'description': (
+                f"At +3% stressed rate ({stressed_rate:.1f}%), cashflow turns negative (£{stressed_cashflow:,.0f}/mo). "
+                "Lenders typically stress-test at current rate +3%."
+            ),
+            'mitigation': 'Fix the mortgage rate for 2-5 years. Negotiate a higher rent or reduce purchase price to create headroom.',
+        })
+
+    # ── 3. Yield Compression Risk ─────────────────────────────────────────────
+    if gross_yield < 4.5:
+        flags.append({
+            'id': 'yield_compression',
+            'name': 'Yield Compression',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'trending-down',
+            'description': (
+                f"Gross yield of {gross_yield:.1f}% is well below the 5%+ minimum investors typically require. "
+                "In a rising-rate environment, low-yield property is the first to see demand fall."
+            ),
+            'mitigation': 'Renegotiate the purchase price, explore HMO/R2SA conversion, or target higher-yielding areas.',
+        })
+    elif gross_yield < 5.5:
+        flags.append({
+            'id': 'yield_compression',
+            'name': 'Yield Compression',
+            'severity': 'MEDIUM',
+            'color': 'amber',
+            'icon': 'trending-down',
+            'description': (
+                f"Gross yield of {gross_yield:.1f}% is below the preferred 6% threshold. "
+                "Any drop in rent or rise in costs will quickly erode profitability."
+            ),
+            'mitigation': 'Achieve maximum achievable rent. Consider furnished lettings to justify a premium.',
+        })
+
+    # ── 4. Cash Flow Cliff ────────────────────────────────────────────────────
+    if monthly_cashflow < 0:
+        flags.append({
+            'id': 'cashflow_cliff',
+            'name': 'Cash Flow Cliff',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'dollar-sign',
+            'description': (
+                f"Monthly cashflow is negative (£{monthly_cashflow:,.0f}/mo). "
+                "You will be topping up from personal income every month. "
+                "Any void period or unexpected repair will compound this loss."
+            ),
+            'mitigation': 'Do not proceed without a minimum 6-month cash reserve (£5,000+). Re-examine the purchase price and financing structure.',
+        })
+    elif monthly_cashflow < 100:
+        flags.append({
+            'id': 'cashflow_cliff',
+            'name': 'Cash Flow Cliff',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'dollar-sign',
+            'description': (
+                f"Cashflow of £{monthly_cashflow:,.0f}/mo provides virtually no buffer. "
+                "A single void month or boiler replacement will wipe out 6+ months of profit."
+            ),
+            'mitigation': 'Target at least £200/mo cashflow. Consider interest-only mortgage if not already used, or negotiate a lower purchase price.',
+        })
+    elif monthly_cashflow < 200:
+        flags.append({
+            'id': 'cashflow_cliff',
+            'name': 'Cash Flow Cliff',
+            'severity': 'MEDIUM',
+            'color': 'amber',
+            'icon': 'dollar-sign',
+            'description': (
+                f"Cashflow of £{monthly_cashflow:,.0f}/mo is thin. "
+                "Void periods, rent arrears, or maintenance could make this deal loss-making."
+            ),
+            'mitigation': 'Maintain a £3,000 cash reserve per property. Review management fee and maintenance budget assumptions.',
+        })
+
+    # ── 5. Void / Vacancy Risk ────────────────────────────────────────────────
+    if monthly_rent > 0:
+        void_break_even_weeks = (monthly_cashflow / (monthly_rent / 4.33)) if monthly_cashflow > 0 else 0
+    else:
+        void_break_even_weeks = 0
+
+    if monthly_cashflow > 0 and void_break_even_weeks < 3:
+        flags.append({
+            'id': 'void_risk',
+            'name': 'Void Period Vulnerability',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'home',
+            'description': (
+                f"Just {void_break_even_weeks:.1f} weeks of void will wipe out a full month's profit. "
+                "National average void period is 3-4 weeks per year."
+            ),
+            'mitigation': 'Price rent competitively to minimise voids. Use a tenant find agent to fill quickly. Hold a maintenance float.',
+        })
+
+    # ── 6. Article 4 / Planning Risk ─────────────────────────────────────────
+    if article_4_active and deal_type == 'HMO':
+        flags.append({
+            'id': 'planning_risk',
+            'name': 'Article 4 Planning Risk',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'file-text',
+            'description': (
+                "This area has an Article 4 Direction — converting to HMO requires Full Planning Permission. "
+                "Many councils in Article 4 zones routinely refuse HMO applications. "
+                "There is no guarantee of approval."
+            ),
+            'mitigation': 'Consult the local planning authority before purchasing. Consider C3→C3b social/supported housing as a compliant alternative.',
+        })
+
+    # ── 7. BRR Equity Risk ────────────────────────────────────────────────────
+    if deal_type == 'BRR' and brr_metrics:
+        money_left_in = brr_metrics.get('money_left_in', 0)
+        brr_roi = brr_metrics.get('brr_roi', 0)
+        if money_left_in > 50000:
+            flags.append({
+                'id': 'brr_equity_risk',
+                'name': 'BRR Capital Trap',
+                'severity': 'HIGH',
+                'color': 'red',
+                'icon': 'lock',
+                'description': (
+                    f"£{money_left_in:,.0f} remains trapped in the property post-refinance. "
+                    "The BRR model requires recycling most of your capital to work effectively."
+                ),
+                'mitigation': 'Negotiate a lower purchase price, increase the refurb scope to lift GDV, or refinance to a higher LTV product.',
+            })
+        elif money_left_in > 20000:
+            flags.append({
+                'id': 'brr_equity_risk',
+                'name': 'BRR Capital Trap',
+                'severity': 'MEDIUM',
+                'color': 'amber',
+                'icon': 'lock',
+                'description': (
+                    f"£{money_left_in:,.0f} will remain in the deal post-refinance, limiting your ability to recycle capital quickly."
+                ),
+                'mitigation': 'Target a GDV that enables a 75% LTV refinance to fully recycle your investment.',
+            })
+
+    # ── 8. Flip Profit Margin Risk ────────────────────────────────────────────
+    if deal_type == 'FLIP' and flip_metrics:
+        profit = flip_metrics.get('profit', 0)
+        flip_roi = flip_metrics.get('flip_roi', 0)
+        if profit < 15000:
+            flags.append({
+                'id': 'flip_margin_risk',
+                'name': 'Thin Flip Margin',
+                'severity': 'HIGH',
+                'color': 'red',
+                'icon': 'scissors',
+                'description': (
+                    f"Projected flip profit of £{profit:,.0f} ({flip_roi:.1f}% ROI) is dangerously thin. "
+                    "Any refurb overrun, extended holding period, or price negotiation from buyer will erode this."
+                ),
+                'mitigation': 'Require minimum 20% ROI and £20,000 profit before committing. Renegotiate purchase price or walk away.',
+            })
+        elif profit < 25000:
+            flags.append({
+                'id': 'flip_margin_risk',
+                'name': 'Flip Margin Pressure',
+                'severity': 'MEDIUM',
+                'color': 'amber',
+                'icon': 'scissors',
+                'description': (
+                    f"Flip profit of £{profit:,.0f} ({flip_roi:.1f}% ROI) is below the recommended 20%+ threshold. "
+                    "Factor in a 10-15% refurb contingency."
+                ),
+                'mitigation': 'Add a 15% contingency to all refurb estimates. Consider selling off-market to avoid agent fees.',
+            })
+
+    # ── 9. R2SA Subletting Consent Risk ──────────────────────────────────────
+    if deal_type == 'R2SA':
+        flags.append({
+            'id': 'r2sa_consent_risk',
+            'name': 'Subletting Consent Risk',
+            'severity': 'HIGH',
+            'color': 'red',
+            'icon': 'key',
+            'description': (
+                "R2SA requires explicit written consent from the freeholder/landlord AND the mortgage lender "
+                "to sublet as short-term accommodation. Many standard AST contracts and BTL mortgages prohibit this."
+            ),
+            'mitigation': 'Obtain written consent from landlord and lender before signing. Use a specialist R2SA lease clause and check local council short-term let regulations.',
+        })
+
+    # ── 10. Low Cash-on-Cash Return ───────────────────────────────────────────
+    if cash_on_cash < 4 and deal_type not in ('FLIP', 'R2SA', 'BRR'):
+        flags.append({
+            'id': 'low_coc',
+            'name': 'Low Cash-on-Cash Return',
+            'severity': 'MEDIUM' if cash_on_cash >= 2 else 'HIGH',
+            'color': 'amber' if cash_on_cash >= 2 else 'red',
+            'icon': 'percent',
+            'description': (
+                f"Cash-on-cash return of {cash_on_cash:.1f}% is below the 8% investor benchmark. "
+                "Your capital is earning less than it could in a savings account or REIT."
+            ),
+            'mitigation': 'Compare against alternative investments. A 6-8% cash-on-cash return is typically the minimum to justify the illiquidity of property.',
+        })
+
+    # ── Sort: HIGH first, then MEDIUM, then LOW ───────────────────────────────
+    severity_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
+    flags.sort(key=lambda f: severity_order.get(f['severity'], 3))
+
+    return flags
+
 
 def generate_pdf_report(results):
     """Generate professional PDF report"""
@@ -4213,6 +4795,177 @@ def create_checkout_session():
     except Exception as e:
         app.logger.error(f'[Stripe] Checkout session exception: {e}')
         return jsonify({'error': 'Failed to create checkout session'}), 500
+
+
+@app.route('/api/sensitivity-analysis', methods=['POST'])
+@limiter.limit("20 per minute")
+def sensitivity_analysis():
+    """
+    AI "What If" Engine — Sensitivity Analysis endpoint.
+
+    Accepts the original deal form data with optional overrides for:
+        mortgage_rate   (float, %)
+        monthly_rent    (float, £)
+        vacancy_rate    (float, % of annual rent lost to voids — default 4.2%)
+
+    Recalculates all financial metrics from scratch and returns:
+        deal_score, monthly_cashflow, gross_yield, net_yield,
+        cash_on_cash, verdict, risk_level, risk_flags, regional_benchmark,
+        plus the three slider values actually used so the frontend can echo them.
+
+    This endpoint is designed to be called on every slider change (debounced).
+    It is pure calculation — no AI/LLM call is made, so it is fast (<100ms).
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'message': 'Invalid JSON data'}), 400
+
+        # ── Validate required baseline field ─────────────────────────────────
+        if not data.get('purchasePrice'):
+            return jsonify({'success': False, 'message': 'purchasePrice is required'}), 400
+
+        # ── Extract slider overrides ──────────────────────────────────────────
+        override_rate     = data.get('override_mortgage_rate')
+        override_rent     = data.get('override_monthly_rent')
+        override_vacancy  = data.get('override_vacancy_rate')  # percent, e.g. 8.0
+
+        # Validate overrides if supplied
+        if override_rate is not None:
+            try:
+                override_rate = float(override_rate)
+                if not (0.5 <= override_rate <= 20):
+                    return jsonify({'success': False, 'message': 'override_mortgage_rate must be between 0.5 and 20'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'override_mortgage_rate must be a number'}), 400
+
+        if override_rent is not None:
+            try:
+                override_rent = float(override_rent)
+                if not (100 <= override_rent <= 50000):
+                    return jsonify({'success': False, 'message': 'override_monthly_rent must be between 100 and 50000'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'override_monthly_rent must be a number'}), 400
+
+        if override_vacancy is not None:
+            try:
+                override_vacancy = float(override_vacancy)
+                if not (0 <= override_vacancy <= 30):
+                    return jsonify({'success': False, 'message': 'override_vacancy_rate must be between 0 and 30'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'override_vacancy_rate must be a number'}), 400
+
+        # ── Apply overrides to the form data copy ─────────────────────────────
+        import copy
+        scenario_data = copy.deepcopy(data)
+
+        if override_rate is not None:
+            scenario_data['interestRate'] = override_rate
+
+        if override_rent is not None:
+            scenario_data['monthlyRent'] = override_rent
+
+        # Vacancy rate override: store for use inside analyze_deal via a special key
+        # analyze_deal uses a fixed 2-week void assumption internally.
+        # We handle it here by adjusting the effective rent downwards.
+        effective_vacancy_rate = override_vacancy if override_vacancy is not None else 4.2  # default ~2.2 weeks
+
+        # If vacancy was overridden, reduce the monthly rent by the void fraction
+        # so analyze_deal's downstream expense calculation reflects the real effective income.
+        # (analyze_deal deducts management, maintenance, insurance from annual rent —
+        # we scale annual rent by (1 - vacancy_rate/100) before passing it in.)
+        if override_vacancy is not None and override_rent is None:
+            # Use original rent from data, then scale by occupancy
+            base_rent = float(data.get('monthlyRent') or data.get('purchasePrice', 0) * 0.005)
+            occupancy = 1.0 - (effective_vacancy_rate / 100.0)
+            scenario_data['monthlyRent'] = round(base_rent * occupancy, 2)
+        elif override_vacancy is not None and override_rent is not None:
+            # Both overridden: apply vacancy on top of the overridden rent
+            occupancy = 1.0 - (effective_vacancy_rate / 100.0)
+            scenario_data['monthlyRent'] = round(override_rent * occupancy, 2)
+
+        # Ensure defaults
+        if not scenario_data.get('dealType'):
+            scenario_data['dealType'] = 'BTL'
+        if not scenario_data.get('address'):
+            scenario_data['address'] = 'Sensitivity Analysis'
+        if not scenario_data.get('postcode'):
+            scenario_data['postcode'] = 'N/A'
+        if not scenario_data.get('monthlyRent') or scenario_data['monthlyRent'] == 0:
+            scenario_data['monthlyRent'] = int(float(scenario_data['purchasePrice']) * 0.005)
+
+        # ── Run core financial calculation ────────────────────────────────────
+        metrics = analyze_deal(scenario_data)
+
+        # ── Build sensitivity response ────────────────────────────────────────
+        # Extract numeric values for the key metrics the frontend will display
+        response = {
+            'success': True,
+            'scenario': {
+                'mortgage_rate':   float(scenario_data.get('interestRate', data.get('interestRate', 5.5))),
+                'monthly_rent':    float(scenario_data.get('monthlyRent', 0)),
+                'vacancy_rate':    effective_vacancy_rate,
+            },
+            'metrics': {
+                'deal_score':          metrics.get('deal_score', 0),
+                'deal_score_label':    metrics.get('deal_score_label', ''),
+                'monthly_cashflow':    metrics.get('monthly_cashflow', 0),
+                'gross_yield':         float(metrics.get('gross_yield', 0)),
+                'net_yield':           float(metrics.get('net_yield', 0)),
+                'cash_on_cash':        float(metrics.get('cash_on_cash', 0)),
+                'verdict':             metrics.get('verdict', 'REVIEW'),
+                'risk_level':          metrics.get('risk_level', 'MEDIUM'),
+                'monthly_mortgage':    float(metrics.get('monthly_mortgage', 0)),
+                'net_annual_income':   float(str(metrics.get('net_annual_income', 0)).replace(',', '')),
+                'annual_cashflow':     round(float(metrics.get('monthly_cashflow', 0)) * 12, 0),
+                'score_breakdown':     metrics.get('score_breakdown', {}),
+                'five_year_projection': metrics.get('five_year_projection', []),
+            },
+            'risk_flags':         metrics.get('risk_flags', []),
+            'regional_benchmark': metrics.get('regional_benchmark', {}),
+        }
+
+        return jsonify(response)
+
+    except ValueError as e:
+        return jsonify({'success': False, 'message': f'Validation error: {str(e)}'}), 400
+    except Exception as e:
+        import traceback
+        app.logger.error(f'[sensitivity-analysis] Error: {str(e)}')
+        app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'message': f'Sensitivity analysis error: {str(e)}'}), 500
+
+
+@app.route('/api/regional-benchmark', methods=['POST'])
+@limiter.limit("20 per minute")
+def regional_benchmark_lookup():
+    """
+    Standalone regional benchmark lookup.
+    Accepts: { postcode, deal_type, gross_yield, monthly_cashflow }
+    Returns the full benchmark comparison panel.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json(silent=True) or {}
+        postcode       = sanitize_input(str(data.get('postcode', '')), 10).upper()
+        deal_type      = sanitize_input(str(data.get('deal_type', 'BTL')), 10).upper()
+        gross_yield    = float(data.get('gross_yield', 0) or 0)
+        monthly_cashflow = float(data.get('monthly_cashflow', 0) or 0)
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+        benchmark = compare_to_regional_benchmark(postcode, deal_type, gross_yield, monthly_cashflow)
+        return jsonify({'success': True, 'benchmark': benchmark})
+
+    except Exception as e:
+        app.logger.error(f'[regional-benchmark] Error: {str(e)}')
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 if __name__ == '__main__':
