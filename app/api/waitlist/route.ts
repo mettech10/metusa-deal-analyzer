@@ -114,13 +114,6 @@ export async function POST(request: Request) {
       console.error("[Brevo] Error:", err)
     }
 
-    // Send welcome email and log the outcome
-    const emailSent = await sendWaitlistWelcomeEmail(email).catch((err) => {
-      console.error("[Waitlist] Welcome email failed:", err)
-      return false
-    })
-    console.log("[Waitlist] Welcome email sent:", emailSent)
-
     return NextResponse.json(
       {
         message: "Successfully joined waitlist",
