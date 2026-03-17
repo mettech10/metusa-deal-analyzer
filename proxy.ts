@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server"
 // Secret key for developer access
 const DEV_SECRET = "metalyzi2026"
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
   // Check for dev access key in URL
