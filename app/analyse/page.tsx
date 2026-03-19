@@ -517,14 +517,17 @@ export default function AnalysePage() {
 
   // Restore a saved analysis from the Recent Deals panel
   const handleLoadSavedDeal = useCallback(
-    (savedFormData: PropertyFormData, savedResults: CalculationResults, savedAiText: string, savedBackendData: BackendResults | null) => {
+    (savedFormData: PropertyFormData, savedResults: CalculationResults | null, savedAiText: string, savedBackendData: BackendResults | null) => {
       setFormData(savedFormData)
-      setResults(savedResults)
+      // If results weren't persisted, recalculate from the saved form data
+      setResults(savedResults ?? calculateAll(savedFormData))
       setAiText(savedAiText)
       setBackendData(savedBackendData)
       setError(null)
       setInputMode("manual")
       savedKeyRef.current = null // allow re-save if user triggers a new analysis
+      // Scroll to top so the user sees the loaded analysis results
+      window.scrollTo({ top: 0, behavior: "smooth" })
     },
     []
   )

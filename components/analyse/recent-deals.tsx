@@ -11,6 +11,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { PropertyFormData, CalculationResults, BackendResults } from "@/lib/types"
 
+// CalculationResults may be null for older saved analyses that pre-date the results column
+type MaybeResults = CalculationResults | null
+
 interface SavedAnalysis {
   id: string
   created_at: string
@@ -25,7 +28,7 @@ interface SavedAnalysis {
 }
 
 interface RecentDealsProps {
-  onLoad?: (formData: PropertyFormData, results: CalculationResults, aiText: string, backendData: BackendResults | null) => void
+  onLoad?: (formData: PropertyFormData, results: MaybeResults, aiText: string, backendData: BackendResults | null) => void
 }
 
 const strategyLabel: Record<string, string> = {
@@ -64,6 +67,7 @@ export function RecentDeals({ onLoad }: RecentDealsProps) {
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const fetchAnalyses = useCallback(async () => {
     try {
@@ -101,15 +105,26 @@ export function RecentDeals({ onLoad }: RecentDealsProps) {
   const handleLoad = async (id: string) => {
     if (!onLoad) return
     setLoadingId(id)
+    setLoadError(null)
     try {
       const res = await fetch(`/api/analyses/${id}`)
-      if (!res.ok) return
+      if (!res.ok) {
+        setLoadError("Failed to load analysis. Please try again.")
+        return
+      }
       const data = await res.json()
-      if (data.form_data && data.results) {
-        onLoad(data.form_data as PropertyFormData, data.results as CalculationResults, data.ai_text || "", (data.backend_data as BackendResults) || null)
+      if (data.form_data) {
+        onLoad(
+          data.form_data as PropertyFormData,
+          (data.results as CalculationResults) ?? null,
+          data.ai_text || "",
+          (data.backend_data as BackendResults) ?? null
+        )
+      } else {
+        setLoadError("Analysis data is incomplete and cannot be loaded.")
       }
     } catch {
-      // silently skip
+      setLoadError("Failed to load analysis. Please check your connection.")
     } finally {
       setLoadingId(null)
     }
@@ -137,6 +152,10 @@ export function RecentDeals({ onLoad }: RecentDealsProps) {
         <h2 className="text-sm font-semibold text-foreground">Recent Deals</h2>
         <span className="ml-auto text-xs text-muted-foreground">{analyses.length} saved</span>
       </div>
+
+      {loadError && (
+        <p className="text-xs text-destructive">{loadError}</p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {analyses.map((deal) => (
