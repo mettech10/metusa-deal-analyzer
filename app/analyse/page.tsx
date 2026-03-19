@@ -526,6 +526,8 @@ export default function AnalysePage() {
       setError(null)
       setInputMode("manual")
       savedKeyRef.current = null // allow re-save if user triggers a new analysis
+      // Scroll to top so the user sees the loaded analysis results
+      window.scrollTo({ top: 0, behavior: "smooth" })
     },
     []
   )
