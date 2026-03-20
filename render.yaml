@@ -1,28 +1,4 @@
 services:
-  # Python Flask backend (AI analysis, scraping, Land Registry, transport APIs)
-  - type: web
-    name: metusa-deal-analyzer
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
-    healthCheckPath: /api/health
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.11"
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: PROPERTY_DATA_API_KEY
-        sync: false
-      - key: SCRAPINGBEE_API_KEY
-        sync: false
-      - key: JINA_API_KEY
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
-        sync: false
-
   # Next.js frontend (Metalyzi UI + Brevo transactional emails)
   - type: web
     name: metusa-deal-analyzer-web
