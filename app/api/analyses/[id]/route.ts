@@ -18,12 +18,24 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 })
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("saved_analyses")
     .select("id, address, form_data, results, ai_text, backend_data")
     .eq("id", id)
     .eq("user_id", user.id)
     .single()
+
+  // If backend_data column doesn't exist yet (migration pending), retry without it
+  if (error && error.message?.includes("backend_data")) {
+    const fallback = await supabase
+      .from("saved_analyses")
+      .select("id, address, form_data, results, ai_text")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single()
+    data = fallback.data ? { ...fallback.data, backend_data: null } : null
+    error = fallback.error
+  }
 
   if (error || !data) {
     return NextResponse.json({ error: error?.message || "Not found" }, { status: 404 })
