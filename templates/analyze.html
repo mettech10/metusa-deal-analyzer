@@ -360,6 +360,62 @@
 
         .pdf-btn-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
 
+        /* Financial Breakdown Table */
+        .fb-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        .fb-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--bg);
+            vertical-align: middle;
+        }
+        .fb-table tr:last-child td { border-bottom: none; }
+        .fb-table .fb-label {
+            font-weight: 600;
+            color: var(--text);
+            width: 38%;
+        }
+        .fb-table .fb-value {
+            font-weight: 700;
+            color: var(--text);
+            width: 22%;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .fb-table .fb-note {
+            color: var(--text-light);
+            font-size: 0.8rem;
+            width: 40%;
+            padding-left: 16px;
+        }
+        .fb-table .fb-section-header td {
+            background: var(--bg);
+            font-weight: 700;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-light);
+            padding: 10px 10px 6px;
+            border-bottom: 1px solid var(--border);
+        }
+        .fb-table .fb-total td {
+            background: #f0fdf4;
+            font-weight: 700;
+            color: #166534;
+            border-top: 2px solid #bbf7d0;
+        }
+        .fb-table .fb-highlight td {
+            background: #eff6ff;
+            font-weight: 700;
+            color: #1e40af;
+        }
+        .fb-table .fb-spacer td {
+            padding: 4px;
+            border-bottom: none;
+        }
+
         /* Saved Analyses */
         .saved-panel {
             background: var(--bg-white);
@@ -894,6 +950,12 @@
         <div class="card">
             <div class="card-title">📊 Key Metrics</div>
             <div class="metrics-grid" id="metricsGrid"></div>
+        </div>
+
+        <!-- Financial Breakdown -->
+        <div class="card" id="financialBreakdownCard">
+            <div class="card-title">📋 Financial Breakdown</div>
+            <div id="financialBreakdownContent"></div>
         </div>
 
         <!-- AI Strengths & Risks -->
@@ -1436,6 +1498,9 @@
             bridgingEl.style.display = 'none';
         }
 
+        // Financial Breakdown
+        renderFinancialBreakdown(r);
+
         // Strengths — server now returns arrays; fall back to legacy string parsing
         const strengthsList = document.getElementById('strengthsList');
         const allStrengths = toPoints(r.ai_strengths).concat(toPoints(r.strengths));
@@ -1525,6 +1590,87 @@
                     <td>${esc(rc.date || 'N/A')}</td>
                 </tr>`).join('');
         }
+    }
+
+    // ── Financial Breakdown ────────────────────────────────────────────────
+    function renderFinancialBreakdown(r) {
+        const fb = r.financial_breakdown;
+        const card = document.getElementById('financialBreakdownCard');
+        const content = document.getElementById('financialBreakdownContent');
+        if (!fb) { card.style.display = 'none'; return; }
+        card.style.display = '';
+
+        const f = v => (v === null || v === undefined) ? '–' : parseFloat(String(v).replace(/,/g,'')).toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+        const fp = v => (parseFloat(String(v).replace(/,/g,'')) || 0).toFixed(2) + '%';
+        const fmoney = v => '£' + f(v);
+        const hasArv = fb.end_value && parseFloat(fb.end_value) > 0;
+        const hasRefurb = fb.refurb_costs && parseFloat(fb.refurb_costs) > 0;
+        const isBRR = r.deal_type === 'BRR' || r.deal_type === 'FLIP';
+
+        function row(label, value, note, extraClass) {
+            return `<tr class="${extraClass||''}">
+                <td class="fb-label">${esc(label)}</td>
+                <td class="fb-value">${value}</td>
+                <td class="fb-note">${note || ''}</td>
+            </tr>`;
+        }
+        function sectionRow(title) {
+            return `<tr class="fb-section-header"><td colspan="3">${esc(title)}</td></tr>`;
+        }
+        function spacer() {
+            return `<tr class="fb-spacer"><td colspan="3"></td></tr>`;
+        }
+
+        let html = '<table class="fb-table">';
+
+        // Section 1: Purchase & Costs
+        html += sectionRow('Purchase & Costs');
+        html += row('Price Offered', fmoney(fb.price_offered), 'The price you have agreed to pay for the property');
+        if (fb.mortgage_pct > 0) {
+            html += row('Mortgage % (LTV)', fp(fb.mortgage_pct), 'Typical BTL mortgage is 75% — Typical Bridging Finance is 60%');
+            html += row('Mortgage', fmoney(fb.mortgage_amount), 'This is the amount a mortgage company would be willing to lend');
+            html += row('Deposit', fmoney(fb.deposit), 'The deposit that would be required to be funded by you');
+        }
+        html += row('Stamp Duty', fmoney(fb.stamp_duty), 'Visit gov.uk/calculate-stamp-duty-land-tax for exact figure');
+        html += row('Legals', fmoney(fb.legals), 'If unsure allow £3k');
+        if (hasRefurb || isBRR) {
+            html += row('Total Refurb Costs', fmoney(fb.refurb_costs || 0), 'Best obtained via a builder\'s quote');
+        }
+        html += row('Total Money In', fmoney(fb.total_money_in), 'Total money required to fund the deal', 'fb-total');
+
+        // Section 2: After Refurb / Refinance
+        if (hasArv) {
+            html += spacer();
+            html += sectionRow('After Refurb — Refinance');
+            html += row('End Value (ARV)', fmoney(fb.end_value), 'What will the value of the property be after you\'ve refurbished it');
+            html += row('New Mortgage Amount', fmoney(fb.new_mortgage_amount), 'New mortgage amount (assuming 75% BTL)', 'fb-highlight');
+            html += row('Money Pulled Out', fmoney(fb.money_pulled_out), 'Equity retained — ARV minus new mortgage (75% BTL)');
+
+            html += spacer();
+            html += sectionRow('Profit');
+            html += row('Profit', fmoney(fb.profit), 'How much profit you will make — note: if refinancing, much of this remains in the deal');
+            html += row('Money Left In', fmoney(fb.money_left_in), 'Money left in the deal after refinance at 75% BTL — ideally £0 or negative', 'fb-highlight');
+        }
+
+        // Section 3: Monthly Cashflow
+        html += spacer();
+        html += sectionRow('Monthly Cashflow');
+        html += row('Rent', fmoney(fb.monthly_rent), 'Rental income from the property — look at comparables');
+        html += row('Mortgage', fmoney(fb.monthly_mortgage_new), `Estimated at ${fb.interest_rate}% interest rate`);
+        html += row('Maintenance & Management', fmoney(fb.monthly_mm), '10% for Management and 10% for Maintenance as standard');
+        html += row('Monthly Cashflow', fmoney(fb.monthly_cashflow), 'How much profit you will make a month', 'fb-total');
+        html += row('Annual Cashflow', fmoney(fb.annual_cashflow), 'How much profit you will make a year', 'fb-total');
+
+        // Section 4: ROI
+        html += spacer();
+        html += sectionRow('Returns');
+        html += row('ROI', fp(fb.roi), 'ROI = annual cashflow ÷ money left in deal × 100', 'fb-highlight');
+        if (hasArv) {
+            html += row('Net Profit on Sale %', fp(fb.flip_net_profit_pct), 'Profit on sale ÷ GDV (End Value) × 100');
+        }
+
+        html += '</table>';
+        content.innerHTML = html;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

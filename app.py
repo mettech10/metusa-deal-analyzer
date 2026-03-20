@@ -1536,6 +1536,8 @@ def analyze_deal(data):
         brr_roi = (equity_created / total_investment) * 100 if total_investment > 0 else 0
         
         brr_metrics = {
+            'arv': round(arv, 0),
+            'total_investment': round(total_investment, 0),
             'equity_created': round(equity_created, 0),
             'refinance_amount': round(refinance_amount, 0),
             'money_left_in': round(money_left_in, 0),
@@ -1754,6 +1756,44 @@ def analyze_deal(data):
         article_4_active=article_4_info.get('is_article_4', False),
     )
 
+    # Financial Breakdown (spreadsheet-style summary)
+    _fb_total_money_in = purchase_price + stamp_duty + legal_fees + refurb_costs
+    _fb_arv = arv if deal_type in ['BRR', 'FLIP'] else 0
+    _fb_new_btl_mortgage = round(_fb_arv * 0.75, 0) if _fb_arv > 0 else 0
+    _fb_new_monthly_mortgage = round((_fb_new_btl_mortgage * interest_rate / 100) / 12, 2) if _fb_new_btl_mortgage > 0 else round(monthly_mortgage, 2)
+    _fb_monthly_mm = round(monthly_rent * 0.20, 2)
+    _fb_monthly_cashflow = round(monthly_rent - _fb_new_monthly_mortgage - _fb_monthly_mm, 2)
+    _fb_annual_cashflow = round(_fb_monthly_cashflow * 12, 0)
+    _fb_money_left_in = round(_fb_total_money_in - _fb_new_btl_mortgage, 0) if _fb_arv > 0 else round(deposit_amount + stamp_duty + legal_fees + refurb_costs, 0)
+    _fb_profit = round(_fb_arv - _fb_total_money_in, 0) if _fb_arv > 0 else 0
+    _fb_roi = round((_fb_annual_cashflow / _fb_money_left_in * 100), 2) if _fb_money_left_in > 0 else 0
+    _fb_flip_net_pct = round((_fb_profit / _fb_arv * 100), 2) if _fb_arv > 0 else 0
+    _fb_ltv_pct = round((loan_amount / purchase_price * 100), 2) if purchase_price > 0 else 0
+
+    financial_breakdown = {
+        'price_offered': round(purchase_price, 0),
+        'mortgage_pct': _fb_ltv_pct,
+        'mortgage_amount': round(loan_amount, 0),
+        'deposit': round(deposit_amount, 0),
+        'stamp_duty': round(stamp_duty, 0),
+        'legals': round(legal_fees, 0),
+        'refurb_costs': round(refurb_costs, 0),
+        'total_money_in': round(_fb_total_money_in, 0),
+        'end_value': round(_fb_arv, 0),
+        'new_mortgage_amount': _fb_new_btl_mortgage,
+        'money_pulled_out': round(_fb_arv - _fb_new_btl_mortgage, 0) if _fb_arv > 0 else 0,
+        'profit': _fb_profit,
+        'money_left_in': _fb_money_left_in,
+        'monthly_rent': round(monthly_rent, 2),
+        'monthly_mortgage_new': _fb_new_monthly_mortgage,
+        'monthly_mm': _fb_monthly_mm,
+        'monthly_cashflow': _fb_monthly_cashflow,
+        'annual_cashflow': _fb_annual_cashflow,
+        'roi': _fb_roi,
+        'flip_net_profit_pct': _fb_flip_net_pct,
+        'interest_rate': interest_rate,
+    }
+
     # Compile results
     results = {
         'deal_type': deal_type,
@@ -1813,7 +1853,10 @@ def analyze_deal(data):
             "Consider negotiating purchase price",
             "Explore alternative strategies (HMO, BRR)",
             "Get professional opinion on achievable rent"
-        ]
+        ],
+        'financial_breakdown': financial_breakdown,
+        'refurb_costs': f"{refurb_costs:,.0f}",
+        'legal_fees': f"{legal_fees:,.0f}",
     }
     
     return results
