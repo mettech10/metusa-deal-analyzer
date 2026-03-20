@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { updateSession } from "@/lib/supabase/proxy"
 
 // Secret key for developer access
 const DEV_SECRET = "metalyzi2026"
 
-export async function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
   // Check for dev access key in URL
@@ -13,7 +12,7 @@ export async function middleware(request: NextRequest) {
 
   // If dev key is present, set a cookie and allow access
   if (hasDevKey) {
-    const response = await updateSession(request)
+    const response = NextResponse.next()
     response.cookies.set("dev_access", DEV_SECRET, {
       maxAge: 60 * 60 * 24 * 7, // 7 days
       httpOnly: true,
@@ -43,19 +42,19 @@ export async function middleware(request: NextRequest) {
     (path) => pathname === path || pathname.startsWith(path + "/")
   )
 
-  // Allow static files and API routes — but still run updateSession to keep auth fresh
+  // Allow static files and API routes
   if (
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/static/") ||
     pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/)
   ) {
-    return await updateSession(request)
+    return NextResponse.next()
   }
 
-  // If has dev cookie, allow access to everything (but refresh session)
+  // If has dev cookie, allow access to everything
   if (hasDevCookie) {
-    return await updateSession(request)
+    return NextResponse.next()
   }
 
   // Redirect to coming-soon if not allowed
@@ -63,7 +62,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/coming-soon", request.url))
   }
 
-  return await updateSession(request)
+  return NextResponse.next()
 }
 
 export const config = {
