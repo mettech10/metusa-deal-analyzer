@@ -1536,15 +1536,42 @@
 
         // House Valuation
         const hv = r.house_valuation;
-        if (hv && hv.estimate) {
+        if (hv) {
             document.getElementById('houseValuationCard').style.display = 'block';
             const confColor = hv.confidence === 'high' ? '#16a34a' : hv.confidence === 'medium' ? '#d97706' : '#6b7280';
+
+            // vs purchase price comparison
+            const pp = hv.purchase_price || 0;
+            let vsHtml = '';
+            if (hv.estimate && pp > 0) {
+                const diff = hv.estimate - pp;
+                const diffPct = ((diff / hv.estimate) * 100).toFixed(1);
+                const diffColor = diff >= 0 ? '#16a34a' : '#dc2626';
+                const diffLabel = diff >= 0 ? `£${Math.abs(diff).toLocaleString()} below valuation` : `£${Math.abs(diff).toLocaleString()} above valuation`;
+                vsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Purchase / Agreed Price</div>
+                        <div class="metric-value">£${Math.round(pp).toLocaleString()}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">vs Valuation</div>
+                        <div class="metric-value" style="color:${diffColor}">${diff >= 0 ? '▼' : '▲'} ${Math.abs(diffPct)}%<br><span style="font-size:0.78rem;font-weight:400">${diffLabel}</span></div>
+                    </div>`;
+            } else if (pp > 0) {
+                vsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Purchase / Agreed Price</div>
+                        <div class="metric-value">£${Math.round(pp).toLocaleString()}</div>
+                    </div>`;
+            }
+
             document.getElementById('houseValuationContent').innerHTML = `
                 <div class="metrics-grid" style="margin-bottom:${hv.note ? '12px' : '0'}">
-                    <div class="metric-card">
-                        <div class="metric-label">Estimated Value</div>
+                    ${hv.estimate ? `<div class="metric-card">
+                        <div class="metric-label">PropertyData Valuation</div>
                         <div class="metric-value">£${Math.round(hv.estimate).toLocaleString()}</div>
-                    </div>
+                    </div>` : ''}
+                    ${vsHtml}
                     ${hv.confidence ? `<div class="metric-card">
                         <div class="metric-label">Confidence</div>
                         <div class="metric-value" style="color:${confColor};text-transform:capitalize">${hv.confidence}</div>

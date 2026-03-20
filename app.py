@@ -4127,7 +4127,7 @@ def ai_analyze():
 
         # ------------------------------------------------------------------ #
         # HOUSE VALUATION                                                      #
-        # Priority: PropertyData valuation → Land Registry avg → asking price #
+        # Priority: PropertyData valuation → Land Registry avg → none        #
         # ------------------------------------------------------------------ #
         house_valuation = market_data.get('sales_valuation')
         if not house_valuation:
@@ -4135,17 +4135,21 @@ def ai_analyze():
             if avg_sold:
                 house_valuation = {
                     'estimate': int(avg_sold),
-                    'confidence': 'Low',
+                    'confidence': 'low',
                     'source': 'Land Registry area average',
                     'note': 'Based on recent sold prices in postcode area — not property-specific.'
                 }
             else:
                 house_valuation = {
-                    'estimate': int(data.get('purchasePrice', 0)),
-                    'confidence': 'Low',
-                    'source': 'Asking price only',
+                    'estimate': None,
+                    'confidence': None,
+                    'source': None,
                     'note': 'No external valuation available. Commission a RICS survey for an accurate figure.'
                 }
+
+        # Always attach the purchase price for vs-valuation comparison
+        if house_valuation is not None:
+            house_valuation['purchase_price'] = purchase_price
 
         # Combine results
         results = {
