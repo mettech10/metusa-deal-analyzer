@@ -43,6 +43,7 @@ def scrape_with_jina(url: str) -> dict:
         'Accept': 'text/plain',
         'X-Timeout': '20',
         'X-Return-Format': 'markdown',
+        'X-No-Cache': 'true',
         'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
     }
     if JINA_API_KEY:

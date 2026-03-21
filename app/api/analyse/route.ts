@@ -22,7 +22,7 @@ export async function POST(request: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(90_000),
       })
 
       if (!flaskRes.ok) {
