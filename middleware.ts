@@ -5,7 +5,7 @@ import { updateSession } from "@/lib/supabase/proxy"
 // Secret key for developer access
 const DEV_SECRET = "metalyzi2026"
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
   // Check for dev access key in URL
