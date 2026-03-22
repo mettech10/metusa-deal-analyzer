@@ -308,6 +308,120 @@ def scrape_with_jina(url: str) -> dict:
         print(f"[Jina] Exception: {e}")
         return None
 
+def scrape_with_scrapingbee(url: str) -> dict:
+    """Scrape property using ScrapingBee API with JS rendering and premium UK proxies.
+    Used as a fallback when Jina and direct scraping fail (e.g. Rightmove/Zoopla block).
+    Requires SCRAPINGBEE_API_KEY env var.
+    """
+    if not SCRAPINGBEE_API_KEY:
+        print("[ScrapingBee] No API key configured, skipping")
+        return None
+
+    try:
+        params = {
+            'api_key': SCRAPINGBEE_API_KEY,
+            'url': url,
+            'render_js': 'true',
+            'premium_proxy': 'true',
+            'country_code': 'gb',
+            'wait': '2000',
+        }
+        response = requests.get(
+            'https://app.scrapingbee.com/api/v1/',
+            params=params,
+            timeout=55,
+        )
+
+        if response.status_code != 200:
+            print(f"[ScrapingBee] Error: status {response.status_code}")
+            return None
+
+        html = response.text
+        if not html or len(html) < 500:
+            print("[ScrapingBee] Empty or very short response")
+            return None
+
+        # Use the existing PropertyExtractor to parse the raw HTML
+        from scrapling_extractor import PropertyExtractor
+        extractor = PropertyExtractor()
+        # Bypass the fetch() method — we already have the HTML
+        text = re.sub(r'<[^>]+>', ' ', html)
+        text = re.sub(r'\s+', ' ', text)
+
+        data = {
+            'address': None,
+            'postcode': None,
+            'price': None,
+            'property_type': None,
+            'bedrooms': None,
+            'description': None,
+            'sqm': None,
+        }
+
+        # Price
+        price_match = re.search(r'£([\d,]+)', html)
+        if price_match:
+            try:
+                val = int(price_match.group(1).replace(',', ''))
+                if val > 10000:
+                    data['price'] = val
+            except Exception:
+                pass
+
+        # Postcode
+        data['postcode'] = extractor._extract_postcode(html, text, url)
+
+        # Bedrooms
+        bed_match = re.search(r'(\d+)\s*bed(?:room)?s?', text, re.IGNORECASE)
+        if bed_match:
+            val = int(bed_match.group(1))
+            if 1 <= val <= 20:
+                data['bedrooms'] = val
+
+        # Property type
+        for ptype in ['semi-detached', 'detached', 'terraced', 'flat', 'bungalow', 'apartment']:
+            if re.search(r'\b' + ptype + r'\b', text, re.IGNORECASE):
+                data['property_type'] = 'Semi-Detached' if 'semi' in ptype.lower() else ptype.title()
+                break
+
+        # Floor area
+        sqm_patterns = [
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm)\b', False),
+            (r'(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft)\b', True),
+        ]
+        for pat, is_sqft in sqm_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                val = float(m.group(1))
+                if is_sqft:
+                    val = val / 10.764
+                if 10 <= val <= 2000:
+                    data['sqm'] = round(val, 1)
+                    break
+
+        # Address from page title
+        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+        if title_match:
+            title = title_match.group(1)
+            title = re.sub(r'\s*[-|]\s*(Rightmove|Zoopla|OnTheMarket|Property|For Sale).*',
+                           '', title, flags=re.IGNORECASE).strip()
+            if title and len(title) > 5:
+                if data['postcode'] and data['postcode'] not in title:
+                    title = f"{title}, {data['postcode']}"
+                data['address'] = title
+
+        if not data['address']:
+            data['address'] = "Address not available"
+
+        print(f"[ScrapingBee] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+              f"postcode={data['postcode']}, address={str(data['address'])[:60]}")
+        return data
+
+    except Exception as e:
+        print(f"[ScrapingBee] Exception: {e}")
+        return None
+
+
 def validate_postcode_str(postcode):
     """Quick validation of UK postcode format"""
     if not postcode:
@@ -538,6 +652,9 @@ limiter = Limiter(
 
 # ── Jina Reader API (URL-to-markdown scraping) ───────────────────────────────
 JINA_API_KEY = os.environ.get('JINA_API_KEY', '')
+
+# ── ScrapingBee (JS-rendering proxy, used as fallback for Rightmove/Zoopla) ──
+SCRAPINGBEE_API_KEY = os.environ.get('SCRAPINGBEE_API_KEY', '')
 
 # ── Ideal Postcodes (address → postcode lookup) ─────────────────────────────
 IDEAL_POSTCODES_API_KEY = os.environ.get('IDEAL_POSTCODES_API_KEY', '')
@@ -3100,6 +3217,7 @@ def admin_stats():
         'Stripe': bool(os.environ.get('STRIPE_SECRET_KEY')),
         'Supabase': bool(os.environ.get('SUPABASE_URL')),
         'Jina Reader': bool(os.environ.get('JINA_API_KEY')),
+        'ScrapingBee': bool(os.environ.get('SCRAPINGBEE_API_KEY')),
         'Ideal Postcodes': bool(os.environ.get('IDEAL_POSTCODES_API_KEY')),
         'EPC API': bool(os.environ.get('EPC_API_EMAIL')),
         'TfL API': True,  # has public defaults
@@ -3466,6 +3584,14 @@ def extract_url():
                 print("[extract-url] Using basic scraper result only")
             else:
                 extracted_data = None
+
+        # If both primary scrapers failed, try ScrapingBee (JS-rendering + premium UK proxy)
+        if not _has_data(extracted_data) and SCRAPINGBEE_API_KEY:
+            print("[extract-url] Primary scrapers failed — trying ScrapingBee fallback...")
+            bee_result = scrape_with_scrapingbee(url)
+            if _has_data(bee_result):
+                extracted_data = bee_result
+                print("[extract-url] Using ScrapingBee result")
 
         if extracted_data and _has_data(extracted_data):
             # Always validate / fill postcode via Ideal Postcodes PAF lookup.
