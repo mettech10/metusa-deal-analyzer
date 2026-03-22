@@ -2,12 +2,20 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 /**
- * Especially important if using Fluid compute: Don't put this client in a
- * global variable. Always create a new client within each function when using
- * it.
+ * Secure Supabase server client with HttpOnly cookies
+ * This prevents XSS attacks from stealing session tokens
  */
 export async function createClient() {
   const cookieStore = await cookies()
+
+  // Secure cookie options
+  const cookieOptions = {
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,  // ← CRITICAL: Prevents XSS access to cookies
+    sameSite: 'lax' as const,
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+  }
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,8 +27,8 @@ export async function createClient() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options),
+            cookiesToSet.forEach(({ name, value }) =>
+              cookieStore.set(name, value, cookieOptions),
             )
           } catch {
             // The "setAll" method was called from a Server Component.
