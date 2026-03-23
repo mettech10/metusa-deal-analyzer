@@ -319,38 +319,48 @@ export default function AnalysePage() {
             setResults(calculateAll(data.propertyData))
           }
         } else if (parsedResults) {
-          // URL mode: Build formData from parsed AI results, then use calculateAll
-          const propertyData: PropertyFormData = {
-            address: parsedResults.address || 'Unknown',
-            postcode: parsedResults.postcode || '',
-            propertyType: parsedResults.property_type || 'house',
-            investmentType: 'btl',
-            bedrooms: parseInt(parsedResults.bedrooms) || 3,
-            condition: 'good',
-            purchasePrice: parseFloat(parsedResults.purchase_price?.toString().replace(/[^0-9.]/g, '')) || 0,
-            monthlyRent: parseFloat(parsedResults.monthly_rent?.toString().replace(/[^0-9.]/g, '')) || 0,
-            depositPercentage: parseFloat(parsedResults.deposit_pct) || 25,
-            interestRate: parseFloat(parsedResults.interest_rate) || 3.75,
-            buyerType: 'additional',
-            purchaseType: 'mortgage',
-            mortgageType: 'interest-only',
-            mortgageTerm: 25,
-            annualRentIncrease: 3,
-            voidWeeks: 2,
-            managementFeePercent: 10,
-            insurance: 480,
-            maintenance: 8,
-            groundRent: 0,
-            bills: 0,
-            refurbishmentBudget: 0,
-            legalFees: 1500,
-            surveyCosts: 500
+          if (body.propertyData) {
+            // Manual mode: the user submitted the form with specific inputs (incl. refurb budget).
+            // Use the original propertyData and calculationResults so that refurb cost and all
+            // other user-entered values are preserved after AI analysis completes.
+            const originalData = body.propertyData as PropertyFormData
+            setFormData(originalData)
+            setResults(
+              body.calculationResults
+                ? (body.calculationResults as CalculationResults)
+                : calculateAll(originalData)
+            )
+          } else {
+            // URL mode: no original propertyData — reconstruct from AI-parsed results
+            const propertyData: PropertyFormData = {
+              address: parsedResults.address || 'Unknown',
+              postcode: parsedResults.postcode || '',
+              propertyType: parsedResults.property_type || 'house',
+              investmentType: 'btl',
+              bedrooms: parseInt(parsedResults.bedrooms) || 3,
+              condition: 'good',
+              purchasePrice: parseFloat(parsedResults.purchase_price?.toString().replace(/[^0-9.]/g, '')) || 0,
+              monthlyRent: parseFloat(parsedResults.monthly_rent?.toString().replace(/[^0-9.]/g, '')) || 0,
+              depositPercentage: parseFloat(parsedResults.deposit_pct) || 25,
+              interestRate: parseFloat(parsedResults.interest_rate) || 3.75,
+              buyerType: 'additional',
+              purchaseType: 'mortgage',
+              mortgageType: 'interest-only',
+              mortgageTerm: 25,
+              annualRentIncrease: 3,
+              voidWeeks: 2,
+              managementFeePercent: 10,
+              insurance: 480,
+              maintenance: 8,
+              groundRent: 0,
+              bills: 0,
+              refurbishmentBudget: 0,
+              legalFees: 1500,
+              surveyCosts: 500
+            }
+            setFormData(propertyData)
+            setResults(calculateAll(propertyData))
           }
-          setFormData(propertyData)
-          
-          // Use calculateAll to generate proper CalculationResults
-          const calcResults = calculateAll(propertyData)
-          setResults(calcResults)
         }
 
         if (analysis) {
