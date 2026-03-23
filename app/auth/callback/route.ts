@@ -148,7 +148,6 @@ async function sendWelcomeEmail(email: string, name?: string): Promise<boolean> 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
-  const type = searchParams.get("type") // 'signup' for email verification
   const next = searchParams.get("next") ?? "/analyse"
 
   if (code) {
@@ -156,22 +155,25 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     
     if (!error && data.session) {
-      // Check if this was an email confirmation (type=signup)
-      if (type === "signup" || !data.session.user.email_confirmed_at) {
-        // Email was just confirmed - send welcome email
-        const email = data.session.user.email
-        const name = data.session.user.user_metadata?.full_name || data.session.user.user_metadata?.name
-        
-        if (email) {
-          // Send welcome email asynchronously
-          sendWelcomeEmail(email, name).catch(console.error)
-        }
-        
-        // Redirect to login page with success message
-        return NextResponse.redirect(`${origin}/login?verified=true`)
+      const email = data.session.user.email
+      const name = data.session.user.user_metadata?.full_name || data.session.user.user_metadata?.name
+      const provider = data.session.user.app_metadata?.provider
+      
+      // Send welcome email for new signups (both Google and email)
+      // For Google: immediate welcome
+      // For email: welcome after they verify (if verification enabled in Supabase)
+      if (email) {
+        sendWelcomeEmail(email, name).catch(console.error)
       }
       
-      // Regular sign in
+      // Check if email needs verification (for email/password signups)
+      // Google users are pre-verified by Google
+      if (provider === "email" && !data.session.user.email_confirmed_at) {
+        // Email not verified yet - redirect to verification page
+        return NextResponse.redirect(`${origin}/verify-email`)
+      }
+      
+      // Google users or verified email users - go straight to app
       return NextResponse.redirect(`${origin}${next}`)
     }
   }

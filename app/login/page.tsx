@@ -41,16 +41,13 @@ function GoogleIcon() {
 function LoginForm() {
   const searchParams = useSearchParams()
   const authError = searchParams.get("error")
-  const verified = searchParams.get("verified")
 
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(
     authError === "auth" ? "Authentication failed. Please try again." : null
   )
-  const [success, setSuccess] = useState<string | null>(
-    verified === "true" ? "✓ Email verified! Please sign in to continue." : null
-  )
+  const [success, setSuccess] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const handleEmailSubmit = (e: React.FormEvent<HTMLFormElement>) => {
