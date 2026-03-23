@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
-const BACKEND_API_URL = process.env.BACKEND_API_URL || "http://127.0.0.1:5002"
+const BACKEND_API_URL = process.env.BACKEND_API_URL || "https://metusa-deal-analyzer.onrender.com"
 
 export async function POST(req: Request) {
   try {
