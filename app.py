@@ -4331,7 +4331,7 @@ def ai_analyze():
 
         # Always attach the purchase price for vs-valuation comparison
         if house_valuation is not None:
-            house_valuation['purchase_price'] = purchase_price
+            house_valuation['purchase_price'] = float(data.get('purchasePrice', 0))
 
         # Combine results
         results = {
