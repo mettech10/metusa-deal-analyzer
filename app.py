@@ -1094,12 +1094,62 @@ def check_article_4(postcode):
     """
     Check if area is under Article 4 direction for HMO conversions (C3→C4).
 
-    Data based on publicly available UK council planning records.
-    'known' = True means the area is in our database; False means verify with council.
+    Uses Claude AI as the primary source to research Article 4 status for any postcode.
+    Falls back to the built-in UK-wide database when AI is unavailable.
     Returns dict with article_4 status and details.
     """
+    postcode_clean = postcode.strip().upper()
+    area_code = postcode_clean.split()[0] if ' ' in postcode_clean else postcode_clean
+
     # ------------------------------------------------------------------ #
-    # UK-WIDE Article 4 Direction Database                                #
+    # AI-powered Article 4 research (primary source)                      #
+    # Claude researches current planning policy for the given postcode.   #
+    # ------------------------------------------------------------------ #
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if api_key:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+            prompt = (
+                f'You are a UK property and planning expert. Determine the Article 4 Direction status '
+                f'for HMO (House in Multiple Occupation C3\u2192C4) conversions at UK postcode: {postcode_clean}\n\n'
+                'Article 4 Directions remove permitted development rights and require full planning permission '
+                'for C3\u2192C4 HMO conversions. Many UK councils have introduced these, especially in '
+                'high-density rental or student areas.\n\n'
+                'Based on your knowledge of UK local authority planning policy, return ONLY valid JSON:\n'
+                '{\n'
+                '  "is_article_4": true or false,\n'
+                '  "known": true if you are reasonably confident, false if uncertain,\n'
+                '  "council": "Full official council name",\n'
+                '  "note": "Brief factual note about Article 4 status for this postcode area",\n'
+                '  "advice": "One sentence of planning advice for an investor considering HMO here"\n'
+                '}'
+            )
+            message = client.messages.create(
+                model=model_id,
+                max_tokens=300,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            raw = message.content[0].text.strip()
+            if raw.startswith('```'):
+                raw = re.sub(r'^```[a-z]*\n?', '', raw)
+                raw = re.sub(r'\n?```$', '', raw)
+            ai_data = json.loads(raw)
+            return {
+                'is_article_4': bool(ai_data.get('is_article_4', False)),
+                'known': bool(ai_data.get('known', True)),
+                'council': ai_data.get('council', 'Local Council'),
+                'note': ai_data.get('note', ''),
+                'area_code': area_code,
+                'advice': ai_data.get('advice', ''),
+                'source': 'ai'
+            }
+        except Exception as e:
+            app.logger.error(f'[AI] Article 4 check error for {postcode}: {e}')
+
+    # ------------------------------------------------------------------ #
+    # Fallback: UK-WIDE Article 4 Direction Database                      #
     # Sources: Council planning portals, gov.uk planning records          #
     # Last updated: 2025. Always verify with local council for changes.   #
     # ------------------------------------------------------------------ #
@@ -1449,8 +1499,7 @@ def check_article_4(postcode):
     # ------------------------------------------------------------------ #
     # Extract outward code from postcode (e.g., 'M14' from 'M14 7EH')    #
     # ------------------------------------------------------------------ #
-    postcode = postcode.strip().upper()
-    area_code = postcode.split()[0] if ' ' in postcode else postcode
+    # (postcode_clean and area_code already set above)
 
     # Try progressively shorter matches (e.g. SW11 → SW1 → SW)
     # to handle outward codes of different lengths
@@ -1485,10 +1534,74 @@ def check_article_4(postcode):
     }
 
 
+def get_location_from_ai(postcode):
+    """
+    Use Claude AI + postcodes.io to get accurate location info (country, region, council).
+    AI resolves the full official council name and metropolitan area from the postcode.
+    Falls back to postcodes.io admin_district + static mapping if AI unavailable.
+    """
+    admin_district = None
+    api_region = None
+    try:
+        resp = requests.get(
+            f'https://api.postcodes.io/postcodes/{postcode.replace(" ", "")}',
+            timeout=8
+        )
+        if resp.status_code == 200:
+            geo = resp.json().get('result', {})
+            admin_district = geo.get('admin_district', '')
+            api_region = geo.get('region', '')
+    except Exception:
+        pass
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if api_key:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+            context = f' (postcodes.io admin_district: "{admin_district}")' if admin_district else ''
+            prompt = (
+                f'Given the UK postcode "{postcode}"{context}, provide the following in JSON:\n'
+                '- country: England, Wales, Scotland, or Northern Ireland\n'
+                '- region: The metropolitan county or well-known area name (e.g. "Greater Manchester", '
+                '"West Yorkshire", "Greater London", "West Midlands", "Merseyside")\n'
+                '- council: The full official local authority name '
+                '(e.g. "Bury Metropolitan Borough Council", "Leeds City Council", '
+                '"London Borough of Hackney")\n\n'
+                'Return ONLY valid JSON, no markdown or explanation:\n'
+                '{"country": "...", "region": "...", "council": "..."}'
+            )
+            message = client.messages.create(
+                model=model_id,
+                max_tokens=150,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            raw = message.content[0].text.strip()
+            if raw.startswith('```'):
+                raw = re.sub(r'^```[a-z]*\n?', '', raw)
+                raw = re.sub(r'\n?```$', '', raw)
+            loc = json.loads(raw)
+            return {
+                'country': loc.get('country', 'England'),
+                'region': loc.get('region') or get_region_from_postcode(postcode),
+                'council': loc.get('council') or admin_district or 'Local Council'
+            }
+        except Exception as e:
+            app.logger.error(f'[AI] Location lookup error for {postcode}: {e}')
+
+    # Fallback: postcodes.io + static region mapping
+    return {
+        'country': 'England',
+        'region': get_region_from_postcode(postcode),
+        'council': admin_district or 'Local Council'
+    }
+
+
 def get_refurb_estimate(postcode, property_type, bedrooms, internal_area=1000):
     """
     Get refurbishment cost estimate per square meter
-    
+
     Based on typical UK refurbishment costs
     """
     # Base costs per sq ft (converted from sq m)
@@ -1823,8 +1936,11 @@ def analyze_deal(data):
         cash_invested, interest_rate, capital_growth_pct
     )
     
-    # Get Article 4 info
+    # Get Article 4 info (AI-powered research as primary source)
     article_4_info = check_article_4(postcode)
+
+    # Get accurate location info (AI-powered: country, region, full council name)
+    location_info = get_location_from_ai(postcode)
 
     # Add deal-type-specific Article 4 guidance
     _a4_active = article_4_info.get('is_article_4', False)
@@ -1973,9 +2089,9 @@ def analyze_deal(data):
         'address': address,
         'postcode': postcode,
         'location': {
-            'country': 'England',
-            'region': get_region_from_postcode(postcode),
-            'council': article_4_info['council']
+            'country': location_info.get('country', 'England'),
+            'region': location_info.get('region', get_region_from_postcode(postcode)),
+            'council': location_info.get('council', article_4_info.get('council', 'Local Council'))
         },
         'purchase_price': f"{purchase_price:,.0f}",
         'stamp_duty': f"{stamp_duty:,.0f}",
