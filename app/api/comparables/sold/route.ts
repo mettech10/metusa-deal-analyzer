@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const FLASK_URL = process.env.FLASK_API_URL || "http://127.0.0.1:5000"
+const FLASK_URL = process.env.BACKEND_API_URL || "https://metusa-deal-analyzer.onrender.com"
 
 export async function POST(req: Request) {
   try {

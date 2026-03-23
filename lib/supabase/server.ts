@@ -13,7 +13,7 @@ export async function createClient() {
     path: '/',
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,  // ← CRITICAL: Prevents XSS access to cookies
-    sameSite: 'lax' as const,
+    sameSite: 'strict' as const,
     maxAge: 60 * 60 * 24 * 7, // 7 days
   }
 
