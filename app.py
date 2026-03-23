@@ -666,10 +666,17 @@ def track_analytics():
     _record_visit(path, request.method)
 
 # Security: Configure CORS properly (restrict in production)
+# NODE_ENV is a Node.js convention — never set in Python/Gunicorn on Render.
+# Render automatically sets RENDER=true, so use that as the production signal.
+# FLASK_ENV=production also works if set manually in the hosting env.
+_is_production = (
+    os.environ.get('RENDER') == 'true'
+    or os.environ.get('FLASK_ENV') == 'production'
+)
 _allowed_origins = (
-    ["https://www.metalyzi.co.uk"]
-    if os.environ.get('NODE_ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production'
-    else ["http://localhost:3000"]
+    ["https://metalyzi.co.uk", "https://www.metalyzi.co.uk"]
+    if _is_production
+    else ["http://localhost:3000", "http://localhost:3001"]
 )
 # Allow additional origins via env var (comma-separated) - use for Vercel deployment URL
 _extra_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
