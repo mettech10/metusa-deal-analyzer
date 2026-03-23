@@ -666,7 +666,11 @@ def track_analytics():
     _record_visit(path, request.method)
 
 # Security: Configure CORS properly (restrict in production)
-_allowed_origins = ["https://metusaproperty.co.uk", "https://analyzer.metusaproperty.co.uk"]
+_allowed_origins = (
+    ["https://www.metalyzi.co.uk"]
+    if os.environ.get('NODE_ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production'
+    else ["http://localhost:3000"]
+)
 # Allow additional origins via env var (comma-separated) - use for Vercel deployment URL
 _extra_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
 if _extra_origins:
@@ -686,6 +690,14 @@ limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
+
+# Security: Add hardening headers to every response
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
 
 # ── Jina Reader API (URL-to-markdown scraping) ───────────────────────────────
 JINA_API_KEY = os.environ.get('JINA_API_KEY', '')
@@ -3118,12 +3130,13 @@ def download_pdf():
 
 @app.route('/api/health')
 def health_check():
-    """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+    """Health check endpoint — kept public for uptime monitoring, returns minimal info only."""
+    return jsonify({'status': 'ok'})
 
 @app.route('/api/test-jina')
+@admin_required
 def test_jina():
-    """Test Jina Reader connectivity (no API key required)"""
+    """Test Jina Reader connectivity (admin only)."""
     try:
         resp = requests.get('https://r.jina.ai/', timeout=10)
         reachable = resp.status_code < 500
@@ -3137,8 +3150,9 @@ def test_jina():
     })
 
 @app.route('/api/test-propertydata')
+@admin_required
 def test_propertydata():
-    """Test PropertyData API configuration"""
+    """Test PropertyData API configuration (admin only)."""
     env_key = os.environ.get('PROPERTY_DATA_API_KEY', '')
     module_key = property_data.api_key if hasattr(property_data, 'api_key') else 'N/A'
     

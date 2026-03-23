@@ -5,6 +5,14 @@ import { updateSession } from "@/lib/supabase/proxy"
 // Secret key for developer access
 const DEV_SECRET = "metalyzi2026"
 
+/** Apply security hardening headers to every outgoing response. */
+function addSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set("X-Content-Type-Options", "nosniff")
+  response.headers.set("X-Frame-Options", "DENY")
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+  return response
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
@@ -19,7 +27,7 @@ export async function proxy(request: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
     })
-    return response
+    return addSecurityHeaders(response)
   }
 
   // Check if dev cookie is present
@@ -50,20 +58,22 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/static/") ||
     pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/)
   ) {
-    return await updateSession(request)
+    return addSecurityHeaders(await updateSession(request))
   }
 
   // If has dev cookie, allow access to everything (but refresh session)
   if (hasDevCookie) {
-    return await updateSession(request)
+    return addSecurityHeaders(await updateSession(request))
   }
 
   // Redirect to coming-soon if not allowed
   if (!isAllowed) {
-    return NextResponse.redirect(new URL("/coming-soon", request.url))
+    return addSecurityHeaders(
+      NextResponse.redirect(new URL("/coming-soon", request.url))
+    )
   }
 
-  return await updateSession(request)
+  return addSecurityHeaders(await updateSession(request))
 }
 
 export const config = {
