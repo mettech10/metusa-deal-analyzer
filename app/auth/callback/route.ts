@@ -167,8 +167,8 @@ export async function GET(request: Request) {
           sendWelcomeEmail(email, name).catch(console.error)
         }
         
-        // Redirect to success page or analyse
-        return NextResponse.redirect(`${origin}/analyse?welcome=true`)
+        // Redirect to login page with success message
+        return NextResponse.redirect(`${origin}/login?verified=true`)
       }
       
       // Regular sign in
