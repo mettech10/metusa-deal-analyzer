@@ -24,14 +24,7 @@ export async function middleware(request: NextRequest) {
 
   // If dev key is present, set a cookie and allow access
   if (hasDevKey) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let response: any
-    try {
-      response = await updateSession(request)
-    } catch {
-      // If Supabase is unavailable, still grant dev access without session refresh
-      response = NextResponse.next({ request })
-    }
+    const response = await updateSession(request)
     response.cookies.set("dev_access", DEV_SECRET, {
       maxAge: 60 * 60 * 24 * 7, // 7 days
       httpOnly: true,
@@ -71,28 +64,24 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/static/") ||
     pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/)
   ) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let apiResponse: any
-    try {
-      apiResponse = await updateSession(request)
-    } catch {
-      apiResponse = NextResponse.next({ request })
-    }
+    const response = await updateSession(request)
+    
     // Add CORS headers for API routes
     if (pathname.startsWith("/api/")) {
       if (isAllowedOrigin && origin) {
-        apiResponse.headers.set("Access-Control-Allow-Origin", origin)
+        response.headers.set("Access-Control-Allow-Origin", origin)
       }
-      apiResponse.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-      apiResponse.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-      apiResponse.headers.set("Access-Control-Allow-Credentials", "true")
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      response.headers.set("Access-Control-Allow-Credentials", "true")
     }
-    return apiResponse
+    
+    return response
   }
 
   // If has dev cookie, allow access to everything (but refresh session)
   if (hasDevCookie) {
-    try { return await updateSession(request) } catch { return NextResponse.next({ request }) }
+    return await updateSession(request)
   }
 
   // Redirect to coming-soon if not allowed
@@ -100,7 +89,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/coming-soon", request.url))
   }
 
-  try { return await updateSession(request) } catch { return NextResponse.next({ request }) }
+  return await updateSession(request)
 }
 
 export const config = {
