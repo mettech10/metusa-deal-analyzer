@@ -5181,11 +5181,20 @@ def sensitivity_analysis():
             return jsonify({'success': False, 'message': 'purchasePrice is required'}), 400
 
         # ── Extract slider overrides ──────────────────────────────────────────
-        override_rate     = data.get('override_mortgage_rate')
-        override_rent     = data.get('override_monthly_rent')
-        override_vacancy  = data.get('override_vacancy_rate')  # percent, e.g. 8.0
+        override_rate          = data.get('override_mortgage_rate')
+        override_rent          = data.get('override_monthly_rent')
+        override_vacancy       = data.get('override_vacancy_rate')  # percent, e.g. 8.0
+        override_purchase_price = data.get('override_purchase_price')
 
         # Validate overrides if supplied
+        if override_purchase_price is not None:
+            try:
+                override_purchase_price = float(override_purchase_price)
+                if not (1000 <= override_purchase_price <= 50_000_000):
+                    return jsonify({'success': False, 'message': 'override_purchase_price must be between 1000 and 50000000'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'override_purchase_price must be a number'}), 400
+
         if override_rate is not None:
             try:
                 override_rate = float(override_rate)
@@ -5213,6 +5222,9 @@ def sensitivity_analysis():
         # ── Apply overrides to the form data copy ─────────────────────────────
         import copy
         scenario_data = copy.deepcopy(data)
+
+        if override_purchase_price is not None:
+            scenario_data['purchasePrice'] = override_purchase_price
 
         if override_rate is not None:
             scenario_data['interestRate'] = override_rate
@@ -5257,9 +5269,10 @@ def sensitivity_analysis():
         response = {
             'success': True,
             'scenario': {
-                'mortgage_rate':   float(scenario_data.get('interestRate', data.get('interestRate', 5.5))),
-                'monthly_rent':    float(scenario_data.get('monthlyRent', 0)),
-                'vacancy_rate':    effective_vacancy_rate,
+                'mortgage_rate':    float(scenario_data.get('interestRate', data.get('interestRate', 5.5))),
+                'monthly_rent':     float(scenario_data.get('monthlyRent', 0)),
+                'vacancy_rate':     effective_vacancy_rate,
+                'purchase_price':   float(scenario_data.get('purchasePrice', data.get('purchasePrice', 0))),
             },
             'metrics': {
                 'deal_score':          metrics.get('deal_score', 0),
