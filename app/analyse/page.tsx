@@ -586,6 +586,132 @@ export default function AnalysePage() {
     const aiRisks = extractSection("RISK")
     const aiNextSteps = extractSection("NEXT STEP")
 
+    // Backend data helpers for PDF
+    const bd = backendData
+    const riskFlags = bd?.risk_flags || []
+    const benchmark = bd?.regional_benchmark
+    const rentComps = bd?.rent_comparables || []
+    const soldComps = bd?.sold_comparables || []
+
+    // Risk flag HTML
+    const riskFlagColor = (color: string) => {
+      if (color === "red") return { bg: "#fff1f2", border: "#fca5a5", badge: "#dc2626", label: "#991b1b" }
+      if (color === "amber") return { bg: "#fffbeb", border: "#fcd34d", badge: "#d97706", label: "#92400e" }
+      return { bg: "#f0fdf4", border: "#86efac", badge: "#16a34a", label: "#14532d" }
+    }
+
+    const riskFlagsHtml = riskFlags.length > 0 ? `
+      <div class="sec-title">Risk Flags</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+        ${riskFlags.map((flag) => {
+          const c = riskFlagColor(flag.color)
+          return `<div style="background:${c.bg};border:1px solid ${c.border};border-radius:6px;padding:10px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="background:${c.badge};color:#fff;font-size:7px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase">${flag.severity}</span>
+              <span style="font-size:10px;font-weight:700;color:${c.label}">${flag.name}</span>
+            </div>
+            <div style="font-size:9px;color:#444;margin-bottom:4px">${flag.description}</div>
+            <div style="font-size:8px;color:#666;font-style:italic">${flag.mitigation}</div>
+          </div>`
+        }).join("")}
+      </div>` : ""
+
+    // Regional benchmark HTML
+    const benchmarkHtml = benchmark ? `
+      <div class="sec-title">Regional Benchmark</div>
+      <div style="background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px;margin-bottom:14px">
+        ${benchmark.region_name ? `<div style="font-size:10px;font-weight:700;color:#1a1a2e;margin-bottom:8px">${benchmark.region_name}${benchmark.postcode_area ? " · " + benchmark.postcode_area : ""}</div>` : ""}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:8px;text-transform:uppercase;color:#888;margin-bottom:3px">Gross Yield</div>
+            <div style="font-size:14px;font-weight:700;color:#4f46e5">${benchmark.your_yield != null ? benchmark.your_yield.toFixed(2) + "%" : "—"}</div>
+            ${benchmark.regional_median_yield != null ? `<div style="font-size:8px;color:#666">Region median: ${benchmark.regional_median_yield.toFixed(2)}%</div>` : ""}
+            ${benchmark.yield_vs_median_label ? `<div style="font-size:8px;font-weight:600;color:${(benchmark.yield_difference || 0) >= 0 ? "#16a34a" : "#dc2626"}">${benchmark.yield_vs_median_label}</div>` : ""}
+          </div>
+          <div>
+            <div style="font-size:8px;text-transform:uppercase;color:#888;margin-bottom:3px">Monthly Cash Flow</div>
+            <div style="font-size:14px;font-weight:700;color:${(benchmark.your_cashflow || 0) >= 0 ? "#16a34a" : "#dc2626"}">${benchmark.your_cashflow != null ? "£" + Math.round(benchmark.your_cashflow).toLocaleString("en-GB") : "—"}</div>
+            ${benchmark.regional_avg_cashflow != null ? `<div style="font-size:8px;color:#666">Region avg: £${Math.round(benchmark.regional_avg_cashflow).toLocaleString("en-GB")}</div>` : ""}
+            ${benchmark.cashflow_vs_avg_label ? `<div style="font-size:8px;font-weight:600;color:${(benchmark.cashflow_difference || 0) >= 0 ? "#16a34a" : "#dc2626"}">${benchmark.cashflow_vs_avg_label}</div>` : ""}
+          </div>
+        </div>
+        ${benchmark.summary ? `<div style="margin-top:8px;font-size:9px;color:#555;border-top:1px solid #e8e8f0;padding-top:8px">${benchmark.summary}</div>` : ""}
+      </div>` : ""
+
+    // Rental comparables HTML
+    const rentCompsHtml = rentComps.length > 0 ? `
+      <div class="sec-title">Rental Comparables</div>
+      <table>
+        <tr>
+          <th>Address</th>
+          <th style="text-align:right">Monthly Rent</th>
+          <th>Beds</th>
+          <th>Type</th>
+          <th>Tenure</th>
+          <th>Source</th>
+        </tr>
+        ${rentComps.slice(0, 8).map(c => `<tr>
+          <td>${c.address || "—"}</td>
+          <td class="td-right" style="color:#16a34a;font-weight:700">£${Math.round(c.monthly_rent).toLocaleString("en-GB")}</td>
+          <td>${c.bedrooms != null ? c.bedrooms + " bed" : "—"}</td>
+          <td>${c.type || "—"}</td>
+          <td>${(c as {tenure?: string}).tenure || "—"}</td>
+          <td style="font-size:8px;color:#888">${c.source || "—"}</td>
+        </tr>`).join("")}
+      </table>` : ""
+
+    // Sold comparables HTML
+    const soldCompsHtml = soldComps.length > 0 ? `
+      <div class="sec-title">Sold Comparables</div>
+      <table>
+        <tr>
+          <th>Address</th>
+          <th style="text-align:right">Price</th>
+          <th>Beds</th>
+          <th>Type</th>
+          <th>Date</th>
+        </tr>
+        ${soldComps.slice(0, 8).map(c => `<tr>
+          <td>${c.address || "—"}</td>
+          <td class="td-right" style="color:#4f46e5;font-weight:700">£${Math.round(c.price).toLocaleString("en-GB")}</td>
+          <td>${c.bedrooms != null ? c.bedrooms + " bed" : "—"}</td>
+          <td>${c.type || "—"}</td>
+          <td style="font-size:8px">${c.date || "—"}</td>
+        </tr>`).join("")}
+      </table>` : ""
+
+    // Area analysis enriched HTML
+    const aiVerdictHtml = bd?.ai_verdict ? `
+      <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:10px;margin-bottom:10px">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#4f46e5;font-weight:700;margin-bottom:4px">AI Area Verdict</div>
+        <div style="font-size:10px;color:#1a1a2e;line-height:1.5">${bd.ai_verdict}</div>
+      </div>` : ""
+
+    const aiAreaHtml = bd?.ai_area ? `
+      <div style="background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:10px;margin-bottom:10px">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700;margin-bottom:4px">Area Analysis</div>
+        <div style="font-size:10px;color:#333;line-height:1.6;white-space:pre-wrap">${bd.ai_area}</div>
+      </div>` : ""
+
+    const strategyRecsHtml = bd?.strategy_recommendations ? (() => {
+      const recs = bd.strategy_recommendations
+      const entries = Object.entries(recs).filter(([, v]) => v)
+      if (!entries.length) return ""
+      return `<div class="sec-title">Strategy Recommendations</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px">
+          ${entries.map(([key, val]) => {
+            const v = val as { suitable: boolean; note: string }
+            return `<div style="background:${v.suitable ? "#f0fdf4" : "#fff1f2"};border:1px solid ${v.suitable ? "#86efac" : "#fca5a5"};border-radius:4px;padding:7px">
+              <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+                <span style="font-size:10px">${v.suitable ? "✅" : "❌"}</span>
+                <span style="font-size:9px;font-weight:700;color:${v.suitable ? "#15803d" : "#dc2626"}">${key}</span>
+              </div>
+              <div style="font-size:8px;color:#555;line-height:1.4">${v.note}</div>
+            </div>`
+          }).join("")}
+        </div>`
+    })() : ""
+
     // Refurb estimates from aiText
     const lightMatch = aiText.match(/Light[^:]*:\s*£([\d,]+)/)
     const mediumMatch = aiText.match(/Medium[^:]*:\s*£([\d,]+)/)
@@ -904,7 +1030,7 @@ export default function AnalysePage() {
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     PAGE 4 · AI ANALYSIS
+     PAGE 4 · AI ANALYSIS & RISK FLAGS
      ════════════════════════════════════════════════════════ -->
 <div class="page">
   <div class="rpt-header">
@@ -933,10 +1059,29 @@ export default function AnalysePage() {
     <div class="ai-text">${aiNextSteps}</div>
   </div>` : ""}
 
-  <div class="sec-title">Full AI Analysis</div>
-  <div style="background:#f8f8fc;border:1px solid #e8e8f0;border-radius:6px;padding:12px">
-    <pre style="font-family:'Courier New',monospace;font-size:9.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#222">${aiText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre>
+  ${riskFlagsHtml}
+  ${benchmarkHtml}
+  ${strategyRecsHtml}
+
+  <div class="rpt-footer">Continued on next page →</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     PAGE 5 · MARKET DATA & COMPARABLES
+     ════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">Market Data &amp; Comparables</div>
+      <div class="rpt-sub">${address} · Powered by Metalyzi AI</div>
+    </div>
+    <span class="rpt-badge">Metalyzi</span>
   </div>
+
+  ${aiVerdictHtml}
+  ${aiAreaHtml}
+  ${rentCompsHtml}
+  ${soldCompsHtml}
 
   <div class="rpt-footer">This report was generated by Metalyzi (metalyzi.com) on ${date}. It is for informational purposes only. Always seek independent financial and legal advice before making any property investment decision. Past performance is not a reliable indicator of future results.</div>
 </div>
