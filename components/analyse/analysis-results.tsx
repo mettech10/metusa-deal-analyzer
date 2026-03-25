@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, useCallback } from "react"
 import {
   Card,
   CardContent,
@@ -11,7 +11,6 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
-import { Slider } from "@/components/ui/slider"
 import { DealScore } from "./deal-score"
 import { PropertyComparables } from "./property-comparables"
 import {
@@ -50,9 +49,10 @@ import {
   Hammer,
   Building2,
   Users,
-  Info,
+  Flag,
+  BarChart2,
   SlidersHorizontal,
-  Activity,
+  Info,
 } from "lucide-react"
 
 interface AnalysisResultsProps {
@@ -541,11 +541,6 @@ function RentComparablesTable({
 }) {
   if (!comparables || comparables.length === 0) return null
 
-  const rents = comparables.slice(0, 8)
-  const avgRent = rents.length > 0
-    ? Math.round(rents.reduce((s, r) => s + r.monthly_rent, 0) / rents.length)
-    : 0
-
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -553,14 +548,11 @@ function RentComparablesTable({
           <Users className="size-4 text-primary" />
           <CardTitle className="text-sm">Comparable Rental Prices</CardTitle>
           <Badge variant="outline" className="ml-auto text-xs">
-            {rents.length} listings
+            {comparables.length} listings
           </Badge>
         </div>
         <CardDescription className="text-xs">
-          Similar properties currently let or recently listed in this area
-          {avgRent > 0 && (
-            <span className="ml-1 font-medium text-foreground">· Avg: {formatCurrency(avgRent)}/mo</span>
-          )}
+          Current rental market in this area
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -568,27 +560,37 @@ function RentComparablesTable({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border/50 text-left">
-                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Address</th>
-                <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">Rent/mo</th>
-                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Beds</th>
-                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Type</th>
-                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">Tenure</th>
-                <th className="pb-2 text-xs font-medium text-muted-foreground">Source</th>
+                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">
+                  Address
+                </th>
+                <th className="pb-2 pr-4 text-right text-xs font-medium text-muted-foreground">
+                  Rent/mo
+                </th>
+                <th className="pb-2 pr-4 text-xs font-medium text-muted-foreground">
+                  Beds
+                </th>
+                <th className="pb-2 text-xs font-medium text-muted-foreground">
+                  Source
+                </th>
               </tr>
             </thead>
             <tbody>
-              {rents.map((rent, i) => (
+              {comparables.slice(0, 6).map((rent, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
                   <td className="py-2 pr-4 text-foreground">
-                    <span className="line-clamp-1 block max-w-[160px]">{rent.address}</span>
+                    <span className="line-clamp-1 block max-w-[180px]">
+                      {rent.address}
+                    </span>
                   </td>
                   <td className="py-2 pr-4 text-right font-medium text-foreground">
                     {formatCurrency(rent.monthly_rent)}/mo
                   </td>
-                  <td className="py-2 pr-4 text-muted-foreground">{rent.bedrooms ?? "—"}</td>
-                  <td className="py-2 pr-4 text-muted-foreground capitalize">{rent.type || "—"}</td>
-                  <td className="py-2 pr-4 text-muted-foreground capitalize">{rent.tenure || "—"}</td>
-                  <td className="py-2 text-xs text-muted-foreground">{rent.source || "—"}</td>
+                  <td className="py-2 pr-4 text-muted-foreground">
+                    {rent.bedrooms ?? "—"}
+                  </td>
+                  <td className="py-2 text-xs text-muted-foreground">
+                    {rent.source || "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -683,471 +685,17 @@ function RefurbEstimatesCard({
   )
 }
 
-// ── Risk Flags ─────────────────────────────────────────────────────────────
-function LTVTooltip() {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    if (open) document.addEventListener("mousedown", handleClick)
-    return () => document.removeEventListener("mousedown", handleClick)
-  }, [open])
-
-  return (
-    <span ref={ref} className="relative inline-flex items-center">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="ml-1 inline-flex size-4 items-center justify-center rounded-full border border-muted-foreground/40 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-        aria-label="What is LTV?"
-      >
-        <Info className="size-2.5" />
-      </button>
-      {open && (
-        <div className="absolute bottom-6 left-1/2 z-50 w-64 -translate-x-1/2 rounded-lg border border-border bg-popover px-3 py-2.5 text-xs text-popover-foreground shadow-lg">
-          <p className="font-semibold mb-1">What is LTV?</p>
-          <p className="leading-relaxed text-muted-foreground">
-            <strong>Loan-to-Value (LTV)</strong> is the mortgage amount as a percentage of the property value. A 75% LTV means you borrow 75% and put in 25% as a deposit. Higher LTV = more leverage but also more risk if property values fall.
-          </p>
-        </div>
-      )}
-    </span>
-  )
-}
-
-function RiskFlagsCard({ flags }: { flags?: BackendResults["risk_flags"] }) {
-  if (!flags || flags.length === 0) return null
-
-  const severityConfig = {
-    HIGH: {
-      border: "border-destructive/40",
-      bg: "bg-destructive/5",
-      badge: "bg-destructive/15 text-destructive border-destructive/30",
-      dot: "bg-destructive",
-    },
-    MEDIUM: {
-      border: "border-warning/40",
-      bg: "bg-warning/5",
-      badge: "bg-warning/15 text-warning border-warning/30",
-      dot: "bg-warning",
-    },
-    LOW: {
-      border: "border-success/40",
-      bg: "bg-success/5",
-      badge: "bg-success/15 text-success border-success/30",
-      dot: "bg-success",
-    },
-  }
-
-  const highCount = flags.filter((f) => f.severity === "HIGH").length
-  const medCount = flags.filter((f) => f.severity === "MEDIUM").length
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="size-4 text-primary" />
-          <CardTitle className="text-sm">Risk Flags</CardTitle>
-          <div className="ml-auto flex gap-1.5">
-            {highCount > 0 && (
-              <span className="rounded-full border border-destructive/30 bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
-                {highCount} HIGH
-              </span>
-            )}
-            {medCount > 0 && (
-              <span className="rounded-full border border-warning/30 bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
-                {medCount} MEDIUM
-              </span>
-            )}
-          </div>
-        </div>
-        <CardDescription className="text-xs">
-          Automatically detected risks based on your deal metrics
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {flags.map((flag) => {
-          const cfg = severityConfig[flag.severity] ?? severityConfig.LOW
-          const isLTV = flag.description.toLowerCase().includes("ltv") || flag.name.toLowerCase().includes("leverage")
-          return (
-            <div key={flag.id} className={`rounded-lg border p-3 ${cfg.border} ${cfg.bg}`}>
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className={`size-2 shrink-0 rounded-full ${cfg.dot}`} />
-                <span className="text-sm font-semibold text-foreground flex items-center gap-0.5">
-                  {flag.name}
-                  {isLTV && <LTVTooltip />}
-                </span>
-                <span className={`ml-auto rounded-full border px-1.5 py-0.5 text-[10px] font-bold ${cfg.badge}`}>
-                  {flag.severity}
-                </span>
-              </div>
-              <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{flag.description}</p>
-              <div className="rounded bg-background/60 px-2 py-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Mitigation</p>
-                <p className="text-xs text-foreground">{flag.mitigation}</p>
-              </div>
-            </div>
-          )
-        })}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Regional Benchmark ──────────────────────────────────────────────────────
-function RegionalBenchmarkCard({ benchmark }: { benchmark?: BackendResults["regional_benchmark"] }) {
-  if (!benchmark || !benchmark.region_name) return null
-
-  const yieldDiff = benchmark.yield_difference ?? 0
-  const cashDiff = benchmark.cashflow_difference ?? 0
-
-  function DiffBadge({ diff, unit }: { diff: number; unit: "%" | "£" }) {
-    const isPos = diff > 0
-    const isFlat = Math.abs(diff) < (unit === "%" ? 0.05 : 5)
-    if (isFlat) return <span className="text-xs text-muted-foreground">In line with market</span>
-    return (
-      <span className={`text-xs font-semibold ${isPos ? "text-success" : "text-destructive"}`}>
-        {isPos ? "+" : ""}{unit === "£" ? `£${Math.abs(diff).toLocaleString("en-GB")}` : `${Math.abs(diff).toFixed(2)}%`} {isPos ? "above" : "below"} regional {unit === "%" ? "median" : "average"}
-      </span>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <Activity className="size-4 text-primary" />
-          <CardTitle className="text-sm">Regional Benchmark</CardTitle>
-          <Badge variant="outline" className="ml-auto text-xs">
-            {benchmark.region_name}
-          </Badge>
-        </div>
-        <CardDescription className="text-xs">
-          How this deal compares to the {benchmark.postcode_area} area median
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {benchmark.summary && (
-          <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            {benchmark.summary}
-          </p>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* Yield comparison */}
-          <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-muted/20 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Gross Yield</p>
-            <p className="text-lg font-bold text-foreground">{benchmark.your_yield?.toFixed(2)}%</p>
-            <DiffBadge diff={yieldDiff} unit="%" />
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Regional median: {benchmark.regional_median_yield?.toFixed(2)}%
-            </p>
-            {benchmark.yield_percentile != null && (
-              <div className="mt-1">
-                <div className="mb-0.5 flex justify-between text-[10px] text-muted-foreground">
-                  <span>Percentile</span>
-                  <span className="font-medium text-foreground">{benchmark.yield_percentile}th</span>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-muted">
-                  <div
-                    className={`h-1.5 rounded-full ${yieldDiff >= 0 ? "bg-success" : "bg-destructive"}`}
-                    style={{ width: `${Math.min(100, benchmark.yield_percentile)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Cashflow comparison */}
-          <div className="flex flex-col gap-1 rounded-lg border border-border/50 bg-muted/20 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Monthly Cashflow</p>
-            <p className={`text-lg font-bold ${(benchmark.your_cashflow ?? 0) >= 0 ? "text-success" : "text-destructive"}`}>
-              {formatCurrency(benchmark.your_cashflow ?? 0)}/mo
-            </p>
-            <DiffBadge diff={cashDiff} unit="£" />
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Regional avg: {formatCurrency(benchmark.regional_avg_cashflow ?? 0)}/mo
-            </p>
-            {benchmark.cashflow_percentile != null && (
-              <div className="mt-1">
-                <div className="mb-0.5 flex justify-between text-[10px] text-muted-foreground">
-                  <span>Percentile</span>
-                  <span className="font-medium text-foreground">{benchmark.cashflow_percentile}th</span>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-muted">
-                  <div
-                    className={`h-1.5 rounded-full ${cashDiff >= 0 ? "bg-success" : "bg-destructive"}`}
-                    style={{ width: `${Math.min(100, benchmark.cashflow_percentile)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {benchmark.data_source && (
-          <p className="text-[10px] text-muted-foreground">Source: {benchmark.data_source}</p>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-// ── Sensitivity Analysis ────────────────────────────────────────────────────
-interface SensitivityMetrics {
-  deal_score: number
-  deal_score_label: string
-  monthly_cashflow: number
-  gross_yield: number
-  net_yield: number
-  cash_on_cash: number
-  verdict: string
-  risk_level: string
-  monthly_mortgage: number
-  annual_cashflow: number
-}
-
-function SensitivityAnalysisPanel({
-  formData,
-}: {
-  formData: PropertyFormData
-}) {
-  const [mortgageRate, setMortgageRate] = useState(formData.interestRate)
-  const [monthlyRent, setMonthlyRent] = useState(formData.monthlyRent)
-  const [vacancyRate, setVacancyRate] = useState(4.2)
-  const [purchasePrice, setPurchasePrice] = useState(formData.purchasePrice)
-  const [metrics, setMetrics] = useState<SensitivityMetrics | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const runScenario = useCallback(
-    async (rate: number, rent: number, vacancy: number, price: number) => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch("/api/sensitivity-analysis", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            purchasePrice: price,
-            dealType: (formData.investmentType || "btl").toUpperCase(),
-            monthlyRent: rent,
-            interestRate: rate,
-            address: formData.address,
-            postcode: formData.postcode,
-            deposit: Math.round(price * (formData.depositPercentage / 100)),
-            override_mortgage_rate: rate,
-            override_monthly_rent: rent,
-            override_vacancy_rate: vacancy,
-            override_purchase_price: price,
-          }),
-        })
-        const data = await res.json()
-        if (data.success && data.metrics) {
-          setMetrics(data.metrics)
-        } else {
-          setError(data.message || "Scenario calculation failed")
-        }
-      } catch {
-        setError("Failed to reach analysis server")
-      } finally {
-        setLoading(false)
-      }
-    },
-    [formData]
-  )
-
-  const debouncedRun = useCallback(
-    (rate: number, rent: number, vacancy: number, price: number) => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(() => runScenario(rate, rent, vacancy, price), 600)
-    },
-    [runScenario]
-  )
-
-  const verdictConfig: Record<string, { text: string; cls: string }> = {
-    PROCEED: { text: "PROCEED", cls: "text-success" },
-    REVIEW:  { text: "REVIEW",  cls: "text-warning" },
-    AVOID:   { text: "AVOID",   cls: "text-destructive" },
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <SlidersHorizontal className="size-4 text-primary" />
-          <CardTitle className="text-sm">What-If Sensitivity Analysis</CardTitle>
-          {loading && <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />}
-        </div>
-        <CardDescription className="text-xs">
-          Adjust the sliders to instantly see how changes affect this deal
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-5">
-        {/* Sliders */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          {/* Mortgage Rate */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground">Mortgage Rate</span>
-              <span className="font-bold text-primary">{mortgageRate.toFixed(2)}%</span>
-            </div>
-            <Slider
-              min={1} max={12} step={0.25}
-              value={[mortgageRate]}
-              onValueChange={([v]) => {
-                setMortgageRate(v)
-                debouncedRun(v, monthlyRent, vacancyRate, purchasePrice)
-              }}
-            />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>1%</span><span>Current: {formData.interestRate}%</span><span>12%</span>
-            </div>
-          </div>
-
-          {/* Monthly Rent */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground">Monthly Rent</span>
-              <span className="font-bold text-primary">£{monthlyRent.toLocaleString("en-GB")}</span>
-            </div>
-            <Slider
-              min={300} max={Math.max(5000, formData.monthlyRent * 2)} step={25}
-              value={[monthlyRent]}
-              onValueChange={([v]) => {
-                setMonthlyRent(v)
-                debouncedRun(mortgageRate, v, vacancyRate, purchasePrice)
-              }}
-            />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>£300</span><span>Current: £{formData.monthlyRent.toLocaleString()}</span><span>£{Math.max(5000, formData.monthlyRent * 2).toLocaleString()}</span>
-            </div>
-          </div>
-
-          {/* Vacancy Rate */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground">Vacancy Rate</span>
-              <span className="font-bold text-primary">{vacancyRate.toFixed(1)}%</span>
-            </div>
-            <Slider
-              min={0} max={20} step={0.5}
-              value={[vacancyRate]}
-              onValueChange={([v]) => {
-                setVacancyRate(v)
-                debouncedRun(mortgageRate, monthlyRent, v, purchasePrice)
-              }}
-            />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>0% (fully let)</span><span>20% (~10 wks void)</span>
-            </div>
-          </div>
-
-          {/* Purchase Price Negotiation */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground">Purchase Price</span>
-              <span className="font-bold text-primary">£{purchasePrice.toLocaleString("en-GB")}</span>
-            </div>
-            <Slider
-              min={Math.round(formData.purchasePrice * 0.75)}
-              max={Math.round(formData.purchasePrice * 1.1)}
-              step={1000}
-              value={[purchasePrice]}
-              onValueChange={([v]) => {
-                setPurchasePrice(v)
-                debouncedRun(mortgageRate, monthlyRent, vacancyRate, v)
-              }}
-            />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>-25% (neg.)</span>
-              <span>Listed: £{formData.purchasePrice.toLocaleString()}</span>
-              <span>+10%</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Error */}
-        {error && (
-          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>
-        )}
-
-        {/* Scenario Results */}
-        {metrics && (
-          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scenario Outcome</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Verdict</span>
-                <span className={`text-sm font-bold ${verdictConfig[metrics.verdict]?.cls ?? "text-foreground"}`}>
-                  {metrics.verdict}
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Deal Score</span>
-                <span className="text-sm font-bold text-foreground">{metrics.deal_score}/100</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Monthly CF</span>
-                <span className={`text-sm font-bold ${metrics.monthly_cashflow >= 0 ? "text-success" : "text-destructive"}`}>
-                  {metrics.monthly_cashflow >= 0 ? "+" : ""}{formatCurrency(metrics.monthly_cashflow)}/mo
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Gross Yield</span>
-                <span className="text-sm font-bold text-foreground">{Number(metrics.gross_yield).toFixed(2)}%</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Net Yield</span>
-                <span className="text-sm font-bold text-foreground">{Number(metrics.net_yield).toFixed(2)}%</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Cash-on-Cash</span>
-                <span className="text-sm font-bold text-foreground">{Number(metrics.cash_on_cash).toFixed(2)}%</span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Annual CF</span>
-                <span className={`text-sm font-bold ${metrics.annual_cashflow >= 0 ? "text-success" : "text-destructive"}`}>
-                  {formatCurrency(metrics.annual_cashflow)}/yr
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted-foreground">Monthly Mortgage</span>
-                <span className="text-sm font-bold text-foreground">{formatCurrency(metrics.monthly_mortgage)}/mo</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!metrics && !loading && (
-          <p className="text-center text-xs text-muted-foreground">
-            Move any slider above to instantly calculate a scenario outcome
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
 // ── AI Insights ────────────────────────────────────────────────────────────
 function AIInsightsCard({
   strengths,
   risks,
   nextSteps,
   area,
-  benchmark,
-  riskFlags,
 }: {
   strengths?: string[]
   risks?: string[]
   nextSteps?: string[]
   area?: string
-  benchmark?: BackendResults["regional_benchmark"]
-  riskFlags?: BackendResults["risk_flags"]
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -1199,56 +747,16 @@ function AIInsightsCard({
         </Card>
       )}
 
-      {(area || benchmark || riskFlags?.length) && (
+      {area && (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <MapPin className="size-4 text-primary" />
               <CardTitle className="text-sm">Area Analysis</CardTitle>
-              {benchmark?.region_name && (
-                <Badge variant="outline" className="ml-auto text-xs">{benchmark.region_name}</Badge>
-              )}
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {area && (
-              <p className="text-sm leading-relaxed text-muted-foreground">{area}</p>
-            )}
-            {/* Live benchmark summary inline */}
-            {benchmark?.summary && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Live Market Benchmark</p>
-                <p className="text-xs leading-relaxed text-muted-foreground">{benchmark.summary}</p>
-                {benchmark.yield_vs_median_label && (
-                  <p className="mt-1 text-xs font-medium text-foreground">Yield: {benchmark.yield_vs_median_label}</p>
-                )}
-                {benchmark.cashflow_vs_avg_label && (
-                  <p className="text-xs font-medium text-foreground">Cashflow: {benchmark.cashflow_vs_avg_label}</p>
-                )}
-              </div>
-            )}
-            {/* Risk flag summary */}
-            {riskFlags && riskFlags.length > 0 && (
-              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-warning">Risk Summary</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {riskFlags.map((f) => (
-                    <span
-                      key={f.id}
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                        f.severity === "HIGH"
-                          ? "border-destructive/30 bg-destructive/10 text-destructive"
-                          : f.severity === "MEDIUM"
-                          ? "border-warning/30 bg-warning/10 text-warning"
-                          : "border-success/30 bg-success/10 text-success"
-                      }`}
-                    >
-                      {f.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+          <CardContent>
+            <p className="text-sm leading-relaxed text-muted-foreground">{area}</p>
           </CardContent>
         </Card>
       )}
@@ -1666,16 +1174,15 @@ export function AnalysisResults({
   const hasArticle4 = !!backendData?.article_4
   const hasLocation = !!(backendData?.location?.council || backendData?.location?.region)
   const hasValuation = !!backendData?.house_valuation
-  const hasRiskFlags = (backendData?.risk_flags?.length ?? 0) > 0
-  const hasBenchmark = !!backendData?.regional_benchmark?.region_name
   const hasAIInsights = !!(
     backendData?.ai_strengths?.length ||
     backendData?.ai_risks?.length ||
     backendData?.ai_next_steps?.length ||
-    backendData?.ai_area ||
-    hasBenchmark ||
-    hasRiskFlags
+    backendData?.ai_area
   )
+  const hasRiskFlags = (backendData?.risk_flags?.length ?? 0) > 0
+  const hasBenchmark = !!backendData?.regional_benchmark
+
   return (
     <div className="flex flex-col gap-6">
 
@@ -2177,15 +1684,6 @@ export function AnalysisResults({
         <StrategySuitability strategies={backendData?.strategy_recommendations} />
       )}
 
-      {/* ── Risk Flags ──────────────────────────────────────────────── */}
-      {hasRiskFlags && <RiskFlagsCard flags={backendData?.risk_flags} />}
-
-      {/* ── Regional Benchmark ──────────────────────────────────────── */}
-      {hasBenchmark && <RegionalBenchmarkCard benchmark={backendData?.regional_benchmark} />}
-
-      {/* ── Sensitivity Analysis ────────────────────────────────────── */}
-      <SensitivityAnalysisPanel formData={data} />
-
       {/* ── Sold & Rent Comparables ─────────────────────────────────── */}
       {hasSoldComparables && (
         <SoldComparablesTable comparables={backendData?.sold_comparables} />
@@ -2213,8 +1711,6 @@ export function AnalysisResults({
           risks={backendData?.ai_risks}
           area={backendData?.ai_area}
           nextSteps={backendData?.ai_next_steps}
-          benchmark={backendData?.regional_benchmark}
-          riskFlags={backendData?.risk_flags}
         />
       ) : (
         /* Fallback: raw AI text when no structured insights available */
