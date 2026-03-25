@@ -223,8 +223,10 @@ export interface BackendResults {
     monthly_rent: number
     bedrooms?: number
     type?: string
+    tenure?: string
     source?: string
     confidence?: string
+    distance_miles?: number
   }>
   house_valuation?: {
     estimate: number
@@ -235,4 +237,29 @@ export interface BackendResults {
   }
   avg_sold_price?: number
   market_source?: string
+  risk_flags?: Array<{
+    id: string
+    name: string
+    severity: "HIGH" | "MEDIUM" | "LOW"
+    color: "red" | "amber" | "green"
+    icon?: string
+    description: string
+    mitigation: string
+  }>
+  regional_benchmark?: {
+    region_name?: string
+    postcode_area?: string
+    data_source?: string
+    regional_median_yield?: number
+    your_yield?: number
+    yield_difference?: number
+    yield_vs_median_label?: string
+    yield_percentile?: number
+    regional_avg_cashflow?: number
+    your_cashflow?: number
+    cashflow_difference?: number
+    cashflow_vs_avg_label?: string
+    cashflow_percentile?: number
+    summary?: string
+  }
 }
