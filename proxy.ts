@@ -12,7 +12,7 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3000",
 ]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
   // Handle CORS preflight
