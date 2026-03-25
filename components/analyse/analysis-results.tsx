@@ -917,10 +917,6 @@ function RegionalBenchmarkPanel({ benchmark }: { benchmark?: RegionalBenchmark }
 }
 
 // ── Sensitivity Analysis Panel ──────────────────────────────────────────────
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_API_URL ||
-  "https://metusa-deal-analyzer.onrender.com"
-
 function SensitivityAnalysisPanel({
   baseFormData,
   baseResults,
@@ -942,7 +938,7 @@ function SensitivityAnalysisPanel({
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`${BACKEND_URL}/api/sensitivity-analysis`, {
+        const res = await fetch(`/api/sensitivity-analysis`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1701,15 +1697,30 @@ export function AnalysisResults({
       {/* ── Regional Benchmarks ─────────────────────────────────────── */}
       {hasBenchmark && <RegionalBenchmarkPanel benchmark={backendData?.regional_benchmark} />}
 
+      {/* ── AI Area Insight ─────────────────────────────────────────── */}
+      {backendData?.ai_area && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <MapPin className="size-4 text-primary" />
+              <CardTitle className="text-sm">Area Analysis</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm leading-relaxed text-muted-foreground">{backendData.ai_area}</p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── Sensitivity Analysis ────────────────────────────────────── */}
       <SensitivityAnalysisPanel baseFormData={data} baseResults={results} />
 
-      {/* ── AI Insights (Strengths / Risks / Area / Next Steps) ─────── */}
+      {/* ── AI Insights (Strengths / Risks / Next Steps) ─────────────── */}
       {hasAIInsights ? (
         <AIInsightsCard
           strengths={backendData?.ai_strengths}
           risks={backendData?.ai_risks}
-          area={backendData?.ai_area}
+          area={undefined}
           nextSteps={backendData?.ai_next_steps}
         />
       ) : (

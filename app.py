@@ -4452,11 +4452,11 @@ def ai_analyze():
         # Combine results
         results = {
             **calculated_metrics,
-            'ai_verdict': ai_insights['verdict'],
-            'ai_strengths': ai_insights['strengths'],
-            'ai_risks': ai_insights['risks'],
-            'ai_area': ai_insights['area'],
-            'ai_next_steps': ai_insights['next_steps'],
+            'ai_verdict': ai_insights.get('verdict', ''),
+            'ai_strengths': ai_insights.get('strengths', []),
+            'ai_risks': ai_insights.get('risks', []),
+            'ai_area': ai_insights.get('area', ''),
+            'ai_next_steps': ai_insights.get('next_steps', []),
             'sold_comparables': sold_comparables,
             'rent_comparables': rent_comparables,
             'house_valuation': house_valuation,
