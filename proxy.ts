@@ -5,16 +5,19 @@ import { updateSession } from "@/lib/supabase/proxy"
 // Secret key for developer access
 const DEV_SECRET = "metalyzi2026"
 
-/** Apply security hardening headers to every outgoing response. */
-function addSecurityHeaders(response: NextResponse): NextResponse {
-  response.headers.set("X-Content-Type-Options", "nosniff")
-  response.headers.set("X-Frame-Options", "DENY")
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-  return response
-}
+// Allowed origins for CORS
+const ALLOWED_ORIGINS = [
+  "https://metalyzi.co.uk",
+  "https://www.metalyzi.co.uk",
+  "http://localhost:3000",
+]
 
 export async function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
+
+  // Handle CORS preflight
+  const origin = request.headers.get("origin")
+  const isAllowedOrigin = !origin || ALLOWED_ORIGINS.includes(origin)
 
   // Check for dev access key in URL
   const hasDevKey = searchParams.get("dev") === DEV_SECRET
@@ -26,8 +29,9 @@ export async function proxy(request: NextRequest) {
       maxAge: 60 * 60 * 24 * 7, // 7 days
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
     })
-    return addSecurityHeaders(response)
+    return response
   }
 
   // Check if dev cookie is present
@@ -44,6 +48,8 @@ export async function proxy(request: NextRequest) {
     "/favicon.ico",
     "/logo.png",
     "/icon.svg",
+    "/robots.txt",
+    "/.well-known/security.txt",
   ]
 
   // Check if the current path is allowed
@@ -58,22 +64,32 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/static/") ||
     pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|css|js)$/)
   ) {
-    return addSecurityHeaders(await updateSession(request))
+    const response = await updateSession(request)
+    
+    // Add CORS headers for API routes
+    if (pathname.startsWith("/api/")) {
+      if (isAllowedOrigin && origin) {
+        response.headers.set("Access-Control-Allow-Origin", origin)
+      }
+      response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+      response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      response.headers.set("Access-Control-Allow-Credentials", "true")
+    }
+    
+    return response
   }
 
   // If has dev cookie, allow access to everything (but refresh session)
   if (hasDevCookie) {
-    return addSecurityHeaders(await updateSession(request))
+    return await updateSession(request)
   }
 
   // Redirect to coming-soon if not allowed
   if (!isAllowed) {
-    return addSecurityHeaders(
-      NextResponse.redirect(new URL("/coming-soon", request.url))
-    )
+    return NextResponse.redirect(new URL("/coming-soon", request.url))
   }
 
-  return addSecurityHeaders(await updateSession(request))
+  return await updateSession(request)
 }
 
 export const config = {
