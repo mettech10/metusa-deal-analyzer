@@ -419,45 +419,55 @@ function HouseValuationCard({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-end gap-8">
-          <div>
-            <p className="text-xs text-muted-foreground">Estimated Value</p>
-            <p className="text-2xl font-bold text-foreground">
-              {formatCurrency(estimate)}
-            </p>
-            <p className={`text-xs font-medium ${confidenceColor}`}>
-              {valuation.confidence} confidence
-            </p>
-          </div>
-          {diff !== null && pct !== null && (
-            <div>
-              <p className="text-xs text-muted-foreground">vs Purchase Price</p>
-              <p
-                className={`text-lg font-semibold ${
-                  isUnder
-                    ? "text-success"
-                    : isOver
-                      ? "text-destructive"
-                      : "text-foreground"
-                }`}
-              >
-                {diff > 0 ? "+" : ""}
-                {formatCurrency(diff)} ({pct > 0 ? "+" : ""}
-                {pct.toFixed(1)}%)
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {isUnder
-                  ? "Below market — potential uplift"
-                  : isOver
-                    ? "Above market estimate"
-                    : "At market value"}
-              </p>
+        {estimate ? (
+          <>
+            <div className="flex items-end gap-8">
+              <div>
+                <p className="text-xs text-muted-foreground">Estimated Value</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {formatCurrency(estimate)}
+                </p>
+                {valuation.confidence && (
+                  <p className={`text-xs font-medium ${confidenceColor}`}>
+                    {valuation.confidence} confidence
+                  </p>
+                )}
+              </div>
+              {diff !== null && pct !== null && (
+                <div>
+                  <p className="text-xs text-muted-foreground">vs Purchase Price</p>
+                  <p
+                    className={`text-lg font-semibold ${
+                      isUnder
+                        ? "text-success"
+                        : isOver
+                          ? "text-destructive"
+                          : "text-foreground"
+                    }`}
+                  >
+                    {diff > 0 ? "+" : ""}
+                    {formatCurrency(diff)} ({pct > 0 ? "+" : ""}
+                    {pct.toFixed(1)}%)
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {isUnder
+                      ? "Below market — potential uplift"
+                      : isOver
+                        ? "Above market estimate"
+                        : "At market value"}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {valuation.note && (
-          <p className="mt-3 border-t border-border/40 pt-3 text-xs text-muted-foreground">
-            {valuation.note}
+            {valuation.note && (
+              <p className="mt-3 border-t border-border/40 pt-3 text-xs text-muted-foreground">
+                {valuation.note}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {valuation.note || "No external valuation available. Commission a RICS survey for an accurate figure."}
           </p>
         )}
       </CardContent>
@@ -1249,13 +1259,13 @@ export function AnalysisResults({
       <Tabs defaultValue="cashflow" className="w-full">
         <TabsList
           className={`w-full grid ${
-            hasSoldComparables || hasRentComparables ? "grid-cols-4" : "grid-cols-3"
+            data.postcode ? "grid-cols-4" : "grid-cols-3"
           }`}
         >
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="costs">Costs</TabsTrigger>
           <TabsTrigger value="projection">5-Year</TabsTrigger>
-          {(hasSoldComparables || hasRentComparables) && (
+          {data.postcode && (
             <TabsTrigger value="comparables">Comparables</TabsTrigger>
           )}
         </TabsList>
@@ -1434,7 +1444,7 @@ export function AnalysisResults({
           </Card>
         </TabsContent>
 
-        {(hasSoldComparables || hasRentComparables) && (
+        {data.postcode && (
           <TabsContent value="comparables" className="mt-4">
             <PropertyComparables
               postcode={data.postcode}
@@ -1697,17 +1707,29 @@ export function AnalysisResults({
       {/* ── Regional Benchmarks ─────────────────────────────────────── */}
       {hasBenchmark && <RegionalBenchmarkPanel benchmark={backendData?.regional_benchmark} />}
 
-      {/* ── AI Area Insight ─────────────────────────────────────────── */}
-      {backendData?.ai_area && (
+      {/* ── AI Verdict + Area Analysis (combined) ───────────────────── */}
+      {(backendData?.ai_verdict || backendData?.ai_area) && (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <MapPin className="size-4 text-primary" />
-              <CardTitle className="text-sm">Area Analysis</CardTitle>
+              <CardTitle className="text-sm">AI Area Verdict</CardTitle>
             </div>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm leading-relaxed text-muted-foreground">{backendData.ai_area}</p>
+          <CardContent className="space-y-3">
+            {backendData?.ai_verdict && (
+              <p className="text-sm leading-relaxed text-foreground">{backendData.ai_verdict}</p>
+            )}
+            {backendData?.ai_area && (
+              <>
+                {backendData?.ai_verdict && (
+                  <div className="border-t border-border/40 pt-3">
+                    <p className="mb-1 text-xs font-medium text-muted-foreground uppercase tracking-wide">Area Analysis</p>
+                  </div>
+                )}
+                <p className="text-sm leading-relaxed text-muted-foreground">{backendData.ai_area}</p>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
