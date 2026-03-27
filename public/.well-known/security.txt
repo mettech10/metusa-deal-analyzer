@@ -1,6 +1,0 @@
-Contact: mailto:security@metalyzi.co.uk
-Expires: 2027-03-22T00:00:00.000Z
-Preferred-Languages: en
-Policy: https://metalyzi.co.uk/security-policy
-Acknowledgments: Thank you for helping keep Metalyzi secure!
-Canonical: https://metalyzi.co.uk/.well-known/security.txt

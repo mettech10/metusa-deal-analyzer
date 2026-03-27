@@ -268,35 +268,286 @@ def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     return data
 
 
-def scrape_with_jina(url: str) -> dict:
-    """Scrape property using Jina Reader API.
-    Prepends https://r.jina.ai/ to the target URL and gets back clean markdown.
-    Works for Rightmove, Zoopla, OnTheMarket and other JS-heavy sites.
-    Set JINA_API_KEY env var for higher rate limits (free key from jina.ai).
+def _apify_run_actor(actor_id: str, input_payload: dict, timeout_secs: int = 60) -> list:
+    """Run an Apify actor synchronously and return its dataset items.
+    Uses the run-sync-get-dataset-items endpoint so we get results in one call.
+    Returns a list of result objects, or an empty list on failure.
     """
-    jina_url = f'https://r.jina.ai/{url}'
-    headers = {
-        'Accept': 'text/plain',
-        'X-Timeout': '20',
-        'X-Return-Format': 'markdown',
-        'X-No-Cache': 'true',
-        'X-Remove-Selector': 'nav,footer,header,[class*="cookie"],[class*="banner"],[class*="popup"]',
-    }
-    if JINA_API_KEY:
-        headers['Authorization'] = f'Bearer {JINA_API_KEY}'
+    if not APIFY_API_TOKEN:
+        print(f"[Apify] No APIFY_API_TOKEN configured, skipping actor {actor_id}")
+        return []
 
+    api_url = (
+        f'https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items'
+        f'?token={APIFY_API_TOKEN}&timeout={timeout_secs}&memory=512'
+    )
     try:
-        response = requests.get(jina_url, headers=headers, timeout=22)
+        response = requests.post(
+            api_url,
+            json=input_payload,
+            timeout=timeout_secs + 10,
+        )
         if response.status_code != 200:
-            print(f"[Jina] Error: status {response.status_code}")
-            return None
-
-        text = response.text
-        return _parse_property_markdown(text, source='Jina')
-
+            print(f"[Apify/{actor_id}] Error: HTTP {response.status_code} — {response.text[:200]}")
+            return []
+        items = response.json()
+        if not isinstance(items, list):
+            print(f"[Apify/{actor_id}] Unexpected response shape: {str(items)[:200]}")
+            return []
+        return items
     except Exception as e:
-        print(f"[Jina] Exception: {e}")
+        print(f"[Apify/{actor_id}] Exception: {e}")
+        return []
+
+
+def _parse_price(raw) -> int | None:
+    """Parse a price value from various formats (int, '£250,000', '250000 GBP', etc.)."""
+    if raw is None:
         return None
+    try:
+        return int(str(raw).replace('£', '').replace(',', '').replace('GBP', '').split()[0])
+    except Exception:
+        return None
+
+
+def _parse_int(raw) -> int | None:
+    """Safely coerce a value to int."""
+    try:
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
+
+
+def scrape_rightmove_with_apify(url: str) -> dict:
+    """Scrape a single Rightmove listing using the Apify Rightmove actor.
+    Returns a rich dict with all available property fields.
+    """
+    print(f"[Apify/Rightmove] Scraping {url}")
+    items = _apify_run_actor(
+        APIFY_RIGHTMOVE_ACTOR_ID,
+        {'startUrls': [{'url': url}], 'maxItems': 1},
+        timeout_secs=55,
+    )
+    if not items:
+        return None
+
+    item = items[0]
+
+    # ── Images ───────────────────────────────────────────────────────────────
+    images_raw = item.get('images') or item.get('propertyImages') or []
+    if isinstance(images_raw, list):
+        image_urls = [
+            (img.get('srcUrl') or img.get('url') or img) if isinstance(img, dict) else str(img)
+            for img in images_raw
+        ]
+        image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        image_urls = []
+
+    floorplan_raw = item.get('floorplans') or item.get('floorPlanImages') or []
+    if isinstance(floorplan_raw, list):
+        floorplan_urls = [
+            (fp.get('srcUrl') or fp.get('url') or fp) if isinstance(fp, dict) else str(fp)
+            for fp in floorplan_raw
+        ]
+        floorplan_urls = [u for u in floorplan_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        floorplan_urls = []
+
+    # ── Agent ────────────────────────────────────────────────────────────────
+    agent = item.get('agent') or item.get('contactInfo') or {}
+    if not isinstance(agent, dict):
+        agent = {}
+
+    # ── Key features ────────────────────────────────────────────────────────
+    features_raw = item.get('keyFeatures') or item.get('features') or []
+    if isinstance(features_raw, str):
+        features = [f.strip() for f in features_raw.split('\n') if f.strip()]
+    elif isinstance(features_raw, list):
+        features = [str(f) for f in features_raw if f]
+    else:
+        features = []
+
+    # ── Tenure / lease ───────────────────────────────────────────────────────
+    tenure_raw = item.get('tenure') or item.get('tenureType') or ''
+    if isinstance(tenure_raw, dict):
+        tenure_type = tenure_raw.get('tenureType') or tenure_raw.get('type') or ''
+        lease_years = _parse_int(tenure_raw.get('yearsRemainingOnLease') or tenure_raw.get('leaseYearsRemaining'))
+    else:
+        tenure_type = str(tenure_raw)
+        lease_years = None
+
+    # ── Floor area ───────────────────────────────────────────────────────────
+    sqft = _parse_int(item.get('floorAreaSqft') or item.get('sqft'))
+    sqm  = item.get('floorAreaSqm') or item.get('sqm')
+    if sqm is None and sqft:
+        sqm = round(sqft / 10.764, 1)
+    sqm = round(float(sqm), 1) if sqm else None
+
+    data = {
+        # Core fields (backward-compatible with the rest of the pipeline)
+        'address':        item.get('address') or item.get('propertyAddress') or 'Address not available',
+        'postcode':       item.get('postcode') or item.get('propertyPostcode') or None,
+        'price':          _parse_price(item.get('price') or item.get('priceAmount')),
+        'property_type':  item.get('propertyType') or item.get('type') or None,
+        'bedrooms':       _parse_int(item.get('bedrooms') or item.get('beds')),
+        'description':    item.get('description') or item.get('summary') or None,
+        'sqm':            sqm,
+        # Extended fields (Section 2)
+        'sqft':           sqft,
+        'bathrooms':      _parse_int(item.get('bathrooms') or item.get('baths')),
+        'tenure_type':    tenure_type or None,
+        'lease_years':    lease_years,
+        'key_features':   features,
+        'images':         image_urls,
+        'floorplans':     floorplan_urls,
+        'agent_name':     agent.get('name') or agent.get('agentName') or item.get('agentName') or None,
+        'agent_phone':    agent.get('telephone') or agent.get('phone') or item.get('agentPhone') or None,
+        'agent_address':  agent.get('address') or agent.get('branchAddress') or None,
+        'listing_url':    url,
+        'source':         'rightmove',
+    }
+    print(f"[Apify/Rightmove] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+          f"postcode={data['postcode']}, images={len(image_urls)}")
+    return data
+
+
+def scrape_onthemarket_with_apify(url: str) -> dict:
+    """Scrape a single OnTheMarket listing using the Apify OnTheMarket actor.
+    Returns a rich dict with all available property fields.
+    """
+    print(f"[Apify/OnTheMarket] Scraping {url}")
+    items = _apify_run_actor(
+        APIFY_ONTHEMARKET_ACTOR_ID,
+        {'startUrls': [{'url': url}], 'maxItems': 1},
+        timeout_secs=55,
+    )
+    if not items:
+        return None
+
+    item = items[0]
+
+    # ── Images ───────────────────────────────────────────────────────────────
+    images_raw = item.get('images') or item.get('propertyImages') or []
+    if isinstance(images_raw, list):
+        image_urls = [
+            (img.get('srcUrl') or img.get('url') or img) if isinstance(img, dict) else str(img)
+            for img in images_raw
+        ]
+        image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        image_urls = []
+
+    floorplan_raw = item.get('floorplans') or item.get('floorPlanImages') or []
+    if isinstance(floorplan_raw, list):
+        floorplan_urls = [
+            (fp.get('srcUrl') or fp.get('url') or fp) if isinstance(fp, dict) else str(fp)
+            for fp in floorplan_raw
+        ]
+        floorplan_urls = [u for u in floorplan_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        floorplan_urls = []
+
+    # ── Agent ────────────────────────────────────────────────────────────────
+    agent = item.get('agent') or item.get('contactInfo') or {}
+    if not isinstance(agent, dict):
+        agent = {}
+
+    # ── Key features ────────────────────────────────────────────────────────
+    features_raw = item.get('keyFeatures') or item.get('features') or []
+    if isinstance(features_raw, str):
+        features = [f.strip() for f in features_raw.split('\n') if f.strip()]
+    elif isinstance(features_raw, list):
+        features = [str(f) for f in features_raw if f]
+    else:
+        features = []
+
+    # ── Tenure / lease ───────────────────────────────────────────────────────
+    tenure_raw = item.get('tenure') or item.get('tenureType') or ''
+    if isinstance(tenure_raw, dict):
+        tenure_type = tenure_raw.get('tenureType') or tenure_raw.get('type') or ''
+        lease_years = _parse_int(tenure_raw.get('yearsRemainingOnLease') or tenure_raw.get('leaseYearsRemaining'))
+    else:
+        tenure_type = str(tenure_raw)
+        lease_years = None
+
+    # ── Floor area ───────────────────────────────────────────────────────────
+    sqft = _parse_int(item.get('floorAreaSqft') or item.get('sqft'))
+    sqm  = item.get('floorAreaSqm') or item.get('sqm')
+    if sqm is None and sqft:
+        sqm = round(sqft / 10.764, 1)
+    sqm = round(float(sqm), 1) if sqm else None
+
+    data = {
+        # Core fields
+        'address':        item.get('address') or item.get('propertyAddress') or 'Address not available',
+        'postcode':       item.get('postcode') or None,
+        'price':          _parse_price(item.get('price') or item.get('priceAmount')),
+        'property_type':  item.get('propertyType') or item.get('type') or None,
+        'bedrooms':       _parse_int(item.get('bedrooms') or item.get('beds')),
+        'description':    item.get('description') or item.get('summary') or None,
+        'sqm':            sqm,
+        # Extended fields (Section 2)
+        'sqft':           sqft,
+        'bathrooms':      _parse_int(item.get('bathrooms') or item.get('baths')),
+        'tenure_type':    tenure_type or None,
+        'lease_years':    lease_years,
+        'key_features':   features,
+        'images':         image_urls,
+        'floorplans':     floorplan_urls,
+        'agent_name':     agent.get('name') or agent.get('agentName') or item.get('agentName') or None,
+        'agent_phone':    agent.get('telephone') or agent.get('phone') or item.get('agentPhone') or None,
+        'agent_address':  agent.get('address') or agent.get('branchAddress') or None,
+        'listing_url':    url,
+        'source':         'onthemarket',
+    }
+    print(f"[Apify/OTM] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+          f"postcode={data['postcode']}, images={len(image_urls)}")
+    return data
+
+
+def scrape_spareroom_with_apify(postcode: str, max_results: int = 10) -> list:
+    """Scrape SpareRoom listings near a postcode using the Apify SpareRoom actor.
+    Returns a list of room listing dicts with all required HMO comparable fields.
+    """
+    print(f"[Apify/SpareRoom] Scraping rooms near {postcode}")
+    search_url = (
+        f'https://www.spareroom.co.uk/flatshare/?search_by=postcode'
+        f'&search={postcode.replace(" ", "+")}&rooms_for=0&rooms_offered=1'
+    )
+    items = _apify_run_actor(
+        APIFY_SPAREROOM_ACTOR_ID,
+        {'startUrls': [{'url': search_url}], 'maxItems': max_results},
+        timeout_secs=60,
+    )
+    results = []
+    for item in items:
+        rent_val = _parse_price(
+            item.get('monthlyRent') or item.get('rent') or item.get('price')
+        )
+        bills_raw = item.get('billsIncluded') or item.get('bills') or ''
+        if isinstance(bills_raw, bool):
+            bills_included = 'Yes' if bills_raw else 'No'
+        elif str(bills_raw).lower() in ('yes', 'true', '1', 'included'):
+            bills_included = 'Yes'
+        elif str(bills_raw).lower() in ('no', 'false', '0', 'not included'):
+            bills_included = 'No'
+        else:
+            bills_included = 'Unknown'
+
+        results.append({
+            'title':          item.get('title') or item.get('listingTitle') or item.get('heading') or 'Room to rent',
+            'address':        item.get('address') or item.get('area') or postcode,
+            'postcode':       item.get('postcode') or postcode,
+            'monthly_rent':   rent_val,
+            'bills_included': bills_included,
+            'num_rooms':      _parse_int(item.get('totalRooms') or item.get('numRooms') or item.get('roomsInProperty')),
+            'room_type':      item.get('roomType') or item.get('type') or item.get('roomSize') or 'Unknown',
+            'available_from': item.get('availableFrom') or item.get('available') or item.get('dateAvailable') or 'Now',
+            'listing_url':    item.get('url') or item.get('listingUrl') or item.get('link') or '',
+        })
+    print(f"[Apify/SpareRoom] Got {len(results)} results for {postcode}")
+    return results
 
 
 def scrape_with_firecrawl(url: str) -> dict:
@@ -702,10 +953,15 @@ def set_security_headers(response):
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     return response
 
-# ── Jina Reader API (URL-to-markdown scraping) ───────────────────────────────
-JINA_API_KEY = os.environ.get('JINA_API_KEY', '')
+# ── Apify (actor-based scraping for Rightmove, OnTheMarket, SpareRoom) ───────
+APIFY_API_TOKEN = os.environ.get('APIFY_API_TOKEN', '')
 
-# ── Firecrawl API (URL-to-markdown, runs in parallel with Jina) ──────────────
+# TODO: Verify these actor IDs are correct in your Apify console before deploying.
+APIFY_RIGHTMOVE_ACTOR_ID    = 'dtrungtin/rightmove-scraper'
+APIFY_ONTHEMARKET_ACTOR_ID  = 'misceres/on-the-market-scraper'
+APIFY_SPAREROOM_ACTOR_ID    = 'misceres/spareroom-scraper'
+
+# ── Firecrawl API (URL-to-markdown, runs in parallel with Apify) ─────────────
 FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
 
 # ── ScrapingBee (legacy, no longer used) ─────────────────────────────────────
@@ -3252,19 +3508,30 @@ def health_check():
     """Health check endpoint — kept public for uptime monitoring, returns minimal info only."""
     return jsonify({'status': 'ok'})
 
-@app.route('/api/test-jina')
+@app.route('/api/test-apify')
 @admin_required
-def test_jina():
-    """Test Jina Reader connectivity (admin only)."""
+def test_apify():
+    """Test Apify connectivity (admin only)."""
+    if not APIFY_API_TOKEN:
+        return jsonify({'status': 'not configured', 'service': 'Apify', 'api_key_present': False,
+                        'timestamp': datetime.now().isoformat()})
     try:
-        resp = requests.get('https://r.jina.ai/', timeout=10)
-        reachable = resp.status_code < 500
-    except Exception as e:
+        resp = requests.get(
+            f'https://api.apify.com/v2/users/me?token={APIFY_API_TOKEN}',
+            timeout=10,
+        )
+        reachable = resp.status_code == 200
+    except Exception:
         reachable = False
     return jsonify({
         'status': 'reachable' if reachable else 'unreachable',
-        'service': 'Jina Reader (r.jina.ai)',
-        'api_key_required': False,
+        'service': 'Apify',
+        'api_key_present': bool(APIFY_API_TOKEN),
+        'actors': {
+            'rightmove':   APIFY_RIGHTMOVE_ACTOR_ID,
+            'onthemarket': APIFY_ONTHEMARKET_ACTOR_ID,
+            'spareroom':   APIFY_SPAREROOM_ACTOR_ID,
+        },
         'timestamp': datetime.now().isoformat()
     })
 
@@ -3389,7 +3656,7 @@ def admin_stats():
         'PropertyData': bool(os.environ.get('PROPERTY_DATA_API_KEY')),
         'Stripe': bool(os.environ.get('STRIPE_SECRET_KEY')),
         'Supabase': bool(os.environ.get('SUPABASE_URL')),
-        'Jina Reader': bool(os.environ.get('JINA_API_KEY')),
+        'Apify': bool(os.environ.get('APIFY_API_TOKEN')),
         'ScrapingBee': bool(os.environ.get('SCRAPINGBEE_API_KEY')),
         'Ideal Postcodes': bool(os.environ.get('IDEAL_POSTCODES_API_KEY')),
         'EPC API': bool(os.environ.get('EPC_API_EMAIL')),
@@ -3712,8 +3979,9 @@ def extract_url():
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
         
-        # Run Jina, Firecrawl, and basic scraper in parallel.
-        print("[extract-url] Running Jina + Firecrawl + basic scraper in parallel...")
+        # Route to the right Apify actor based on the listing URL domain,
+        # then fall back to Firecrawl and the basic scraper for unknown sites.
+        print("[extract-url] Running Apify actor + Firecrawl + basic scraper in parallel...")
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _has_data(d):
@@ -3722,20 +3990,30 @@ def extract_url():
             addr = d.get('address')
             return bool(d.get('price') or (addr and addr != 'Address not available'))
 
+        # Pick the appropriate Apify scraper for the URL's domain.
+        if 'rightmove.co.uk' in url:
+            apify_fn = scrape_rightmove_with_apify
+        elif 'onthemarket.com' in url:
+            apify_fn = scrape_onthemarket_with_apify
+        else:
+            apify_fn = None  # No Apify actor for this site; fall back to Firecrawl
+
         with ThreadPoolExecutor(max_workers=3) as pool:
-            jina_future      = pool.submit(scrape_with_jina, url)
+            apify_future     = pool.submit(apify_fn, url) if apify_fn else None
             firecrawl_future = pool.submit(scrape_with_firecrawl, url)
             basic_future     = pool.submit(extract_property_from_url, url)
 
-            jina_result      = None
+            apify_result     = None
             firecrawl_result = None
             basic_result     = None
+
+            futures = [f for f in [apify_future, firecrawl_future, basic_future] if f is not None]
             try:
-                for future in as_completed([jina_future, firecrawl_future, basic_future], timeout=27):
+                for future in as_completed(futures, timeout=70):
                     result = future.result()
-                    if future is jina_future:
-                        jina_result = result
-                        print(f"[extract-url] Jina finished, has_data={_has_data(result)}")
+                    if future is apify_future:
+                        apify_result = result
+                        print(f"[extract-url] Apify finished, has_data={_has_data(result)}")
                     elif future is firecrawl_future:
                         firecrawl_result = result
                         print(f"[extract-url] Firecrawl finished, has_data={_has_data(result)}")
@@ -3745,16 +4023,16 @@ def extract_url():
             except Exception:
                 pass
 
-            # Priority: Jina > Firecrawl > basic scraper.
+            # Priority: Apify > Firecrawl > basic scraper.
             # API scraper fields take precedence over basic HTML parse.
             def _merge(api_result, base_result):
                 return {**base_result, **{
                     k: v for k, v in api_result.items() if v not in (None, '', 'Address not available')
                 }}
 
-            if _has_data(jina_result):
-                extracted_data = _merge(jina_result, basic_result) if _has_data(basic_result) else jina_result
-                print("[extract-url] Using Jina result" + (" (merged with basic)" if _has_data(basic_result) else ""))
+            if _has_data(apify_result):
+                extracted_data = _merge(apify_result, basic_result) if _has_data(basic_result) else apify_result
+                print("[extract-url] Using Apify result" + (" (merged with basic)" if _has_data(basic_result) else ""))
             elif _has_data(firecrawl_result):
                 extracted_data = _merge(firecrawl_result, basic_result) if _has_data(basic_result) else firecrawl_result
                 print("[extract-url] Using Firecrawl result" + (" (merged with basic)" if _has_data(basic_result) else ""))
@@ -3793,6 +4071,129 @@ def extract_url():
             'success': False,
             'message': 'Error extracting data from URL'
         }), 500
+
+@app.route('/api/comparables', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_comparables():
+    """Return SpareRoom rental comparables for a given postcode.
+    Only intended to be called when the investment strategy is HMO.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json(silent=True) or {}
+        postcode = (data.get('postcode') or '').strip()
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+        max_results = min(int(data.get('maxResults', 10)), 20)
+
+        listings = scrape_spareroom_with_apify(postcode, max_results=max_results)
+
+        return jsonify({
+            'success': True,
+            'postcode': postcode,
+            'listings': listings,
+            'count': len(listings),
+        })
+
+    except Exception as e:
+        app.logger.error(f'Comparables error: {e}')
+        return jsonify({'success': False, 'message': 'Error fetching comparables'}), 500
+
+
+@app.route('/api/hmo-analysis', methods=['POST'])
+@limiter.limit("5 per minute")
+def hmo_analysis():
+    """Run AI analysis on SpareRoom listing data and return HMO area verdict.
+    Expects: { postcode: str, listings: [...SpareRoom listing dicts] }
+    Returns: { success, analysis: { demand, rentRange, roomTypes, patterns, verdict } }
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json(silent=True) or {}
+        postcode = (data.get('postcode') or '').strip()
+        listings = data.get('listings') or []
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+        if not listings:
+            return jsonify({'success': False, 'message': 'listings array is required'}), 400
+
+        # Build a concise summary of the listings for the AI prompt
+        summary_lines = []
+        for i, lst in enumerate(listings[:15], 1):
+            rent = f"£{lst.get('monthly_rent', '?')}/mo" if lst.get('monthly_rent') else "rent unknown"
+            bills = f"bills {'included' if lst.get('bills_included') == 'Yes' else 'not included'}"
+            room_type = lst.get('room_type') or 'unknown type'
+            summary_lines.append(f"{i}. {room_type} room — {rent} ({bills})")
+
+        listings_text = '\n'.join(summary_lines)
+
+        prompt = f"""You are a UK property investment analyst. Analyse the following SpareRoom listings
+near postcode {postcode} and provide a clear HMO demand assessment.
+
+SPAREROOM LISTINGS:
+{listings_text}
+
+Respond with a JSON object (no markdown, raw JSON only) with exactly these fields:
+{{
+  "demand": "strong" | "moderate" | "weak",
+  "rentRange": "e.g. £450-£650 pcm",
+  "roomTypes": "e.g. mostly double rooms, some singles",
+  "patterns": "1-2 sentences on patterns worth noting for investors",
+  "verdict": "2-3 sentence overall verdict on HMO viability for this postcode"
+}}"""
+
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            # Rule-based fallback if no AI key
+            rents = [lst.get('monthly_rent') for lst in listings if lst.get('monthly_rent')]
+            if rents:
+                lo, hi = min(rents), max(rents)
+                rent_range = f"£{lo}–£{hi} pcm"
+            else:
+                rent_range = "Unknown"
+            bills_included_count = sum(1 for lst in listings if lst.get('bills_included') == 'Yes')
+            room_types_raw = [lst.get('room_type', '') for lst in listings if lst.get('room_type')]
+            analysis = {
+                'demand':    'moderate',
+                'rentRange': rent_range,
+                'roomTypes': ', '.join(set(room_types_raw)) if room_types_raw else 'Mixed',
+                'patterns':  f"{bills_included_count}/{len(listings)} listings include bills. {len(listings)} active listings found near {postcode}.",
+                'verdict':   f"Based on {len(listings)} live SpareRoom listings near {postcode} with rents {rent_range}, this area shows activity for HMO investment. Further research recommended.",
+            }
+            return jsonify({'success': True, 'analysis': analysis})
+
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+
+        message = client.messages.create(
+            model=model_id,
+            max_tokens=512,
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+        raw_text = message.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw_text.startswith('```'):
+            raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
+            raw_text = re.sub(r'\s*```$', '', raw_text)
+
+        analysis = json.loads(raw_text)
+        return jsonify({'success': True, 'analysis': analysis})
+
+    except json.JSONDecodeError as e:
+        app.logger.error(f'HMO analysis JSON parse error: {e}')
+        return jsonify({'success': False, 'message': 'AI returned unexpected format'}), 500
+    except Exception as e:
+        app.logger.error(f'HMO analysis error: {e}')
+        return jsonify({'success': False, 'message': 'Error running HMO analysis'}), 500
+
 
 @app.route('/epc-lookup', methods=['POST'])
 @limiter.limit("20 per minute")

@@ -1,7 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /admin/
-Disallow: /api/
-Disallow: /coming-soon
-
-Sitemap: https://metalyzi.co.uk/sitemap.xml
