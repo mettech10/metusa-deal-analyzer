@@ -42,6 +42,20 @@ export async function POST(req: Request) {
           propertyType: raw.propertyType || raw.property_type || "house",
           bedrooms: Number(raw.bedrooms) || 3,
           ...(raw.sqft ? { sqft: Number(raw.sqft) } : {}),
+          // Extended fields from Apify scrapers
+          ...(raw.bathrooms != null ? { bathrooms: Number(raw.bathrooms) } : {}),
+          ...(raw.sqm != null ? { sqm: Number(raw.sqm) } : {}),
+          ...(raw.tenure_type ? { tenureType: raw.tenure_type } : {}),
+          ...(raw.lease_years != null ? { leaseYears: Number(raw.lease_years) } : {}),
+          ...(raw.key_features ? { keyFeatures: raw.key_features } : {}),
+          ...(raw.description ? { description: raw.description } : {}),
+          ...(raw.images ? { images: raw.images } : {}),
+          ...(raw.floorplans ? { floorplans: raw.floorplans } : {}),
+          ...(raw.agent_name ? { agentName: raw.agent_name } : {}),
+          ...(raw.agent_phone ? { agentPhone: raw.agent_phone } : {}),
+          ...(raw.agent_address ? { agentAddress: raw.agent_address } : {}),
+          ...(raw.listing_url ? { listingUrl: raw.listing_url } : {}),
+          ...(raw.source ? { source: raw.source } : {}),
         },
       })
     }
