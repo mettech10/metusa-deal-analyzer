@@ -463,6 +463,8 @@ export default function AnalysePage() {
           propertyType: scraped.propertyType || "house",
           bedrooms: Number(scraped.bedrooms) || 3,
           ...(scraped.sqft ? { sqft: Number(scraped.sqft) } : {}),
+          ...(scraped.tenureType ? { tenureType: scraped.tenureType as "freehold" | "leasehold" } : {}),
+          ...(scraped.leaseYears ? { leaseYears: Number(scraped.leaseYears) } : {}),
         }
 
         // Transition to manual form with pre-filled data

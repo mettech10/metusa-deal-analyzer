@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Loader2, Link2, Info } from "lucide-react"
-import type { PropertyFormData } from "@/lib/types"
+import type { PropertyFormData, PropertyTypeDetail, TenureType } from "@/lib/types"
 import { estimateRefurbCost } from "@/lib/calculations"
 
 const schema = z.object({
@@ -23,6 +23,12 @@ const schema = z.object({
   postcode: z.string().min(1, "Postcode is required"),
   purchasePrice: z.coerce.number().min(0),
   propertyType: z.enum(["house", "flat", "commercial"]),
+  propertyTypeDetail: z.enum([
+    "terraced", "semi-detached", "detached", "end-of-terrace",
+    "flat-apartment", "bungalow", "maisonette", "other",
+  ]).optional(),
+  tenureType: z.enum(["freehold", "leasehold"]).optional(),
+  leaseYears: z.coerce.number().min(1).max(999).optional(),
   investmentType: z.enum(["btl", "brr", "hmo", "flip", "r2sa", "development"]),
   sqft: z.coerce.number().min(0).optional(),
   bedrooms: z.coerce.number().min(0).max(20),
@@ -147,6 +153,17 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
   const propertyTypeValue = watch("propertyType")
   const postcodeValue = watch("postcode")
   const refurbValue = watch("refurbishmentBudget")
+  const tenureTypeValue = watch("tenureType")
+
+  const propertyTypeDetailValue = watch("propertyTypeDetail")
+
+  // Auto-map the granular property type to the broad type used by calculations.
+  useEffect(() => {
+    if (!propertyTypeDetailValue) return
+    const flatTypes = ["flat-apartment", "maisonette"]
+    const broad = flatTypes.includes(propertyTypeDetailValue) ? "flat" : "house"
+    setValue("propertyType", broad, { shouldDirty: false })
+  }, [propertyTypeDetailValue, setValue])
 
   // Auto-compute refurb budget from sqm + condition whenever they change,
   // but only if the user hasn't manually entered a custom refurb amount
@@ -239,21 +256,52 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
           <FormField label="Property Type">
             <Controller
               control={control}
-              name="propertyType"
+              name="propertyTypeDetail"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v as PropertyTypeDetail)}>
                   <SelectTrigger className="w-full">
-                    <SelectValue />
+                    <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="house">House</SelectItem>
-                    <SelectItem value="flat">Flat/Apartment</SelectItem>
-                    <SelectItem value="commercial">Commercial</SelectItem>
+                    <SelectItem value="terraced">Terraced</SelectItem>
+                    <SelectItem value="semi-detached">Semi-Detached</SelectItem>
+                    <SelectItem value="detached">Detached</SelectItem>
+                    <SelectItem value="end-of-terrace">End of Terrace</SelectItem>
+                    <SelectItem value="flat-apartment">Flat / Apartment</SelectItem>
+                    <SelectItem value="bungalow">Bungalow</SelectItem>
+                    <SelectItem value="maisonette">Maisonette</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               )}
             />
           </FormField>
+          <FormField label="Tenure Type">
+            <Controller
+              control={control}
+              name="tenureType"
+              render={({ field }) => (
+                <Select value={field.value ?? ""} onValueChange={(v) => field.onChange(v as TenureType)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select tenure" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="freehold">Freehold</SelectItem>
+                    <SelectItem value="leasehold">Leasehold</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </FormField>
+          {tenureTypeValue === "leasehold" && (
+            <FormField label="Lease Years Remaining" hint="Years left on the lease">
+              <Input
+                type="number"
+                placeholder="e.g. 125"
+                {...register("leaseYears")}
+              />
+            </FormField>
+          )}
           <FormField label="Floor Size (sqft)" hint="From listing or EPC certificate (optional)">
             <div className="relative">
               <Input

@@ -1,4 +1,14 @@
 export type PropertyType = "house" | "flat" | "commercial"
+export type PropertyTypeDetail =
+  | "terraced"
+  | "semi-detached"
+  | "detached"
+  | "end-of-terrace"
+  | "flat-apartment"
+  | "bungalow"
+  | "maisonette"
+  | "other"
+export type TenureType = "freehold" | "leasehold"
 export type InvestmentType = "btl" | "brr" | "hmo" | "flip" | "r2sa" | "development"
 export type PropertyCondition = "excellent" | "good" | "fair" | "needs-work"
 export type PurchaseType = "mortgage" | "bridging-loan" | "cash"
@@ -9,6 +19,9 @@ export interface PropertyFormData {
   postcode: string
   purchasePrice: number
   propertyType: PropertyType
+  propertyTypeDetail?: PropertyTypeDetail  // granular type (terraced, semi, etc.)
+  tenureType?: TenureType                  // freehold or leasehold
+  leaseYears?: number                      // years remaining on lease (leasehold only)
   investmentType: InvestmentType
   sqft?: number
   bedrooms: number
