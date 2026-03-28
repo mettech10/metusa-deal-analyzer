@@ -1,0 +1,38 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="180" height="180" rx="37" fill="#0F1A25"/>
+
+  <!-- M-shaped building skyline -->
+  <!-- 5 columns: width=24, gap=5, total=140, starts at x=20 (symmetric margins) -->
+  <!-- Bottom baseline y=168 (small 12px gap at bottom per spec) -->
+
+  <!-- Col 1 – left stroke of M (tallest) -->
+  <rect x="20"  y="28"  width="24" height="140" rx="3" fill="#3ECFC8"/>
+  <!-- Col 2 – left valley of M (shortest) -->
+  <rect x="49"  y="108" width="24" height="60"  rx="3" fill="#3ECFC8"/>
+  <!-- Col 3 – centre peak of M -->
+  <rect x="78"  y="58"  width="24" height="110" rx="3" fill="#3ECFC8"/>
+  <!-- Col 4 – right valley of M (shortest) -->
+  <rect x="107" y="108" width="24" height="60"  rx="3" fill="#3ECFC8"/>
+  <!-- Col 5 – right stroke of M (tallest) -->
+  <rect x="136" y="28"  width="24" height="140" rx="3" fill="#3ECFC8"/>
+
+  <!-- Window details – tall cols -->
+  <rect x="26"  y="40"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="26"  y="56"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="26"  y="72"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="26"  y="88"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+
+  <rect x="84"  y="68"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="84"  y="84"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="84"  y="100" width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+
+  <rect x="142" y="40"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="142" y="56"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="142" y="72"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="142" y="88"  width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+
+  <!-- Window details – valley cols -->
+  <rect x="55"  y="116" width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+  <rect x="113" y="116" width="12" height="8" rx="1.5" fill="rgba(255,255,255,0.28)"/>
+</svg>
