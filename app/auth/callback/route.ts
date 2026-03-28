@@ -30,7 +30,7 @@ export async function GET(request: Request) {
           }
         }).catch(console.error)
       } else {
-        console.log(`[Auth Callback] Skipping welcome email for ${user.email} (already sent or email not confirmed)`)
+        console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
       }
 
       return NextResponse.redirect(`${origin}${next}`)

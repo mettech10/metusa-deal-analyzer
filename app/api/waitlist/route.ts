@@ -97,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     // Add to Brevo contacts and send welcome email
-    let brevoResult = false
+    let brevoResult: boolean | null = false
     let emailSent = false
     
     try {
