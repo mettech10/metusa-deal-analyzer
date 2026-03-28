@@ -16,19 +16,25 @@ export async function GET(request: Request) {
       // Use a metadata flag to reliably detect first verification without
       // relying on clock skew-prone timestamp comparisons.
       const { data: { user } } = await supabase.auth.getUser()
-      if (user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent) {
+      const isFirstVerification = user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
+      if (isFirstVerification) {
         console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
-        sendWelcomeEmail(user.email).then(async (sent) => {
-          if (sent) {
-            // Mark welcome email as sent to prevent duplicates on future logins
-            const adminClient = createAdminClient()
-            await adminClient.auth.admin.updateUserById(user.id, {
-              user_metadata: { ...user.user_metadata, welcome_email_sent: true },
-            })
-          } else {
-            console.error(`[Auth Callback] Welcome email failed to send to ${user.email}`)
-          }
-        }).catch(console.error)
+        // Await the email send so it completes before the serverless function exits
+        const sent = await sendWelcomeEmail(user.email!).catch((err) => {
+          console.error(`[Auth Callback] Welcome email error:`, err)
+          return false
+        })
+        if (sent) {
+          // Mark welcome email as sent to prevent duplicates on future logins
+          const adminClient = createAdminClient()
+          await adminClient.auth.admin.updateUserById(user!.id, {
+            user_metadata: { ...user!.user_metadata, welcome_email_sent: true },
+          })
+        } else {
+          console.error(`[Auth Callback] Welcome email failed to send to ${user!.email}`)
+        }
+        // Redirect to verification success page so the user sees confirmation
+        return NextResponse.redirect(`${origin}/auth/verified`)
       } else {
         console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
       }
