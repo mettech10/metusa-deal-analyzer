@@ -10,12 +10,12 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const { data: sessionData, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      // Send welcome email on first-time email confirmation only.
-      // Use a metadata flag to reliably detect first verification without
-      // relying on clock skew-prone timestamp comparisons.
-      const { data: { user } } = await supabase.auth.getUser()
+      // Use the user returned directly from the exchange — calling getUser()
+      // after exchangeCodeForSession reads from request cookies which don't
+      // yet contain the newly-set session, so it would return null.
+      const user = sessionData.user
       const isFirstVerification = user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
       if (isFirstVerification) {
         console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
