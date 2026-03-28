@@ -19,8 +19,15 @@ export async function GET(request: Request) {
       if (user?.email && user.email_confirmed_at) {
         const confirmedAgeMs = Date.now() - new Date(user.email_confirmed_at).getTime()
         if (confirmedAgeMs < 60_000) {
-          sendWelcomeEmail(user.email).catch(console.error)
+          console.log(`[Auth Callback] Sending welcome email to ${user.email} (confirmed ${confirmedAgeMs}ms ago)`)
+          sendWelcomeEmail(user.email).then((sent) => {
+            if (!sent) console.error(`[Auth Callback] Welcome email failed to send to ${user.email}`)
+          }).catch(console.error)
+        } else {
+          console.log(`[Auth Callback] Skipping welcome email for ${user.email} (confirmed ${confirmedAgeMs}ms ago — not a fresh verification)`)
         }
+      } else {
+        console.log(`[Auth Callback] No email or email_confirmed_at on user — welcome email skipped`)
       }
 
       return NextResponse.redirect(`${origin}${next}`)
