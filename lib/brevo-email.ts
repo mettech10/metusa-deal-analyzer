@@ -20,6 +20,8 @@ async function sendBrevoEmail(
     return false
   }
 
+  const replyToEmail = process.env.BREVO_REPLY_TO_EMAIL ?? process.env.BREVO_SENDER_EMAIL ?? senderEmail
+
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
@@ -29,6 +31,7 @@ async function sendBrevoEmail(
       },
       body: JSON.stringify({
         sender: { name: "Metalyzi", email: senderEmail },
+        replyTo: { email: replyToEmail },
         to: [{ email: to }],
         subject,
         htmlContent,
