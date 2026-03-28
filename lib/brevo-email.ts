@@ -1,6 +1,6 @@
 /**
  * Brevo Transactional Email helpers
- * Sends welcome and receipt emails via Brevo SMTP API.
+ * Sends waitlist, verification, welcome, and receipt emails via Brevo SMTP API.
  *
  * Required env vars:
  *   BREVO_API_KEY        — your Brevo API key
@@ -35,12 +35,13 @@ async function sendBrevoEmail(
       }),
     })
 
+    const responseText = await res.text()
     if (!res.ok) {
-      console.error("[Brevo Email] Send failed:", res.status, await res.text())
+      console.error("[Brevo Email] Send failed:", res.status, responseText)
       return false
     }
 
-    console.log(`[Brevo Email] ✓ Sent "${subject}" → ${to}`)
+    console.log(`[Brevo Email] ✓ Sent "${subject}" → ${to} | Response: ${responseText}`)
     return true
   } catch (err) {
     console.error("[Brevo Email] Network error:", err)
@@ -48,7 +49,40 @@ async function sendBrevoEmail(
   }
 }
 
-// ─── Email Templates ─────────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function logoBlock(): string {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://metalyzi.co.uk"
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr>
+        <td align="center">
+          <img
+            src="${siteUrl}/logo.png"
+            alt="Metalyzi"
+            width="48"
+            height="48"
+            style="display:block;border-radius:10px;border:0;"
+            onerror="this.style.display='none'"
+          />
+          <div style="margin-top:10px;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">
+            Metalyzi
+          </div>
+        </td>
+      </tr>
+    </table>`
+}
+
+function emailFooter(): string {
+  return `
+    <tr>
+      <td style="padding:20px 36px 28px;border-top:1px solid #2a2a2a;">
+        <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;text-align:center;">
+          © 2025 Metalyzi. All rights reserved.
+        </p>
+      </td>
+    </tr>`
+}
 
 function baseTemplate(content: string): string {
   return `<!DOCTYPE html>
@@ -57,34 +91,29 @@ function baseTemplate(content: string): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Metalyzi</title>
+  <style>
+    @media only screen and (max-width: 600px) {
+      .email-wrapper { padding: 20px 8px !important; }
+      .email-card { border-radius: 0 !important; }
+      .email-body { padding: 24px 20px !important; }
+      .email-footer-cell { padding: 16px 20px 24px !important; }
+      .cta-button { display: block !important; text-align: center !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#0f0f0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f0f0f;padding:40px 16px;">
+<body style="margin:0;padding:0;background:#0f0f0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+  <table width="100%" cellpadding="0" cellspacing="0" class="email-wrapper" style="background:#0f0f0f;padding:40px 16px;">
     <tr>
       <td align="center">
-        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a;overflow:hidden;">
-          <!-- Header -->
-          <tr>
-            <td style="background:#111;padding:28px 36px;border-bottom:1px solid #2a2a2a;">
-              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Metalyzi</span>
-              <span style="font-size:13px;color:#6b7280;margin-left:8px;">AI Property Analysis</span>
-            </td>
-          </tr>
+        <table width="560" cellpadding="0" cellspacing="0" class="email-card" style="max-width:560px;width:100%;background:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a;overflow:hidden;">
           <!-- Content -->
           <tr>
-            <td style="padding:36px;">
+            <td class="email-body" style="padding:36px;">
               ${content}
             </td>
           </tr>
           <!-- Footer -->
-          <tr>
-            <td style="padding:20px 36px 28px;border-top:1px solid #2a2a2a;">
-              <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;">
-                You're receiving this email because you interacted with Metalyzi.<br />
-                © ${new Date().getFullYear()} Metalyzi. All rights reserved.
-              </p>
-            </td>
-          </tr>
+          ${emailFooter()}
         </table>
       </td>
     </tr>
@@ -93,86 +122,96 @@ function baseTemplate(content: string): string {
 </html>`
 }
 
+// ─── Email Templates ─────────────────────────────────────────────────────────
+
+function verificationEmailHtml(verificationUrl: string): string {
+  return baseTemplate(`
+    ${logoBlock()}
+
+    <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#ffffff;line-height:1.3;text-align:center;">
+      Confirm your email address
+    </h1>
+    <p style="margin:0 0 28px;font-size:15px;color:#9ca3af;line-height:1.7;text-align:center;">
+      Thanks for signing up to Metalyzi. Click the button below to verify
+      your email and get started with smarter property investment.
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr>
+        <td align="center">
+          <a href="${verificationUrl}"
+             class="cta-button"
+             style="display:inline-block;background:#ffffff;color:#0f0f0f;font-size:15px;font-weight:700;padding:14px 36px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Verify Email
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;text-align:center;">
+      If you didn't create a Metalyzi account, you can safely ignore this email.<br />
+      This link expires in 24 hours.
+    </p>
+  `)
+}
+
+function welcomeEmailHtml(): string {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://metalyzi.co.uk"
+  const dashboardUrl = `${siteUrl}/analyse`
+
+  return baseTemplate(`
+    ${logoBlock()}
+
+    <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#ffffff;line-height:1.3;text-align:center;">
+      Welcome to Metalyzi
+    </h1>
+    <p style="margin:0 0 28px;font-size:15px;color:#9ca3af;line-height:1.7;text-align:center;">
+      You're all set. Metalyzi helps you analyse property investment deals
+      faster and smarter — so you can make confident decisions backed by
+      real data.
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr>
+        <td align="center">
+          <a href="${dashboardUrl}"
+             class="cta-button"
+             style="display:inline-block;background:#ffffff;color:#0f0f0f;font-size:15px;font-weight:700;padding:14px 36px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Start Analysing
+          </a>
+        </td>
+      </tr>
+    </table>
+  `)
+}
+
 function waitlistEmailHtml(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="color-scheme" content="light dark" />
-  <title>Welcome to Metalyzi</title>
-</head>
-<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#0f0f0f;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f0f0f;padding:40px 16px;">
-    <tr>
-      <td align="center">
-        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background-color:#1a1a1a;border-radius:12px;border:1px solid #2a2a2a;overflow:hidden;">
-          
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#111;padding:28px 36px;border-bottom:1px solid #2a2a2a;">
-              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.5px;">Metalyzi</span>
-              <span style="font-size:13px;color:#6b7280;margin-left:8px;">AI Property Analysis</span>
-            </td>
-          </tr>
-          
-          <!-- Content -->
-          <tr>
-            <td style="padding:36px;">
-              <h1 style="margin:0 0 8px;font-size:28px;font-weight:700;color:#ffffff;line-height:1.3;">
-                You're on the waitlist! 🎉
-              </h1>
-              <p style="margin:0 0 28px;font-size:15px;color:#9ca3af;line-height:1.6;">
-                Thanks for joining the Metalyzi waitlist. You're now part of a community that's transforming how property deals are analysed in the UK.
-              </p>
+  return baseTemplate(`
+    <h1 style="margin:0 0 8px;font-size:24px;font-weight:700;color:#ffffff;line-height:1.3;">
+      You're on the waitlist! 🎉
+    </h1>
+    <p style="margin:0 0 24px;font-size:15px;color:#9ca3af;line-height:1.6;">
+      Thanks for joining the Metalyzi waitlist. We'll let you know as soon as early access opens up.
+    </p>
 
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#111;border:1px solid #2a2a2a;border-radius:8px;margin-bottom:28px;">
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">What Metalyzi does</p>
-                    <ul style="margin:0;padding:0 0 0 18px;color:#d1d5db;font-size:14px;line-height:2;">
-                      <li>Analyse any UK property deal in seconds</li>
-                      <li>Instant SDLT, mortgage & cashflow calculations</li>
-                      <li>AI-powered investment recommendations</li>
-                      <li>Comparable sales & rental data</li>
-                      <li>Smart deal scoring & risk assessment</li>
-                    </ul>
-                  </td>
-                </tr>
-              </table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#111;border:1px solid #2a2a2a;border-radius:8px;margin-bottom:28px;">
+      <tr>
+        <td style="padding:20px 24px;">
+          <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">What's coming</p>
+          <ul style="margin:0;padding:0 0 0 18px;color:#d1d5db;font-size:14px;line-height:2;">
+            <li>AI-powered property deal analysis</li>
+            <li>Instant cashflow &amp; yield calculations</li>
+            <li>Comparable sales &amp; rental data</li>
+            <li>Smart deal scoring system</li>
+          </ul>
+        </td>
+      </tr>
+    </table>
 
-              <p style="margin:0 0 20px;font-size:14px;color:#9ca3af;line-height:1.6;">
-                No more spreadsheets. No more guesswork. Just clear, data-driven insights that help you make confident investment decisions.
-              </p>
-
-              <p style="margin:0 0 20px;font-size:14px;color:#9ca3af;line-height:1.6;">
-                <strong style="color:#ffffff;">Timeline:</strong><br />
-                Q2 2026 — Private beta access<br />
-                Q3 2026 — Public launch
-              </p>
-
-              <p style="margin:0;font-size:14px;color:#9ca3af;line-height:1.6;">
-                We'll be in touch soon with your early access invitation.
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="padding:20px 36px 28px;border-top:1px solid #2a2a2a;">
-              <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;">
-                You're receiving this email because you interacted with Metalyzi.<br />
-                © ${new Date().getFullYear()} Metalyzi. All rights reserved.
-              </p>
-            </td>
-          </tr>
-          
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`
+    <p style="margin:0;font-size:14px;color:#6b7280;line-height:1.6;">
+      We'll be in touch soon. In the meantime, feel free to reply to this email if you have any questions.
+    </p>
+  `)
 }
 
 function signUpWelcomeEmailHtml(name?: string): string {
@@ -255,10 +294,22 @@ function receiptEmailHtml(plan: string, amount: string): string {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Section 2 — Verification email: sent on signup via admin.generateLink */
+export function sendVerificationEmail(email: string, verificationUrl: string): Promise<boolean> {
+  return sendBrevoEmail(email, "Verify your Metalyzi account", verificationEmailHtml(verificationUrl))
+}
+
+/** Section 3 — Welcome email: sent once after email is confirmed */
+export function sendWelcomeEmail(email: string): Promise<boolean> {
+  return sendBrevoEmail(email, "Welcome to Metalyzi 🏠", welcomeEmailHtml())
+}
+
+/** Waitlist welcome — DO NOT MODIFY (used by /api/waitlist) */
 export function sendWaitlistWelcomeEmail(email: string): Promise<boolean> {
   return sendBrevoEmail(email, "You're on the Metalyzi waitlist!", waitlistEmailHtml())
 }
 
+/** Legacy sign-up welcome — kept for backwards compatibility */
 export function sendSignUpWelcomeEmail(email: string, name?: string): Promise<boolean> {
   return sendBrevoEmail(email, "Welcome to Metalyzi!", signUpWelcomeEmailHtml(name))
 }

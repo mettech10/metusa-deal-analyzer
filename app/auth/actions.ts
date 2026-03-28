@@ -2,6 +2,8 @@
 
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
+import { sendVerificationEmail } from "@/lib/brevo-email"
 
 export async function signInWithEmail(formData: FormData) {
   const supabase = await createClient()
@@ -22,8 +24,6 @@ export async function signInWithEmail(formData: FormData) {
 }
 
 export async function signUpWithEmail(formData: FormData) {
-  const supabase = await createClient()
-
   const { headers } = await import("next/headers")
   const headersList = await headers()
   const host = headersList.get("host") || ""
@@ -34,22 +34,29 @@ export async function signUpWithEmail(formData: FormData) {
   const password = formData.get("password") as string
   const name = formData.get("name") as string
 
-  const { error } = await supabase.auth.signUp({
+  const redirectTo =
+    process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
+    `${origin}/auth/callback`
+
+  // Use the admin client with generateLink so Supabase never sends its own
+  // confirmation email — we send a fully branded Brevo email instead.
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient.auth.admin.generateLink({
+    type: "signup",
     email,
     password,
     options: {
-      emailRedirectTo:
-        process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-        `${origin}/auth/callback`,
-      data: {
-        full_name: name,
-      },
+      redirectTo,
+      data: { full_name: name },
     },
   })
 
   if (error) {
     return { error: error.message }
   }
+
+  const verificationUrl = data.properties.action_link
+  await sendVerificationEmail(email, verificationUrl)
 
   return { success: "Check your email to confirm your account." }
 }
