@@ -3,7 +3,7 @@
 import { useState, useTransition, Suspense } from "react"
 import Link from "next/link"
 import Image from "next/image"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -40,46 +40,22 @@ function GoogleIcon() {
 
 function LoginForm() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const authError = searchParams.get("error")
 
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [error, setError] = useState<string | null>(
     authError === "auth" ? "Authentication failed. Please try again." : null
   )
-  const [passwordError, setPasswordError] = useState<string | null>(null)
-  const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
-
-  const clearFieldErrors = () => {
-    setPasswordError(null)
-    setConfirmPasswordError(null)
-  }
 
   const handleEmailSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError(null)
-    clearFieldErrors()
+    setSuccess(null)
 
     const formData = new FormData(e.currentTarget)
-
-    if (mode === "signup") {
-      const password = formData.get("password") as string
-      const confirmPassword = formData.get("confirmPassword") as string
-      let valid = true
-
-      if (password.length < 8) {
-        setPasswordError("Password must be at least 8 characters")
-        valid = false
-      }
-      if (password !== confirmPassword) {
-        setConfirmPasswordError("Passwords do not match")
-        valid = false
-      }
-      if (!valid) return
-    }
 
     startTransition(async () => {
       if (mode === "login") {
@@ -89,12 +65,11 @@ function LoginForm() {
         }
         // On success, signInWithEmail redirects via server action
       } else {
-        const email = formData.get("email") as string
         const result = await signUpWithEmail(formData)
         if (result?.error) {
           setError(result.error)
-        } else {
-          router.push(`/verify-email?email=${encodeURIComponent(email)}`)
+        } else if (result?.success) {
+          setSuccess(result.success)
         }
       }
     })
@@ -166,7 +141,7 @@ function LoginForm() {
               onClick={() => {
                 setMode("login")
                 setError(null)
-                clearFieldErrors()
+                setSuccess(null)
               }}
               className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all ${
                 mode === "login"
@@ -181,7 +156,7 @@ function LoginForm() {
               onClick={() => {
                 setMode("signup")
                 setError(null)
-                clearFieldErrors()
+                setSuccess(null)
               }}
               className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all ${
                 mode === "signup"
@@ -193,10 +168,15 @@ function LoginForm() {
             </button>
           </div>
 
-          {/* Error message */}
+          {/* Error / Success messages */}
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
+            </div>
+          )}
+          {success && (
+            <div className="mb-4 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
+              {success}
             </div>
           )}
 
@@ -262,14 +242,6 @@ function LoginForm() {
                 <Label htmlFor="password" className="text-sm text-foreground">
                   Password
                 </Label>
-                {mode === "login" && (
-                  <Link
-                    href="/forgot-password"
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Forgot password?
-                  </Link>
-                )}
               </div>
               <div className="relative">
                 <Input
@@ -278,11 +250,11 @@ function LoginForm() {
                   type={showPassword ? "text" : "password"}
                   placeholder={
                     mode === "signup"
-                      ? "Create a password (min. 8 characters)"
+                      ? "Create a password (min. 6 characters)"
                       : "Enter your password"
                   }
                   required
-                  minLength={mode === "signup" ? 8 : undefined}
+                  minLength={6}
                   className="pr-10"
                   disabled={isPending}
                 />
@@ -299,44 +271,7 @@ function LoginForm() {
                   )}
                 </button>
               </div>
-              {passwordError && (
-                <p className="text-xs text-destructive">{passwordError}</p>
-              )}
             </div>
-
-            {mode === "signup" && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="confirmPassword" className="text-sm text-foreground">
-                  Confirm Password
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showConfirmPassword ? "text" : "password"}
-                    placeholder="Re-enter your password"
-                    required
-                    className="pr-10"
-                    disabled={isPending}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
-                </div>
-                {confirmPasswordError && (
-                  <p className="text-xs text-destructive">{confirmPasswordError}</p>
-                )}
-              </div>
-            )}
 
             <Button
               type="submit"
@@ -367,7 +302,7 @@ function LoginForm() {
                   onClick={() => {
                     setMode("signup")
                     setError(null)
-                    clearFieldErrors()
+                    setSuccess(null)
                   }}
                   className="text-primary hover:underline"
                 >
@@ -382,7 +317,7 @@ function LoginForm() {
                   onClick={() => {
                     setMode("login")
                     setError(null)
-                    clearFieldErrors()
+                    setSuccess(null)
                   }}
                   className="text-primary hover:underline"
                 >
