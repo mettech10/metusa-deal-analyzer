@@ -26,7 +26,11 @@ export default function VerifiedPage() {
           </div>
 
           <Button asChild className="w-full">
-            <Link href="/login">Go to Login</Link>
+            <Link href="/login">Log In</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="w-full">
+            <Link href="/">Go Back</Link>
           </Button>
         </CardContent>
       </Card>

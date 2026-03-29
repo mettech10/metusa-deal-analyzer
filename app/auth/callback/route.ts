@@ -22,27 +22,29 @@ export async function GET(request: Request) {
       // after exchangeCodeForSession reads from request cookies which don't
       // yet contain the newly-set session, so it would return null.
       const user = sessionData.user
-      const isFirstVerification = user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
-      if (isFirstVerification) {
-        console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
-        // Await the email send so it completes before the serverless function exits
-        const sent = await sendWelcomeEmail(user.email!).catch((err) => {
-          console.error(`[Auth Callback] Welcome email error:`, err)
-          return false
-        })
-        if (sent) {
-          // Mark welcome email as sent to prevent duplicates on future logins
-          const adminClient = createAdminClient()
-          await adminClient.auth.admin.updateUserById(user!.id, {
-            user_metadata: { ...user!.user_metadata, welcome_email_sent: true },
+
+      // Email verification (signup confirmation) — always show success page
+      if (type === "signup" || (user?.email_confirmed_at && next === "/analyse")) {
+        const isFirstVerification = user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
+        if (isFirstVerification) {
+          console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
+          const sent = await sendWelcomeEmail(user.email!).catch((err) => {
+            console.error(`[Auth Callback] Welcome email error:`, err)
+            return false
           })
+          if (sent) {
+            const adminClient = createAdminClient()
+            await adminClient.auth.admin.updateUserById(user!.id, {
+              user_metadata: { ...user!.user_metadata, welcome_email_sent: true },
+            })
+          } else {
+            console.error(`[Auth Callback] Welcome email failed to send to ${user!.email}`)
+          }
         } else {
-          console.error(`[Auth Callback] Welcome email failed to send to ${user!.email}`)
+          console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
         }
-        // Redirect to verification success page so the user sees confirmation
-        return NextResponse.redirect(`${origin}/verification-success`)
-      } else {
-        console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
+        // Always redirect to success page for email verification
+        return NextResponse.redirect(`${origin}/auth/verified`)
       }
 
       return NextResponse.redirect(`${origin}${next}`)
