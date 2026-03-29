@@ -34,9 +34,10 @@ export async function signUpWithEmail(formData: FormData) {
   const password = formData.get("password") as string
   const name = formData.get("name") as string
 
-  const redirectTo =
+  const callbackBase =
     process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
     `${origin}/auth/callback`
+  const redirectTo = `${callbackBase}?source=email_verify`
 
   // Use the admin client with generateLink so Supabase never sends its own
   // confirmation email — we send a fully branded Brevo email instead.

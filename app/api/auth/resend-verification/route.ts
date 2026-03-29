@@ -23,9 +23,10 @@ export async function POST(request: Request) {
     const host = headersList.get("host") || ""
     const protocol = headersList.get("x-forwarded-proto") || "https"
     const origin = `${protocol}://${host}`
-    const redirectTo =
+    const callbackBase =
       process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
       `${origin}/auth/callback`
+    const redirectTo = `${callbackBase}?source=email_verify`
 
     const adminClient = createAdminClient()
     const { data, error } = await adminClient.auth.admin.generateLink({
