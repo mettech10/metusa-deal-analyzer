@@ -35,6 +35,7 @@ const schema = z.object({
   depositPercentage: z.coerce.number().min(0).max(100),
   interestRate: z.coerce.number().min(0).max(20),
   mortgageTerm: z.coerce.number().min(1).max(40),
+  mortgageType: z.enum(["repayment", "interest-only"]).optional().default("interest-only"),
   // Bridging loan fields
   bridgingMonthlyRate: z.coerce.number().min(0).max(5).optional(),
   bridgingTermMonths: z.coerce.number().min(1).max(36).optional(),
