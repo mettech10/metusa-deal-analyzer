@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input"
 import { PropertyForm } from "@/components/analyse/property-form"
 import { AnalysisResults } from "@/components/analyse/analysis-results"
 import { RecentDeals } from "@/components/analyse/recent-deals"
+import { PropertyListingCard } from "@/components/analyse/property-listing-card"
+import type { ScrapedListing } from "@/components/analyse/property-listing-card"
 import { calculateAll, calculateDealScore } from "@/lib/calculations"
 import type { PropertyFormData, CalculationResults, BackendResults } from "@/lib/types"
 import {
@@ -232,6 +234,7 @@ export default function AnalysePage() {
   const [backendData, setBackendData] = useState<BackendResults | null>(null)
   const [prefillData, setPrefillData] = useState<Partial<PropertyFormData> | null>(null)
   const [scrapedFromUrl, setScrapedFromUrl] = useState(false)
+  const [scrapedListing, setScrapedListing] = useState<ScrapedListing | null>(null)
 
   // Call the Flask backend API and handle the response
   const callAnalysisAPI = useCallback(
@@ -448,6 +451,29 @@ export default function AnalysePage() {
           ...(scraped.sqft ? { sqft: Number(scraped.sqft) } : {}),
         }
 
+        // Store the rich listing data for the property card display
+        setScrapedListing({
+          address:      scraped.address || "",
+          postcode:     scraped.postcode,
+          price:        scraped.purchasePrice ? Number(scraped.purchasePrice) : undefined,
+          propertyType: scraped.propertyType,
+          bedrooms:     scraped.bedrooms != null ? Number(scraped.bedrooms) : undefined,
+          bathrooms:    scraped.bathrooms != null ? Number(scraped.bathrooms) : undefined,
+          sqft:         scraped.sqft != null ? Number(scraped.sqft) : undefined,
+          sqm:          scraped.sqm != null ? Number(scraped.sqm) : undefined,
+          tenureType:   scraped.tenureType,
+          leaseYears:   scraped.leaseYears != null ? Number(scraped.leaseYears) : undefined,
+          keyFeatures:  scraped.keyFeatures,
+          description:  scraped.description,
+          images:       scraped.images,
+          floorplans:   scraped.floorplans,
+          agentName:    scraped.agentName,
+          agentPhone:   scraped.agentPhone,
+          agentAddress: scraped.agentAddress,
+          listingUrl:   scraped.listingUrl,
+          source:       scraped.source,
+        })
+
         // Transition to manual form with pre-filled data
         setPrefillData(mapped)
         setScrapedFromUrl(true)
@@ -541,6 +567,7 @@ export default function AnalysePage() {
     setBackendData(null)
     setPrefillData(null)
     setScrapedFromUrl(false)
+    setScrapedListing(null)
     savedKeyRef.current = null
   }
 
@@ -1155,6 +1182,11 @@ export default function AnalysePage() {
                 </span>
               )}
             </div>
+
+            {/* Property listing card — shown when scraped from Rightmove/OTM */}
+            {scrapedListing && (scrapedListing.source === "rightmove" || scrapedListing.source === "onthemarket") && (
+              <PropertyListingCard listing={scrapedListing} />
+            )}
 
             {results && formData ? (
               <AnalysisResults
