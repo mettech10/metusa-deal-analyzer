@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { sendVerificationEmail } from "@/lib/brevo-email"
+import { sendVerificationEmail, sendPasswordResetEmail } from "@/lib/brevo-email"
 
 export async function signInWithEmail(formData: FormData) {
   const supabase = await createClient()
@@ -94,4 +94,50 @@ export async function signOut() {
   const supabase = await createClient()
   await supabase.auth.signOut()
   redirect("/")
+}
+
+export async function resetPasswordForEmail(formData: FormData) {
+  const { headers } = await import("next/headers")
+  const headersList = await headers()
+  const host = headersList.get("host") || ""
+  const protocol = headersList.get("x-forwarded-proto") || "https"
+  const origin = `${protocol}://${host}`
+
+  const email = formData.get("email") as string
+  const redirectTo =
+    process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
+    `${origin}/auth/callback`
+
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  })
+
+  if (error) {
+    // Return generic message so we don't expose whether an account exists
+    console.error("[resetPasswordForEmail] generateLink error:", error.message)
+    return { success: true }
+  }
+
+  const resetUrl = data.properties.action_link
+  await sendPasswordResetEmail(email, resetUrl).catch((err) => {
+    console.error("[resetPasswordForEmail] Brevo send error:", err)
+  })
+
+  return { success: true }
+}
+
+export async function updatePassword(formData: FormData) {
+  const password = formData.get("password") as string
+  const supabase = await createClient()
+
+  const { error } = await supabase.auth.updateUser({ password })
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  return { success: true }
 }
