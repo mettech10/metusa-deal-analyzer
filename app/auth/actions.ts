@@ -56,7 +56,17 @@ export async function signUpWithEmail(formData: FormData) {
     return { error: error.message }
   }
 
-  const verificationUrl = data.properties.action_link
+  // Build a direct callback URL using the hashed_token from generateLink.
+  // This avoids going through Supabase's own verify endpoint (which would
+  // redirect with a PKCE `code` that has no matching code_verifier cookie,
+  // causing exchangeCodeForSession to fail silently and the user to land on
+  // the wrong page).  Instead, the button takes the user straight to our
+  // /auth/callback which calls verifyOtp({ token_hash, type }).
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL?.replace(/\/auth\/callback.*$/, "") ||
+    origin
+  const verificationUrl = `${siteUrl}/auth/callback?token_hash=${data.properties.hashed_token}&type=signup`
   await sendVerificationEmail(email, verificationUrl)
 
   return { success: "Check your email to confirm your account." }
