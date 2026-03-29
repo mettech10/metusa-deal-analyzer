@@ -4,6 +4,35 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { sendWelcomeEmail } from "@/lib/brevo-email"
 import type { EmailOtpType } from "@supabase/supabase-js"
 
+async function handleVerifiedUser(
+  user: { id: string; email?: string | null; email_confirmed_at?: string | null; user_metadata?: Record<string, any> } | null,
+) {
+  if (!user) return
+
+  const isFirstVerification =
+    user.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
+
+  if (isFirstVerification) {
+    console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
+    const sent = await sendWelcomeEmail(user.email!).catch((err) => {
+      console.error(`[Auth Callback] Welcome email error:`, err)
+      return false
+    })
+    if (sent) {
+      const adminClient = createAdminClient()
+      await adminClient.auth.admin.updateUserById(user.id, {
+        user_metadata: { ...user.user_metadata, welcome_email_sent: true },
+      })
+    } else {
+      console.error(`[Auth Callback] Welcome email failed to send to ${user.email}`)
+    }
+  } else {
+    console.log(
+      `[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`
+    )
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
@@ -36,36 +65,21 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/reset-password`)
     }
 
-    // Use the user returned directly from the exchange — calling getUser()
-    // after exchangeCodeForSession reads from request cookies which don't
-    // yet contain the newly-set session, so it would return null.
     const user = sessionData.user
 
     // Email verification (signup confirmation) — always show success page
-    if (type === "signup" || (user?.email_confirmed_at && next === "/analyse")) {
-      const isFirstVerification = user?.email && user.email_confirmed_at && !user.user_metadata?.welcome_email_sent
-      if (isFirstVerification) {
-        console.log(`[Auth Callback] Sending welcome email to ${user.email}`)
-        const sent = await sendWelcomeEmail(user.email!).catch((err) => {
-          console.error(`[Auth Callback] Welcome email error:`, err)
-          return false
-        })
-        if (sent) {
-          const adminClient = createAdminClient()
-          await adminClient.auth.admin.updateUserById(user!.id, {
-            user_metadata: { ...user!.user_metadata, welcome_email_sent: true },
-          })
-        } else {
-          console.error(`[Auth Callback] Welcome email failed to send to ${user!.email}`)
-        }
-      } else {
-        console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
-      }
-      // Always redirect to success page for email verification
+    if (type === "signup" || type === "email" || (user?.email_confirmed_at && next === "/analyse")) {
+      await handleVerifiedUser(user)
       return NextResponse.redirect(`${origin}/auth/verified`)
     }
 
     return NextResponse.redirect(`${origin}${next}`)
+  }
+
+  // Verification failed — redirect to dedicated failure page for email flows
+  if (type === "signup" || type === "email" || token_hash) {
+    console.error(`[Auth Callback] Verification failed:`, authError)
+    return NextResponse.redirect(`${origin}/verification-failed`)
   }
 
   // Auth error — redirect to login with error param
