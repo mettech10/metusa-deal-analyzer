@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { DealScore } from "./deal-score"
 import { PropertyComparables } from "./property-comparables"
+import { HmoComparables } from "./hmo-comparables"
 import {
   BarChart,
   Bar,
@@ -1690,6 +1691,11 @@ export function AnalysisResults({
       )}
       {hasRentComparables && (
         <RentComparablesTable comparables={backendData?.rent_comparables} />
+      )}
+
+      {/* ── HMO Rental Comparables & Area Analysis ─────────────────── */}
+      {data.investmentType === "hmo" && data.postcode && (
+        <HmoComparables postcode={data.postcode} />
       )}
 
       {/* ── Refurbishment Estimates ─────────────────────────────────── */}
