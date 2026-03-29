@@ -6,12 +6,18 @@ import { sendWelcomeEmail } from "@/lib/brevo-email"
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
+  const type = searchParams.get("type")
   const next = searchParams.get("next") ?? "/analyse"
 
   if (code) {
     const supabase = await createClient()
     const { data: sessionData, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
+      // Password reset flow — send user to the reset password page
+      if (type === "recovery") {
+        return NextResponse.redirect(`${origin}/reset-password`)
+      }
+
       // Use the user returned directly from the exchange — calling getUser()
       // after exchangeCodeForSession reads from request cookies which don't
       // yet contain the newly-set session, so it would return null.
@@ -34,7 +40,7 @@ export async function GET(request: Request) {
           console.error(`[Auth Callback] Welcome email failed to send to ${user!.email}`)
         }
         // Redirect to verification success page so the user sees confirmation
-        return NextResponse.redirect(`${origin}/auth/verified`)
+        return NextResponse.redirect(`${origin}/verification-success`)
       } else {
         console.log(`[Auth Callback] Skipping welcome email for ${user?.email} (already sent or email not confirmed)`)
       }

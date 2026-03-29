@@ -295,6 +295,37 @@ function receiptEmailHtml(plan: string, amount: string): string {
   `)
 }
 
+function passwordResetEmailHtml(resetUrl: string): string {
+  return baseTemplate(`
+    ${logoBlock()}
+
+    <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#ffffff;line-height:1.3;text-align:center;">
+      Reset your password
+    </h1>
+    <p style="margin:0 0 28px;font-size:15px;color:#9ca3af;line-height:1.7;text-align:center;">
+      We received a request to reset your Metalyzi password. Click the button
+      below to choose a new one.
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+      <tr>
+        <td align="center">
+          <a href="${resetUrl}"
+             class="cta-button"
+             style="display:inline-block;background:#ffffff;color:#0f0f0f;font-size:15px;font-weight:700;padding:14px 36px;border-radius:8px;text-decoration:none;letter-spacing:0.2px;">
+            Reset Password
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <p style="margin:0;font-size:12px;color:#4b5563;line-height:1.6;text-align:center;">
+      If you didn't request a password reset, you can safely ignore this email.<br />
+      This link expires in 1 hour.
+    </p>
+  `)
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /** Section 2 — Verification email: sent on signup via admin.generateLink */
@@ -304,7 +335,12 @@ export function sendVerificationEmail(email: string, verificationUrl: string): P
 
 /** Section 3 — Welcome email: sent once after email is confirmed */
 export function sendWelcomeEmail(email: string): Promise<boolean> {
-  return sendBrevoEmail(email, "Welcome to Metalyzi", welcomeEmailHtml())
+  return sendBrevoEmail(email, "Welcome to Metalyzi 🏠", welcomeEmailHtml())
+}
+
+/** Password reset email: sent via admin.generateLink (bypasses suppress-email-hook) */
+export function sendPasswordResetEmail(email: string, resetUrl: string): Promise<boolean> {
+  return sendBrevoEmail(email, "Reset your Metalyzi password", passwordResetEmailHtml(resetUrl))
 }
 
 /** Waitlist welcome — DO NOT MODIFY (used by /api/waitlist) */
