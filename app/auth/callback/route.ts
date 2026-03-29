@@ -38,6 +38,7 @@ export async function GET(request: Request) {
   const code = searchParams.get("code")
   const token_hash = searchParams.get("token_hash")
   const type = searchParams.get("type")
+  const source = searchParams.get("source")
   const next = searchParams.get("next") ?? "/analyse"
 
   const supabase = await createClient()
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     const user = sessionData.user
 
     // Email verification (signup confirmation) — always show success page
-    if (type === "signup" || type === "email" || (user?.email_confirmed_at && next === "/analyse")) {
+    if (type === "signup" || type === "email" || source === "email_verify") {
       await handleVerifiedUser(user)
       return NextResponse.redirect(`${origin}/auth/verified`)
     }
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
   }
 
   // Verification failed — redirect to dedicated failure page for email flows
-  if (type === "signup" || type === "email" || token_hash) {
+  if (type === "signup" || type === "email" || token_hash || source === "email_verify") {
     console.error(`[Auth Callback] Verification failed:`, authError)
     return NextResponse.redirect(`${origin}/verification-failed`)
   }
