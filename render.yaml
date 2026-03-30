@@ -22,6 +22,8 @@ services:
         sync: false
       - key: FIRECRAWL_API_KEY
         sync: false
+      - key: APIFY_API_TOKEN
+        sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
