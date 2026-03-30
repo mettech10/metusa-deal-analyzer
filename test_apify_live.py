@@ -89,8 +89,9 @@ print(f"  Actor:   {actor_id}")
 print(f"  Payload: {json.dumps(input_payload)}")
 print()
 
+api_actor_id = actor_id.replace('/', '~')
 api_url = (
-    f'https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items'
+    f'https://api.apify.com/v2/acts/{api_actor_id}/run-sync-get-dataset-items'
     f'?token={APIFY_API_TOKEN}&timeout=60&memory=512'
 )
 
@@ -102,7 +103,7 @@ try:
     print(f"  Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
     print()
 
-    if resp.status_code == 200:
+    if resp.status_code in (200, 201):
         try:
             data = resp.json()
             print(f"  Response type: {type(data).__name__}")
@@ -117,6 +118,7 @@ try:
                     print("  This could mean:")
                     print("    - The listing URL is invalid or has been removed")
                     print("    - The actor's scraping logic failed silently")
+                    print("    - The actor needs different input fields")
             else:
                 print("  RAW RESPONSE (not a list):")
                 print("  " + json.dumps(data, indent=2, default=str)[:2000])
