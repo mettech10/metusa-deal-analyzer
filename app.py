@@ -274,29 +274,68 @@ def _apify_run_actor(actor_id: str, input_payload: dict, timeout_secs: int = 60)
     Returns a list of result objects, or an empty list on failure.
     """
     if not APIFY_API_TOKEN:
-        print(f"[Apify] No APIFY_API_TOKEN configured, skipping actor {actor_id}")
+        print(f"[Apify] ERROR: No APIFY_API_TOKEN configured — skipping actor {actor_id}. "
+              "Set APIFY_API_TOKEN in environment variables.")
         return []
 
     api_url = (
         f'https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items'
         f'?token={APIFY_API_TOKEN}&timeout={timeout_secs}&memory=512'
     )
+    print(f"[Apify/{actor_id}] Starting run — timeout={timeout_secs}s, memory=512MB")
+    print(f"[Apify/{actor_id}] Input payload: {json.dumps(input_payload)[:300]}")
     try:
         response = requests.post(
             api_url,
             json=input_payload,
             timeout=timeout_secs + 10,
         )
-        if response.status_code != 200:
-            print(f"[Apify/{actor_id}] Error: HTTP {response.status_code} — {response.text[:200]}")
+        print(f"[Apify/{actor_id}] HTTP {response.status_code} — "
+              f"Content-Length: {len(response.content)} bytes")
+
+        if response.status_code == 402:
+            print(f"[Apify/{actor_id}] PAYMENT REQUIRED — free plan credit may be exhausted "
+                  "or actor requires paid subscription. Check https://console.apify.com/billing")
             return []
+        if response.status_code == 404:
+            print(f"[Apify/{actor_id}] ACTOR NOT FOUND — the actor ID may be incorrect or "
+                  "the actor has been removed from Apify Store")
+            return []
+        if response.status_code == 401:
+            print(f"[Apify/{actor_id}] UNAUTHORIZED — APIFY_API_TOKEN is invalid or expired. "
+                  "Generate a new token at https://console.apify.com/settings/integrations")
+            return []
+        if response.status_code != 200:
+            print(f"[Apify/{actor_id}] ERROR: HTTP {response.status_code} — {response.text[:500]}")
+            return []
+
         items = response.json()
         if not isinstance(items, list):
-            print(f"[Apify/{actor_id}] Unexpected response shape: {str(items)[:200]}")
+            # Apify sometimes returns a run status object instead of dataset items
+            if isinstance(items, dict) and items.get('status'):
+                run_status = items.get('status')
+                print(f"[Apify/{actor_id}] Actor run status: {run_status}")
+                if run_status in ('FAILED', 'TIMED-OUT', 'ABORTED'):
+                    print(f"[Apify/{actor_id}] Actor run {run_status}: {items.get('statusMessage', 'no details')}")
+                return []
+            print(f"[Apify/{actor_id}] Unexpected response shape: {str(items)[:500]}")
             return []
+
+        if len(items) == 0:
+            print(f"[Apify/{actor_id}] WARNING: Actor returned empty dataset (0 items). "
+                  "The actor ran successfully but found no data for this input.")
+        else:
+            print(f"[Apify/{actor_id}] Success — returned {len(items)} item(s)")
         return items
+    except requests.exceptions.Timeout:
+        print(f"[Apify/{actor_id}] TIMEOUT after {timeout_secs + 10}s — "
+              "actor may need more time or is stuck")
+        return []
+    except requests.exceptions.ConnectionError as e:
+        print(f"[Apify/{actor_id}] CONNECTION ERROR — cannot reach api.apify.com: {e}")
+        return []
     except Exception as e:
-        print(f"[Apify/{actor_id}] Exception: {e}")
+        print(f"[Apify/{actor_id}] EXCEPTION: {type(e).__name__}: {e}")
         return []
 
 
@@ -956,10 +995,10 @@ def set_security_headers(response):
 # ── Apify (actor-based scraping for Rightmove, OnTheMarket, SpareRoom) ───────
 APIFY_API_TOKEN = os.environ.get('APIFY_API_TOKEN', '')
 
-# TODO: Verify these actor IDs are correct in your Apify console before deploying.
-APIFY_RIGHTMOVE_ACTOR_ID    = 'dtrungtin/rightmove-scraper'
-APIFY_ONTHEMARKET_ACTOR_ID  = 'misceres/on-the-market-scraper'
-APIFY_SPAREROOM_ACTOR_ID    = 'misceres/spareroom-scraper'
+# Verified actor IDs from Apify Store (2026-03-30)
+APIFY_RIGHTMOVE_ACTOR_ID    = 'dhrumil/rightmove-scraper'
+APIFY_ONTHEMARKET_ACTOR_ID  = 'shahidirfan/onthemarket-property-scraper'
+APIFY_SPAREROOM_ACTOR_ID    = 'memo23/spareroom-scraper'
 
 # ── Firecrawl API (URL-to-markdown, runs in parallel with Apify) ─────────────
 FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
