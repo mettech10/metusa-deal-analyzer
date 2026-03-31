@@ -1014,6 +1014,14 @@ APIFY_RIGHTMOVE_ACTOR_ID    = 'dhrumil/rightmove-scraper'
 APIFY_ONTHEMARKET_ACTOR_ID  = 'fatihtahta/onthemarket-scraper'
 APIFY_SPAREROOM_ACTOR_ID    = 'memo23/spareroom-scraper'
 
+# Rental comparables actor — automation-lab/rightmove-scraper
+# Chosen over dhrumil/rightmove-scraper for rental comps because it accepts
+# searchLocation (raw postcode), channel ("RENT"), minBedrooms, maxBedrooms,
+# radius as direct input fields — no need to resolve Rightmove location IDs.
+# Actively maintained (last updated 2026-03-29), returns price, address,
+# propertySubType, bedrooms, bathrooms, images, agent info, and listing URL.
+APIFY_RIGHTMOVE_RENTAL_ACTOR_ID = 'automation-lab/rightmove-scraper'
+
 # ── Firecrawl API (URL-to-markdown, runs in parallel with Apify) ─────────────
 FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
 
@@ -4956,25 +4964,37 @@ def get_sold_prices():
         if not validate_postcode(postcode):
             return jsonify({'success': False, 'message': 'Invalid postcode format'}), 400
         
-        # Get sold prices from Land Registry
-        sales = land_registry.get_sold_prices(postcode, limit=10)
-        
+        property_type_detail = data.get('propertyTypeDetail')
+        property_type = data.get('propertyType')
+        tenure_type = data.get('tenureType')
+
+        # Get sold prices from Land Registry with optional filtering
+        sales = land_registry.get_sold_prices(
+            postcode,
+            limit=10,
+            property_type_detail=property_type_detail,
+            property_type=property_type,
+            tenure_type=tenure_type,
+        )
+
         if not sales:
             return jsonify({
                 'success': True,
-                'sales': [],
+                'data': {'sales': [], 'average': 0, 'count': 0},
                 'message': 'No recent sales found for this postcode'
             })
-        
+
         # Calculate average
         prices = [sale['price'] for sale in sales]
         avg_price = sum(prices) / len(prices)
-        
+
         return jsonify({
             'success': True,
-            'sales': sales,
-            'average': round(avg_price, 0),
-            'count': len(sales)
+            'data': {
+                'sales': sales,
+                'average': round(avg_price, 0),
+                'count': len(sales),
+            }
         })
         
     except Exception as e:
@@ -4983,6 +5003,149 @@ def get_sold_prices():
             'success': False,
             'message': 'Error fetching sold prices. Please try again.'
         }), 500
+
+@app.route('/api/rental-comparables', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_rental_comparables():
+    """Get rental comparables from Rightmove via Apify.
+    Accepts postcode, bedrooms, propertyType, strategy.
+    Returns filtered rental listings matching the subject property."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 3))
+        property_type = data.get('propertyType', '')         # broad: house / flat
+        property_type_detail = data.get('propertyTypeDetail', '')  # terraced, semi-detached etc.
+        strategy = data.get('strategy', 'btl')                # btl, brr, r2sa
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        if not APIFY_API_TOKEN:
+            return jsonify({
+                'success': False,
+                'message': 'Apify API token not configured — rental comparables unavailable'
+            }), 503
+
+        # Map property type detail → Rightmove propertyTypes filter values
+        # Rightmove uses: detached, semi-detached, terraced, flat, bungalow
+        rm_type_map = {
+            'detached': 'detached',
+            'semi-detached': 'semi-detached',
+            'terraced': 'terraced',
+            'end-of-terrace': 'terraced',
+            'flat-apartment': 'flat',
+            'maisonette': 'flat',
+            'bungalow': 'bungalow',
+        }
+        rm_property_type = rm_type_map.get(property_type_detail, '')
+
+        # Use postcode outcode (first part) for broader search area
+        outcode = postcode.split()[0] if ' ' in postcode else postcode
+
+        # Build Apify input — automation-lab/rightmove-scraper accepts these directly
+        input_payload = {
+            'searchLocation': outcode,
+            'channel': 'RENT',
+            'maxResults': 15,
+            'radius': '0.5',
+            'minBedrooms': bedrooms,
+            'maxBedrooms': bedrooms,
+        }
+
+        app.logger.info(f'[Rental Comps] Searching {outcode} — {bedrooms}bed, type={rm_property_type or "any"}')
+
+        items = _apify_run_actor(
+            APIFY_RIGHTMOVE_RENTAL_ACTOR_ID,
+            input_payload,
+            timeout_secs=60
+        )
+
+        if not items:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'listings': [],
+                    'count': 0,
+                    'averageRent': 0,
+                    'message': 'No rental comparables found in this area'
+                }
+            })
+
+        # Post-filter by property type if specified (Rightmove search doesn't always
+        # have a propertyTypes parameter in the actor, so we filter results)
+        if rm_property_type:
+            filtered = []
+            for item in items:
+                sub_type = (item.get('propertySubType') or item.get('propertyType') or '').lower()
+                if rm_property_type in sub_type:
+                    filtered.append(item)
+                elif rm_property_type == 'flat' and ('apartment' in sub_type or 'maisonette' in sub_type):
+                    filtered.append(item)
+                elif rm_property_type == 'terraced' and 'terrace' in sub_type:
+                    filtered.append(item)
+            # Fall back to unfiltered if type filter eliminates everything
+            if filtered:
+                items = filtered
+            else:
+                app.logger.info(f'[Rental Comps] Type filter ({rm_property_type}) eliminated all results, '
+                                f'showing unfiltered')
+
+        # Map to clean output format
+        listings = []
+        for item in items:
+            price = item.get('price') or 0
+            # Some listings might show weekly — convert to monthly
+            freq = (item.get('priceFrequency') or 'monthly').lower()
+            monthly_rent = price
+            rent_label = None
+            if 'week' in freq:
+                monthly_rent = round(price * 52 / 12)
+                rent_label = f'Est. monthly (£{price}/week × 52 ÷ 12)'
+            elif strategy == 'r2sa' and 'night' in freq:
+                monthly_rent = price * 30
+                rent_label = f'Est. monthly (nightly £{price} × 30)'
+
+            listings.append({
+                'address': item.get('displayAddress', ''),
+                'monthlyRent': monthly_rent,
+                'rentLabel': rent_label,
+                'bedrooms': item.get('bedrooms'),
+                'propertyType': item.get('propertySubType') or item.get('propertyType') or '',
+                'imageUrl': item.get('imageUrl') or '',
+                'listingUrl': item.get('url') or '',
+                'agent': item.get('agent') or '',
+                'addedOn': item.get('addedOn') or '',
+                'priceFrequency': freq,
+            })
+
+        # Calculate stats
+        rents = [l['monthlyRent'] for l in listings if l['monthlyRent'] > 0]
+        avg_rent = round(sum(rents) / len(rents)) if rents else 0
+        min_rent = min(rents) if rents else 0
+        max_rent = max(rents) if rents else 0
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'listings': listings,
+                'count': len(listings),
+                'averageRent': avg_rent,
+                'minRent': min_rent,
+                'maxRent': max_rent,
+            }
+        })
+
+    except Exception as e:
+        app.logger.error(f'Rental comparables error: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching rental comparables. Please try again.'
+        }), 500
+
 
 @app.route('/api/price-trend', methods=['POST'])
 @limiter.limit("10 per minute")
