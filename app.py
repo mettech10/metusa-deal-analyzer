@@ -421,11 +421,20 @@ def scrape_rightmove_with_apify(url: str) -> dict:
         lease_years = None
 
     # ── Floor area ───────────────────────────────────────────────────────────
-    sqft = _parse_int(item.get('floorAreaSqft') or item.get('sqft'))
-    sqm  = item.get('floorAreaSqm') or item.get('sqm')
+    # dhrumil/rightmove-scraper returns sizeSqFeetMin/Max; other actors use floorAreaSqft/sqft
+    sqft = _parse_int(
+        item.get('floorAreaSqft')
+        or item.get('sqft')
+        or item.get('sizeSqFeetMax')
+        or item.get('sizeSqFeetMin')
+    )
+    sqm = item.get('floorAreaSqm') or item.get('sqm')
     if sqm is None and sqft:
         sqm = round(sqft / 10.764, 1)
     sqm = round(float(sqm), 1) if sqm else None
+    print(f"[Rightmove] Floor area: sqft={sqft}, sqm={sqm} "
+          f"(sizeSqFeetMax={item.get('sizeSqFeetMax')}, sizeSqFeetMin={item.get('sizeSqFeetMin')}, "
+          f"floorAreaSqft={item.get('floorAreaSqft')})")
 
     # ── Postcode (from outcode + incode if not direct) ──────────────────────
     postcode = item.get('postcode') or item.get('propertyPostcode')
@@ -525,8 +534,13 @@ def scrape_onthemarket_with_apify(url: str) -> dict:
         lease_years = None
 
     # ── Floor area ───────────────────────────────────────────────────────────
-    sqft = _parse_int(item.get('floorAreaSqft') or item.get('sqft'))
-    sqm  = item.get('floorAreaSqm') or item.get('sqm')
+    sqft = _parse_int(
+        item.get('floorAreaSqft')
+        or item.get('sqft')
+        or item.get('sizeSqFeetMax')
+        or item.get('sizeSqFeetMin')
+    )
+    sqm = item.get('floorAreaSqm') or item.get('sqm')
     if sqm is None and sqft:
         sqm = round(sqft / 10.764, 1)
     sqm = round(float(sqm), 1) if sqm else None
