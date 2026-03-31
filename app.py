@@ -429,12 +429,39 @@ def scrape_rightmove_with_apify(url: str) -> dict:
         or item.get('sizeSqFeetMin')
     )
     sqm = item.get('floorAreaSqm') or item.get('sqm')
+
+    # Fallback: parse floor area from description / descriptionHtml / features text
+    if not sqft and not sqm:
+        text_sources = [
+            item.get('description') or '',
+            item.get('descriptionHtml') or '',
+            ' '.join(item.get('features') or []) if isinstance(item.get('features'), list) else '',
+            ' '.join(item.get('keyFeatures') or []) if isinstance(item.get('keyFeatures'), list) else '',
+        ]
+        combined_text = ' '.join(text_sources)
+        import re as _re
+        sqft_patterns = [
+            (r'(\d[\d,]*(?:\.\d+)?)\s*(?:sq\.?\s*ft|ft²|sqft|square\s*feet)\b', 'sqft'),
+            (r'(\d[\d,]*(?:\.\d+)?)\s*(?:sq\.?\s*m|m²|m2|sqm|square\s*met(?:re|er)s?)\b', 'sqm'),
+        ]
+        for pat, unit in sqft_patterns:
+            m = _re.search(pat, combined_text, _re.IGNORECASE)
+            if m:
+                val = float(m.group(1).replace(',', ''))
+                if unit == 'sqft' and 100 <= val <= 20000:
+                    sqft = int(val)
+                    print(f"[Rightmove] Floor area from description regex: {sqft} sqft")
+                    break
+                elif unit == 'sqm' and 10 <= val <= 2000:
+                    sqm = round(val, 1)
+                    sqft = round(val * 10.764)
+                    print(f"[Rightmove] Floor area from description regex: {sqm} sqm → {sqft} sqft")
+                    break
+
     if sqm is None and sqft:
         sqm = round(sqft / 10.764, 1)
     sqm = round(float(sqm), 1) if sqm else None
-    print(f"[Rightmove] Floor area: sqft={sqft}, sqm={sqm} "
-          f"(sizeSqFeetMax={item.get('sizeSqFeetMax')}, sizeSqFeetMin={item.get('sizeSqFeetMin')}, "
-          f"floorAreaSqft={item.get('floorAreaSqft')})")
+    print(f"[Rightmove] Floor area final: sqft={sqft}, sqm={sqm}")
 
     # ── Postcode (from outcode + incode if not direct) ──────────────────────
     postcode = item.get('postcode') or item.get('propertyPostcode')
