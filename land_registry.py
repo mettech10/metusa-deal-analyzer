@@ -23,38 +23,99 @@ class LandRegistryAPI:
             "Content-Type": "application/x-www-form-urlencoded"
         }
     
-    def get_sold_prices(self, postcode: str, limit: int = 10) -> List[Dict]:
+    # Land Registry ppd:propertyType codes → human-readable labels
+    PROPERTY_TYPE_MAP = {
+        'D': 'detached',
+        'S': 'semi-detached',
+        'T': 'terraced',
+        'F': 'flat',
+        'O': 'other',
+    }
+
+    # Map our frontend property-type-detail values to Land Registry codes
+    DETAIL_TO_LR_CODE = {
+        'detached': 'D',
+        'semi-detached': 'S',
+        'terraced': 'T',
+        'end-of-terrace': 'T',   # Land Registry groups end-terrace with terraced
+        'flat-apartment': 'F',
+        'maisonette': 'F',       # Land Registry groups maisonettes with flats
+        'bungalow': 'D',         # Bungalows are typically detached in LR data
+        'other': 'O',
+    }
+
+    # Map our frontend broad type to LR codes
+    BROAD_TO_LR_CODE = {
+        'house': None,           # don't filter — could be D/S/T
+        'flat': 'F',
+        'commercial': 'O',
+    }
+
+    def get_sold_prices(
+        self,
+        postcode: str,
+        limit: int = 10,
+        property_type_detail: str = None,
+        property_type: str = None,
+        tenure_type: str = None,
+    ) -> List[Dict]:
         """
-        Get recent sold prices for a postcode
-        
+        Get recent sold prices for a postcode, optionally filtered by property type and tenure.
+
         Args:
             postcode: UK postcode (e.g., "M14 6LT")
             limit: Maximum number of results
-            
+            property_type_detail: Granular type (terraced, semi-detached, flat-apartment etc.)
+            property_type: Broad type (house, flat, commercial) — used if detail not given
+            tenure_type: 'freehold' or 'leasehold'
+
         Returns:
-            List of sold price records
+            List of sold price records with propertyType and tenure fields
         """
+        # Build optional SPARQL filters
+        type_filter = ""
+        lr_code = None
+        if property_type_detail:
+            lr_code = self.DETAIL_TO_LR_CODE.get(property_type_detail)
+        elif property_type:
+            lr_code = self.BROAD_TO_LR_CODE.get(property_type)
+        if lr_code:
+            type_filter = f"""
+          ?transaction ppd:propertyType <http://landregistry.data.gov.uk/def/common/{lr_code}> ."""
+
+        tenure_filter = ""
+        if tenure_type == 'freehold':
+            tenure_filter = """
+          ?transaction ppd:estateType ppd:freehold ."""
+        elif tenure_type == 'leasehold':
+            tenure_filter = """
+          ?transaction ppd:estateType ppd:leasehold ."""
+
+        # Fetch more than needed so we can post-filter if required
+        fetch_limit = limit * 3
+
         query = f"""
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
         PREFIX ppd: <http://landregistry.data.gov.uk/def/ppi/>
         PREFIX lrcommon: <http://landregistry.data.gov.uk/def/common/>
-        
-        SELECT ?price ?date ?street ?town ?propertyType ?duration
+
+        SELECT ?price ?date ?street ?town ?pType ?eType
         WHERE {{
           ?transaction ppd:pricePaid ?price ;
                        ppd:transactionDate ?date ;
-                       ppd:propertyAddress ?property .
-          
+                       ppd:propertyAddress ?property ;
+                       ppd:propertyType ?pType .{type_filter}{tenure_filter}
+
           ?property lrcommon:postcode "{postcode}"^^xsd:string .
-          
+
           OPTIONAL {{ ?property lrcommon:street ?street }}
           OPTIONAL {{ ?property lrcommon:town ?town }}
-          OPTIONAL {{ ?property lrcommon:paon ?propertyType }}
+          OPTIONAL {{ ?transaction ppd:estateType ?eType }}
         }}
         ORDER BY DESC(?date)
-        LIMIT {limit}
+        LIMIT {fetch_limit}
         """
-        
+
         try:
             response = requests.post(
                 self.endpoint,
@@ -63,20 +124,31 @@ class LandRegistryAPI:
                 timeout=10
             )
             response.raise_for_status()
-            
+
             data = response.json()
             results = []
-            
+
             for binding in data.get('results', {}).get('bindings', []):
+                # Extract property type code from URI, e.g. ".../common/D" → "D"
+                ptype_uri = binding.get('pType', {}).get('value', '')
+                ptype_code = ptype_uri.rsplit('/', 1)[-1] if ptype_uri else ''
+                ptype_label = self.PROPERTY_TYPE_MAP.get(ptype_code, ptype_code)
+
+                # Extract tenure from URI
+                etype_uri = binding.get('eType', {}).get('value', '')
+                tenure = 'freehold' if 'freehold' in etype_uri else ('leasehold' if 'leasehold' in etype_uri else '')
+
                 results.append({
                     'price': int(binding['price']['value']),
                     'date': binding['date']['value'],
                     'street': binding.get('street', {}).get('value', 'N/A'),
-                    'town': binding.get('town', {}).get('value', 'N/A')
+                    'town': binding.get('town', {}).get('value', 'N/A'),
+                    'propertyType': ptype_label,
+                    'tenure': tenure,
                 })
-            
-            return results
-            
+
+            return results[:limit]
+
         except Exception as e:
             print(f"Land Registry API error: {e}")
             return []
