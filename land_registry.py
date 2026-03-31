@@ -23,32 +23,33 @@ class LandRegistryAPI:
             "Content-Type": "application/x-www-form-urlencoded"
         }
     
-    # Land Registry ppd:propertyType codes → human-readable labels
+    # Land Registry ppd:propertyType URI suffixes → human-readable labels
+    # Actual URIs: http://landregistry.data.gov.uk/def/common/{suffix}
     PROPERTY_TYPE_MAP = {
-        'D': 'detached',
-        'S': 'semi-detached',
-        'T': 'terraced',
-        'F': 'flat',
-        'O': 'other',
+        'detached': 'detached',
+        'semi-detached': 'semi-detached',
+        'terraced': 'terraced',
+        'flat-maisonette': 'flat',
+        'otherPropertyType': 'other',
     }
 
-    # Map our frontend property-type-detail values to Land Registry codes
+    # Map our frontend property-type-detail values to Land Registry URI suffixes
     DETAIL_TO_LR_CODE = {
-        'detached': 'D',
-        'semi-detached': 'S',
-        'terraced': 'T',
-        'end-of-terrace': 'T',   # Land Registry groups end-terrace with terraced
-        'flat-apartment': 'F',
-        'maisonette': 'F',       # Land Registry groups maisonettes with flats
-        'bungalow': 'D',         # Bungalows are typically detached in LR data
-        'other': 'O',
+        'detached': 'detached',
+        'semi-detached': 'semi-detached',
+        'terraced': 'terraced',
+        'end-of-terrace': 'terraced',          # LR groups end-terrace with terraced
+        'flat-apartment': 'flat-maisonette',
+        'maisonette': 'flat-maisonette',        # LR groups maisonettes with flats
+        'bungalow': 'detached',                 # Bungalows typically detached in LR
+        'other': 'otherPropertyType',
     }
 
-    # Map our frontend broad type to LR codes
+    # Map our frontend broad type to LR URI suffixes
     BROAD_TO_LR_CODE = {
-        'house': None,           # don't filter — could be D/S/T
-        'flat': 'F',
-        'commercial': 'O',
+        'house': None,                          # don't filter — could be D/S/T
+        'flat': 'flat-maisonette',
+        'commercial': 'otherPropertyType',
     }
 
     def get_sold_prices(
@@ -72,27 +73,17 @@ class LandRegistryAPI:
         Returns:
             List of sold price records with propertyType and tenure fields
         """
-        # Build optional SPARQL filters
-        type_filter = ""
+        # Resolve property type filter code for post-query filtering
         lr_code = None
         if property_type_detail:
             lr_code = self.DETAIL_TO_LR_CODE.get(property_type_detail)
         elif property_type:
             lr_code = self.BROAD_TO_LR_CODE.get(property_type)
-        if lr_code:
-            type_filter = f"""
-          ?transaction ppd:propertyType <http://landregistry.data.gov.uk/def/common/{lr_code}> ."""
 
-        tenure_filter = ""
-        if tenure_type == 'freehold':
-            tenure_filter = """
-          ?transaction ppd:estateType ppd:freehold ."""
-        elif tenure_type == 'leasehold':
-            tenure_filter = """
-          ?transaction ppd:estateType ppd:leasehold ."""
-
-        # Fetch more than needed so we can post-filter if required
-        fetch_limit = limit * 3
+        # Fetch a larger batch so post-filtering still yields enough results.
+        # We do NOT filter in SPARQL because the Land Registry endpoint is
+        # extremely slow with property-type / estate-type constraints.
+        fetch_limit = limit * 5
 
         query = f"""
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
@@ -104,7 +95,7 @@ class LandRegistryAPI:
           ?transaction ppd:pricePaid ?price ;
                        ppd:transactionDate ?date ;
                        ppd:propertyAddress ?property ;
-                       ppd:propertyType ?pType .{type_filter}{tenure_filter}
+                       ppd:propertyType ?pType .
 
           ?property lrcommon:postcode "{postcode}"^^xsd:string .
 
@@ -121,7 +112,7 @@ class LandRegistryAPI:
                 self.endpoint,
                 headers=self.headers,
                 data={"query": query},
-                timeout=10
+                timeout=30
             )
             response.raise_for_status()
 
@@ -129,7 +120,7 @@ class LandRegistryAPI:
             results = []
 
             for binding in data.get('results', {}).get('bindings', []):
-                # Extract property type code from URI, e.g. ".../common/D" → "D"
+                # Extract property type suffix from URI, e.g. ".../common/detached" → "detached"
                 ptype_uri = binding.get('pType', {}).get('value', '')
                 ptype_code = ptype_uri.rsplit('/', 1)[-1] if ptype_uri else ''
                 ptype_label = self.PROPERTY_TYPE_MAP.get(ptype_code, ptype_code)
@@ -138,14 +129,24 @@ class LandRegistryAPI:
                 etype_uri = binding.get('eType', {}).get('value', '')
                 tenure = 'freehold' if 'freehold' in etype_uri else ('leasehold' if 'leasehold' in etype_uri else '')
 
-                results.append({
+                record = {
                     'price': int(binding['price']['value']),
                     'date': binding['date']['value'],
                     'street': binding.get('street', {}).get('value', 'N/A'),
                     'town': binding.get('town', {}).get('value', 'N/A'),
                     'propertyType': ptype_label,
                     'tenure': tenure,
-                })
+                }
+
+                # Post-filter by property type if requested
+                if lr_code and ptype_code != lr_code:
+                    continue
+
+                # Post-filter by tenure if requested
+                if tenure_type and tenure != tenure_type:
+                    continue
+
+                results.append(record)
 
             return results[:limit]
 
