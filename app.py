@@ -616,10 +616,14 @@ def scrape_spareroom_with_apify(postcode: str, max_results: int = 10) -> list:
     )
     results = []
     for item in items:
+        # SpareRoom actor returns min_rent/max_rent; also check legacy field names
         rent_val = _parse_price(
-            item.get('monthlyRent') or item.get('rent') or item.get('price')
+            item.get('min_rent') or item.get('max_rent')
+            or item.get('monthlyRent') or item.get('rent') or item.get('price')
         )
-        bills_raw = item.get('billsIncluded') or item.get('bills') or ''
+
+        # Bills included
+        bills_raw = item.get('bills_inc') or item.get('billsIncluded') or item.get('bills') or ''
         if isinstance(bills_raw, bool):
             bills_included = 'Yes' if bills_raw else 'No'
         elif str(bills_raw).lower() in ('yes', 'true', '1', 'included'):
@@ -629,16 +633,45 @@ def scrape_spareroom_with_apify(postcode: str, max_results: int = 10) -> list:
         else:
             bills_included = 'Unknown'
 
+        # Room type: check the rooms array first, then fallback to accom_type
+        room_type = 'Unknown'
+        rooms = item.get('rooms') or []
+        if rooms and isinstance(rooms, list):
+            # Find first available room
+            avail_room = next((r for r in rooms if r.get('room_status') == 'available'), rooms[0])
+            rt = avail_room.get('room_type', '')
+            if avail_room.get('ensuite') == 'Y':
+                room_type = f"{rt} (en-suite)" if rt else 'en-suite'
+            elif rt:
+                room_type = rt
+        if room_type == 'Unknown':
+            room_type = item.get('accom_type') or item.get('roomType') or item.get('type') or 'Unknown'
+
+        # Construct listing URL from advert_id
+        advert_id = item.get('advert_id') or ''
+        listing_url = (
+            f"https://www.spareroom.co.uk/flatshare/flatshare_detail.pl?flatshare_id={advert_id}"
+            if advert_id else
+            item.get('url') or item.get('listingUrl') or item.get('link') or ''
+        )
+
+        # Image URL — pick the first photo if available
+        photos = item.get('photos') or []
+        image_url = ''
+        if photos and isinstance(photos, list):
+            image_url = photos[0].get('square_url') or photos[0].get('standard_url') or ''
+
         results.append({
-            'title':          item.get('title') or item.get('listingTitle') or item.get('heading') or 'Room to rent',
-            'address':        item.get('address') or item.get('area') or postcode,
+            'title':          item.get('ad_title') or item.get('title') or item.get('listingTitle') or 'Room to rent',
+            'address':        item.get('neighbourhood_name') or item.get('address') or item.get('area') or postcode,
             'postcode':       item.get('postcode') or postcode,
             'monthly_rent':   rent_val,
             'bills_included': bills_included,
-            'num_rooms':      _parse_int(item.get('totalRooms') or item.get('numRooms') or item.get('roomsInProperty')),
-            'room_type':      item.get('roomType') or item.get('type') or item.get('roomSize') or 'Unknown',
-            'available_from': item.get('availableFrom') or item.get('available') or item.get('dateAvailable') or 'Now',
-            'listing_url':    item.get('url') or item.get('listingUrl') or item.get('link') or '',
+            'num_rooms':      _parse_int(item.get('rooms_in_property') or item.get('totalRooms') or item.get('numRooms')),
+            'room_type':      room_type,
+            'available_from': item.get('available_from') or item.get('availableFrom') or item.get('available') or 'Now',
+            'listing_url':    listing_url,
+            'image_url':      image_url,
         })
     print(f"[Apify/SpareRoom] Got {len(results)} results for {postcode}")
     return results
