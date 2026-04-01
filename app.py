@@ -5008,21 +5008,23 @@ def get_sold_prices():
         property_type_detail = data.get('propertyTypeDetail')
         property_type = data.get('propertyType')
         tenure_type = data.get('tenureType')
+        bedrooms = data.get('bedrooms')
 
-        # Get sold prices from Land Registry with optional filtering
-        sales = land_registry.get_sold_prices(
+        # Get sold prices with automatic radius expansion when no exact matches
+        sales, radius_used = land_registry.get_sold_prices_with_radius(
             postcode,
             limit=10,
             property_type_detail=property_type_detail,
             property_type=property_type,
             tenure_type=tenure_type,
+            bedrooms=int(bedrooms) if bedrooms else None,
         )
 
         if not sales:
             return jsonify({
                 'success': True,
-                'data': {'sales': [], 'average': 0, 'count': 0},
-                'message': 'No recent sales found for this postcode'
+                'data': {'sales': [], 'average': 0, 'count': 0, 'radiusMiles': radius_used},
+                'message': 'No recent sales found for this postcode or nearby area'
             })
 
         # Calculate average
@@ -5035,6 +5037,7 @@ def get_sold_prices():
                 'sales': sales,
                 'average': round(avg_price, 0),
                 'count': len(sales),
+                'radiusMiles': radius_used,
             }
         })
         
