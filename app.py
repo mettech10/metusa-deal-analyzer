@@ -4224,11 +4224,41 @@ def get_comparables():
 
         max_results = min(int(data.get('maxResults', 10)), 20)
 
-        listings = scrape_spareroom_with_apify(postcode, max_results=max_results)
+        # Extract postcode district (outcode) and area
+        # e.g. "SK16 5ET" → district="SK16", area="SK"
+        # e.g. "M1 2AB" → district="M1", area="M"
+        # e.g. "SW1A 2AA" → district="SW1A", area="SW"
+        import re
+        parts = postcode.upper().split()
+        district = parts[0] if parts else postcode.upper()
+        area = re.match(r'^[A-Z]+', district)
+        area = area.group(0) if area else district
+
+        # Tier 1: Search by postcode district
+        print(f"[SpareRoom] Tier 1 — searching district: {district}")
+        listings = scrape_spareroom_with_apify(district, max_results=max_results)
+        search_used = district
+
+        # Tier 2: If fewer than 3 results, expand to postcode area
+        if len(listings) < 3 and area != district:
+            print(f"[SpareRoom] Tier 2 — expanding to area: {area} (tier 1 returned {len(listings)})")
+            area_listings = scrape_spareroom_with_apify(area, max_results=max_results)
+            # Deduplicate by listing_url
+            seen_urls = {l.get('listing_url') for l in listings if l.get('listing_url')}
+            for lst in area_listings:
+                url = lst.get('listing_url', '')
+                if url and url not in seen_urls:
+                    listings.append(lst)
+                    seen_urls.add(url)
+            search_used = f"{area} (expanded)"
+            listings = listings[:max_results]
+
+        print(f"[SpareRoom] Final: {len(listings)} listings for {search_used}")
 
         return jsonify({
             'success': True,
             'postcode': postcode,
+            'searchArea': search_used,
             'listings': listings,
             'count': len(listings),
         })
@@ -5122,8 +5152,10 @@ def get_rental_comparables():
 
         # Use postcode outcode (first part) for broader search area
         outcode = postcode.split()[0] if ' ' in postcode else postcode
+        search_area = outcode
 
-        # Build Apify input — automation-lab/rightmove-scraper accepts these directly
+        # Tier 1: Search by outcode with 0.5 mile radius
+        app.logger.info(f'[Rental Comps] Tier 1 — Searching {outcode} radius 0.5 — {bedrooms}bed, type={rm_property_type or "any"}')
         input_payload = {
             'searchLocation': outcode,
             'channel': 'RENT',
@@ -5133,13 +5165,22 @@ def get_rental_comparables():
             'maxBedrooms': bedrooms,
         }
 
-        app.logger.info(f'[Rental Comps] Searching {outcode} — {bedrooms}bed, type={rm_property_type or "any"}')
-
         items = _apify_run_actor(
             APIFY_RIGHTMOVE_RENTAL_ACTOR_ID,
             input_payload,
             timeout_secs=60
         )
+
+        # Tier 2: If fewer than 3 results, retry with radius 1.0
+        if len(items or []) < 3:
+            app.logger.info(f'[Rental Comps] Tier 2 — expanding radius to 1.0 (tier 1 returned {len(items or [])})')
+            input_payload['radius'] = '1.0'
+            items = _apify_run_actor(
+                APIFY_RIGHTMOVE_RENTAL_ACTOR_ID,
+                input_payload,
+                timeout_secs=60
+            )
+            search_area = f"{outcode} (wider radius)"
 
         if not items:
             return jsonify({
@@ -5148,6 +5189,7 @@ def get_rental_comparables():
                     'listings': [],
                     'count': 0,
                     'averageRent': 0,
+                    'searchArea': search_area,
                     'message': 'No rental comparables found in this area'
                 }
             })
@@ -5213,6 +5255,7 @@ def get_rental_comparables():
                 'averageRent': avg_rent,
                 'minRent': min_rent,
                 'maxRent': max_rent,
+                'searchArea': search_area,
             }
         })
 
