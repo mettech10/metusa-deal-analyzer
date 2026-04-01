@@ -5,8 +5,9 @@ UK Price Paid Data access for deal analysis
 
 import requests
 import json
+import math
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import os
 
 # API Configuration
@@ -154,6 +155,100 @@ class LandRegistryAPI:
             print(f"Land Registry API error: {e}")
             return []
     
+    def _get_nearby_postcodes(self, postcode: str, radius_miles: float) -> List[str]:
+        """
+        Get postcodes within a radius of the given postcode using postcodes.io.
+        Returns a list of postcode strings (excluding the original).
+        """
+        try:
+            # First, get the lat/lng for the postcode
+            geo_res = requests.get(
+                f"https://api.postcodes.io/postcodes/{requests.utils.quote(postcode)}",
+                timeout=5
+            )
+            if not geo_res.ok:
+                return []
+            geo = geo_res.json().get("result", {})
+            lat = geo.get("latitude")
+            lng = geo.get("longitude")
+            if not lat or not lng:
+                return []
+
+            # Convert miles to metres (postcodes.io uses metres, max 2000m)
+            radius_m = min(int(radius_miles * 1609.34), 2000)
+
+            # Find nearby postcodes
+            nearby_res = requests.get(
+                f"https://api.postcodes.io/postcodes?lon={lng}&lat={lat}&radius={radius_m}&limit=20",
+                timeout=5
+            )
+            if not nearby_res.ok:
+                return []
+
+            results = nearby_res.json().get("result") or []
+            nearby = [
+                r["postcode"] for r in results
+                if r.get("postcode") and r["postcode"].upper() != postcode.upper()
+            ]
+            return nearby
+
+        except Exception as e:
+            print(f"Nearby postcodes lookup error: {e}")
+            return []
+
+    def get_sold_prices_with_radius(
+        self,
+        postcode: str,
+        limit: int = 10,
+        property_type_detail: str = None,
+        property_type: str = None,
+        tenure_type: str = None,
+        bedrooms: int = None,
+    ) -> Tuple[List[Dict], float]:
+        """
+        Get sold prices, automatically widening the search radius if no results.
+
+        Returns:
+            Tuple of (results_list, radius_miles_used)
+            radius_miles_used is 0 for exact postcode match, 0.5 or 1.0 for wider search.
+        """
+        # Step 1: Try exact postcode first
+        results = self.get_sold_prices(
+            postcode, limit,
+            property_type_detail=property_type_detail,
+            property_type=property_type,
+            tenure_type=tenure_type,
+        )
+        if results:
+            return results, 0
+
+        # Step 2: Widen to 0.5 mile radius
+        for radius in [0.5, 1.0]:
+            nearby = self._get_nearby_postcodes(postcode, radius)
+            if not nearby:
+                continue
+
+            all_results = []
+            for pc in nearby:
+                batch = self.get_sold_prices(
+                    pc, limit,
+                    property_type_detail=property_type_detail,
+                    property_type=property_type,
+                    tenure_type=tenure_type,
+                )
+                all_results.extend(batch)
+                # Stop early if we have enough
+                if len(all_results) >= limit:
+                    break
+
+            if all_results:
+                # Sort by date descending and trim
+                all_results.sort(key=lambda x: x.get('date', ''), reverse=True)
+                return all_results[:limit], radius
+
+        # Nothing at any radius
+        return [], 1.0
+
     def get_average_price(self, postcode: str, months: int = 12) -> Optional[float]:
         """
         Calculate average sold price for postcode over time period
