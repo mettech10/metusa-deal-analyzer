@@ -690,12 +690,17 @@ def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
         price_match = re.search(r'£([\d,]+)\s*per month', text)
         rent_pcm = int(price_match.group(1).replace(',', '')) if price_match else None
 
-        # Title: "Room in a Shared House, Street Name, Postcode"
-        title_match = re.search(
-            r'(Room in a Shared (?:House|Flat|Property)[^£]*?)(?:£|\d+\.\d+\s*km)',
-            text, re.I
-        )
-        title = title_match.group(1).strip().rstrip(', ') if title_match else 'Room to rent'
+        # Title: prefer img alt text (clean), fallback to regex on card text
+        img_el = card.select_one('img')
+        alt_text = (img_el.get('alt', '') if img_el else '').strip()
+        if alt_text and 'room in a shared' in alt_text.lower():
+            title = alt_text
+        else:
+            title_match = re.search(
+                r'(Room in a Shared (?:House|Flat|Property),\s*[^,]+(?:,\s*[A-Z]{1,2}\d{1,2}[A-Z]?)?)',
+                text, re.I
+            )
+            title = title_match.group(1).strip() if title_match else 'Room to rent'
 
         # Distance from search centre
         dist_match = re.search(r'([\d.]+)\s*km', text)
