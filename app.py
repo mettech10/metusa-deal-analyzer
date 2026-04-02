@@ -600,81 +600,16 @@ def scrape_onthemarket_with_apify(url: str) -> dict:
     return data
 
 
-def scrape_spareroom_with_apify(postcode: str, max_results: int = 10) -> list:
-    """Scrape SpareRoom listings near a postcode using the Apify SpareRoom actor.
-    Returns a list of room listing dicts with all required HMO comparable fields.
+def get_spareroom_search_url(postcode: str) -> str:
+    """Build a SpareRoom search URL for a given postcode.
+    SpareRoom renders local results via client-side JavaScript, making automated
+    scraping unreliable. This returns a direct search link for manual lookup.
     """
-    print(f"[Apify/SpareRoom] Scraping rooms near {postcode}")
-    search_url = (
+    return (
         f'https://www.spareroom.co.uk/flatshare/?search_by=postcode'
-        f'&search={postcode.replace(" ", "+")}&rooms_for=0&rooms_offered=1'
+        f'&search={postcode.replace(" ", "+")}'
+        f'&miles_from_max=2&rooms_for=0&rooms_offered=1'
     )
-    items = _apify_run_actor(
-        APIFY_SPAREROOM_ACTOR_ID,
-        {'startUrls': [search_url], 'maxItems': max_results},
-        timeout_secs=60,
-    )
-    results = []
-    for item in items:
-        # SpareRoom actor returns min_rent/max_rent; also check legacy field names
-        rent_val = _parse_price(
-            item.get('min_rent') or item.get('max_rent')
-            or item.get('monthlyRent') or item.get('rent') or item.get('price')
-        )
-
-        # Bills included
-        bills_raw = item.get('bills_inc') or item.get('billsIncluded') or item.get('bills') or ''
-        if isinstance(bills_raw, bool):
-            bills_included = 'Yes' if bills_raw else 'No'
-        elif str(bills_raw).lower() in ('yes', 'true', '1', 'included'):
-            bills_included = 'Yes'
-        elif str(bills_raw).lower() in ('no', 'false', '0', 'not included'):
-            bills_included = 'No'
-        else:
-            bills_included = 'Unknown'
-
-        # Room type: check the rooms array first, then fallback to accom_type
-        room_type = 'Unknown'
-        rooms = item.get('rooms') or []
-        if rooms and isinstance(rooms, list):
-            # Find first available room
-            avail_room = next((r for r in rooms if r.get('room_status') == 'available'), rooms[0])
-            rt = avail_room.get('room_type', '')
-            if avail_room.get('ensuite') == 'Y':
-                room_type = f"{rt} (en-suite)" if rt else 'en-suite'
-            elif rt:
-                room_type = rt
-        if room_type == 'Unknown':
-            room_type = item.get('accom_type') or item.get('roomType') or item.get('type') or 'Unknown'
-
-        # Construct listing URL from advert_id
-        advert_id = item.get('advert_id') or ''
-        listing_url = (
-            f"https://www.spareroom.co.uk/flatshare/flatshare_detail.pl?flatshare_id={advert_id}"
-            if advert_id else
-            item.get('url') or item.get('listingUrl') or item.get('link') or ''
-        )
-
-        # Image URL — pick the first photo if available
-        photos = item.get('photos') or []
-        image_url = ''
-        if photos and isinstance(photos, list):
-            image_url = photos[0].get('square_url') or photos[0].get('standard_url') or ''
-
-        results.append({
-            'title':          item.get('ad_title') or item.get('title') or item.get('listingTitle') or 'Room to rent',
-            'address':        item.get('neighbourhood_name') or item.get('address') or item.get('area') or postcode,
-            'postcode':       item.get('postcode') or postcode,
-            'monthly_rent':   rent_val,
-            'bills_included': bills_included,
-            'num_rooms':      _parse_int(item.get('rooms_in_property') or item.get('totalRooms') or item.get('numRooms')),
-            'room_type':      room_type,
-            'available_from': item.get('available_from') or item.get('availableFrom') or item.get('available') or 'Now',
-            'listing_url':    listing_url,
-            'image_url':      image_url,
-        })
-    print(f"[Apify/SpareRoom] Got {len(results)} results for {postcode}")
-    return results
 
 
 def scrape_with_firecrawl(url: str) -> dict:
@@ -4212,6 +4147,12 @@ def extract_url():
 def get_comparables():
     """Return SpareRoom rental comparables for a given postcode.
     Only intended to be called when the investment strategy is HMO.
+
+    NOTE: SpareRoom renders local results via client-side JavaScript, making
+    automated scraping unreliable (both Apify actors and direct HTML scraping
+    return random nationwide results, not location-filtered data). Until a
+    reliable data source is available, this endpoint returns a manual search
+    link so users can check SpareRoom directly.
     """
     try:
         if not request.is_json:
@@ -4222,45 +4163,28 @@ def get_comparables():
         if not postcode:
             return jsonify({'success': False, 'message': 'postcode is required'}), 400
 
-        max_results = min(int(data.get('maxResults', 10)), 20)
-
-        # Extract postcode district (outcode) and area
-        # e.g. "SK16 5ET" → district="SK16", area="SK"
-        # e.g. "M1 2AB" → district="M1", area="M"
-        # e.g. "SW1A 2AA" → district="SW1A", area="SW"
+        # Extract postcode district for display
         import re
         parts = postcode.upper().split()
         district = parts[0] if parts else postcode.upper()
-        area = re.match(r'^[A-Z]+', district)
-        area = area.group(0) if area else district
 
-        # Tier 1: Search by postcode district
-        print(f"[SpareRoom] Tier 1 — searching district: {district}")
-        listings = scrape_spareroom_with_apify(district, max_results=max_results)
-        search_used = district
+        # Build the SpareRoom search URL for manual lookup
+        search_url = get_spareroom_search_url(postcode)
 
-        # Tier 2: If fewer than 3 results, expand to postcode area
-        if len(listings) < 3 and area != district:
-            print(f"[SpareRoom] Tier 2 — expanding to area: {area} (tier 1 returned {len(listings)})")
-            area_listings = scrape_spareroom_with_apify(area, max_results=max_results)
-            # Deduplicate by listing_url
-            seen_urls = {l.get('listing_url') for l in listings if l.get('listing_url')}
-            for lst in area_listings:
-                url = lst.get('listing_url', '')
-                if url and url not in seen_urls:
-                    listings.append(lst)
-                    seen_urls.add(url)
-            search_used = f"{area} (expanded)"
-            listings = listings[:max_results]
-
-        print(f"[SpareRoom] Final: {len(listings)} listings for {search_used}")
+        print(f"[SpareRoom] Returning manual search link for {postcode} (district: {district})")
 
         return jsonify({
             'success': True,
             'postcode': postcode,
-            'searchArea': search_used,
-            'listings': listings,
-            'count': len(listings),
+            'searchArea': district,
+            'listings': [],
+            'count': 0,
+            'searchUrl': search_url,
+            'manualSearch': True,
+            'message': (
+                f'SpareRoom data is temporarily unavailable for automated retrieval. '
+                f'Search manually for rooms near {district}.'
+            ),
         })
 
     except Exception as e:
