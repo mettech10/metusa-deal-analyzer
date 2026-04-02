@@ -612,6 +612,148 @@ def get_spareroom_search_url(postcode: str) -> str:
     )
 
 
+def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
+    """Scrape room listings from OpenRent for a given postcode district.
+
+    OpenRent serves real, location-filtered room listings in server-rendered HTML,
+    unlike SpareRoom which renders organic results via client-side JavaScript.
+    Uses the isRoomOnly=true filter to get HMO-style room listings only.
+
+    TODO: Add proxy rotation if blocking becomes an issue in future.
+
+    Args:
+        district: Postcode district e.g. "M14", "SK16", "LS6"
+        max_results: Maximum number of room listings to return
+
+    Returns:
+        List of room listing dicts with title, rentPcm, roomType, etc.
+    """
+    import time
+    import random
+    from bs4 import BeautifulSoup
+
+    search_url = (
+        f'https://www.openrent.com/properties-to-rent/{district.lower()}'
+        f'?term={district.upper()}'
+        f'&prices_min=0&prices_max=2500'
+        f'&bedrooms_min=0&bedrooms_max=0'
+        f'&isRoomOnly=true'
+    )
+    print(f"[OpenRent] Fetching rooms for {district}: {search_url}")
+
+    # Random delay 1-3s to avoid rate limiting
+    time.sleep(1 + random.random() * 2)
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) '
+                       'Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,'
+                  'image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.openrent.com/',
+    }
+
+    try:
+        resp = requests.get(search_url, headers=headers, timeout=15, allow_redirects=True)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[OpenRent] Fetch error: {e}")
+        return []
+
+    html = resp.text
+    if resp.status_code == 403 or 'captcha' in html.lower()[:2000]:
+        print(f"[OpenRent] Blocked (status={resp.status_code}), first 500 chars: {html[:500]}")
+        return []
+
+    soup = BeautifulSoup(html, 'html.parser')
+    cards = soup.select('a.pli')
+
+    if not cards:
+        print(f"[OpenRent] No .pli cards found. HTML sample: {html[:2000]}")
+        return []
+
+    results = []
+    for card in cards:
+        text = card.get_text(' ', strip=True)
+
+        # Only include room-in-a-shared listings (HMO relevant)
+        is_room = 'room in a shared' in text.lower()
+        if not is_room:
+            continue
+
+        # Monthly rent
+        price_match = re.search(r'£([\d,]+)\s*per month', text)
+        rent_pcm = int(price_match.group(1).replace(',', '')) if price_match else None
+
+        # Title: "Room in a Shared House, Street Name, Postcode"
+        title_match = re.search(
+            r'(Room in a Shared (?:House|Flat|Property)[^£]*?)(?:£|\d+\.\d+\s*km)',
+            text, re.I
+        )
+        title = title_match.group(1).strip().rstrip(', ') if title_match else 'Room to rent'
+
+        # Distance from search centre
+        dist_match = re.search(r'([\d.]+)\s*km', text)
+        distance_km = float(dist_match.group(1)) if dist_match else None
+
+        # Room type detection from title
+        room_type = 'double'  # OpenRent defaults; refine if possible
+        if 'single' in text.lower():
+            room_type = 'single'
+        elif 'en-suite' in text.lower() or 'ensuite' in text.lower():
+            room_type = 'en-suite'
+        elif 'studio' in text.lower():
+            room_type = 'studio'
+
+        # Bills included detection
+        bills_text = text.lower()
+        if 'bills inc' in bills_text or 'all bills' in bills_text:
+            bills_included = True
+        elif 'bills not' in bills_text or 'excl' in bills_text:
+            bills_included = False
+        else:
+            bills_included = None  # Unknown
+
+        # Listing URL
+        href = card.get('href', '')
+        listing_url = f"https://www.openrent.com{href}" if href.startswith('/') else href
+
+        # Image URL
+        img = card.select_one('img')
+        image_url = ''
+        if img:
+            src = img.get('src', '') or img.get('data-src', '')
+            if src and 'NoImage' not in src:
+                image_url = f"https:{src}" if src.startswith('//') else src
+
+        # Extract area/postcode from title
+        area_match = re.search(r',\s*([A-Z]{1,2}\d{1,2}[A-Z]?)\s*$', title)
+        area = area_match.group(1) if area_match else district.upper()
+
+        results.append({
+            'title': title[:120],
+            'rentPcm': rent_pcm,
+            'roomType': room_type,
+            'billsIncluded': bills_included,
+            'area': area,
+            'distanceKm': distance_km,
+            'listingUrl': listing_url,
+            'imageUrl': image_url,
+            'source': 'openrent',
+        })
+
+        if len(results) >= max_results:
+            break
+
+    print(f"[OpenRent] Found {len(results)} room listings for {district}")
+    return results
+
+
 def scrape_with_firecrawl(url: str) -> dict:
     """Scrape property using Firecrawl API (firecrawl.dev).
     Returns clean markdown — same format as Jina but with better JS rendering.
@@ -4145,14 +4287,11 @@ def extract_url():
 @app.route('/api/comparables', methods=['POST'])
 @limiter.limit("10 per minute")
 def get_comparables():
-    """Return SpareRoom rental comparables for a given postcode.
+    """Return HMO room rental comparables for a given postcode.
     Only intended to be called when the investment strategy is HMO.
 
-    NOTE: SpareRoom renders local results via client-side JavaScript, making
-    automated scraping unreliable (both Apify actors and direct HTML scraping
-    return random nationwide results, not location-filtered data). Until a
-    reliable data source is available, this endpoint returns a manual search
-    link so users can check SpareRoom directly.
+    Primary: scrapes OpenRent room listings (server-rendered, location-accurate).
+    Fallback: returns manual SpareRoom search link if OpenRent is blocked/empty.
     """
     try:
         if not request.is_json:
@@ -4163,15 +4302,42 @@ def get_comparables():
         if not postcode:
             return jsonify({'success': False, 'message': 'postcode is required'}), 400
 
-        # Extract postcode district for display
+        max_results = min(int(data.get('maxResults', 12)), 20)
+
+        # Extract postcode district
         import re
         parts = postcode.upper().split()
         district = parts[0] if parts else postcode.upper()
 
-        # Build the SpareRoom search URL for manual lookup
-        search_url = get_spareroom_search_url(postcode)
+        # Primary: OpenRent room scraping (server-rendered, reliable)
+        listings = scrape_openrent_rooms(district, max_results=max_results)
 
-        print(f"[SpareRoom] Returning manual search link for {postcode} (district: {district})")
+        if listings:
+            # Build summary stats
+            rents = [l['rentPcm'] for l in listings if l.get('rentPcm')]
+            summary = {}
+            if rents:
+                summary = {
+                    'count': len(listings),
+                    'averageRent': round(sum(rents) / len(rents)),
+                    'minRent': min(rents),
+                    'maxRent': max(rents),
+                }
+
+            return jsonify({
+                'success': True,
+                'postcode': postcode,
+                'searchArea': district,
+                'listings': listings,
+                'count': len(listings),
+                'summary': summary,
+                'source': 'openrent',
+                'searchUrl': f'https://www.openrent.com/properties-to-rent/{district.lower()}?term={district}&isRoomOnly=true',
+            })
+
+        # Fallback: return SpareRoom manual search link
+        spareroom_url = get_spareroom_search_url(postcode)
+        print(f"[HMO] OpenRent returned 0 rooms for {district}, falling back to manual links")
 
         return jsonify({
             'success': True,
@@ -4179,11 +4345,12 @@ def get_comparables():
             'searchArea': district,
             'listings': [],
             'count': 0,
-            'searchUrl': search_url,
+            'searchUrl': spareroom_url,
             'manualSearch': True,
+            'source': 'fallback',
             'message': (
-                f'SpareRoom data is temporarily unavailable for automated retrieval. '
-                f'Search manually for rooms near {district}.'
+                f'No room listings found for {district}. '
+                f'Search SpareRoom manually for rooms near {district}.'
             ),
         })
 
