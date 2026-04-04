@@ -358,6 +358,67 @@ MIT License - see LICENSE file for details
 
 ---
 
+## 📊 Metalyzi Benchmark Database
+
+The platform includes a proprietary benchmark database covering UK postcode districts, built from government open data sources (all Open Government Licence).
+
+### Data Sources
+
+| Source | Data | Update Frequency |
+|--------|------|-----------------|
+| **Land Registry PPD** | Median/avg sold prices, transaction counts per district | Monthly |
+| **VOA PRMS** | Median/quartile rents by local authority + bedrooms | Annual |
+| **ONS HPI** | 5-year compound price growth rates | Monthly |
+
+### Database Schema
+
+Two Supabase tables:
+- `postcode_benchmarks` — district-level price, rent, yield, void rate, and growth data
+- `benchmark_update_log` — pipeline run history with error tracking
+
+### Running the Pipeline
+
+```bash
+# Set environment variables
+export SUPABASE_URL=https://your-project.supabase.co
+export SUPABASE_SERVICE_KEY=your-service-role-key
+
+# Seed initial data for priority districts (first run)
+python scripts/update_benchmarks.py --seed
+
+# Monthly update (all sources)
+python scripts/update_benchmarks.py
+
+# Update specific source only
+python scripts/update_benchmarks.py --source land-registry
+python scripts/update_benchmarks.py --source voa
+```
+
+### Automated Monthly Updates
+
+The pipeline can be triggered via the `/api/benchmarks/update` endpoint (protected by `BENCHMARK_CRON_SECRET` header). Set up an external cron service (e.g., cron-job.org) to call:
+
+```
+POST https://metusa-deal-analyzer.onrender.com/api/benchmarks/update
+Headers: X-Cron-Secret: <your-secret>
+```
+
+Schedule: `0 9 15 * *` (9am on 15th of each month)
+
+### How Benchmarks Power Deal Analysis
+
+When a deal is analysed:
+1. `get_benchmark_for_postcode()` queries the database with a 4-level fallback (exact match → district+type → district-only → nearest prefix)
+2. Benchmark data is injected into the Claude AI prompt as structured context
+3. The frontend displays a "Benchmark Comparison" panel showing the deal vs district medians
+4. The existing `compare_to_regional_benchmark()` function also runs using the hardcoded REGIONAL_BENCHMARKS dictionary for backwards compatibility
+
+### Priority Seed Districts
+
+LS1, LS2, LS6, LS11, M1, M14, M40, B1, B29, L1, L8, S1, S2, NG1, NG7, E1, E3, N17, SE15, SW9, W12, BL1, BL9, WN1, SK1, SK16, BS1, BS3, GL1, OX1, CB1, MK1, NE1, NE6, SR1, TS1, HU1, G1, G42, EH1, EH6, CF1, CF24
+
+---
+
 ## 📞 Support
 
 For support, email uche@metusaproperty.co.uk or open an issue on GitHub.
