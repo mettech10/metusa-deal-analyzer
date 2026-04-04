@@ -1271,51 +1271,60 @@ PDF_CONFIG = {
 
 def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
     """
-    Calculate UK stamp duty for England & NI
-    Updated for 2024/2025 rates including 5% surcharge for additional properties
+    Calculate UK Stamp Duty Land Tax (SDLT) for England & NI.
+    Updated for 2025/2026 rates.
+
+    Three buyer categories:
+    1. First-time buyer: 0% up to £300k, 5% on £300k-£500k, standard rates above £500k
+    2. Standard buyer (primary residence, no surcharge): tiered 0/5/10/12%
+    3. Additional property (investment/second home): standard + 5% surcharge
     """
     if first_time_buyer:
-        # First-time buyer relief (England/NI, 2024/2025)
-        # 0% up to £425,000; 5% on £425,001–£625,000; standard rates above £625k
-        if price <= 425000:
+        # First-time buyer relief (England/NI, 2025/2026)
+        # 0% up to £300,000
+        # 5% on £300,001 to £500,000
+        # Above £500,000: relief does not apply — use standard rates (NO surcharge)
+        if price <= 300000:
             return 0
-        elif price <= 625000:
-            return (price - 425000) * 0.05
+        elif price <= 500000:
+            return (price - 300000) * 0.05
         else:
-            # No FTB relief above £625k — standard rates apply
-            if price <= 125000:
+            # FTB relief lost above £500k — standard rates, no surcharge
+            if price <= 250000:
                 return 0
-            elif price <= 250000:
-                return (price - 125000) * 0.02
             elif price <= 925000:
-                return 2500 + ((price - 250000) * 0.05)
+                return (price - 250000) * 0.05
             elif price <= 1500000:
-                return 36250 + ((price - 925000) * 0.10)
+                return 33750 + ((price - 925000) * 0.10)
             else:
-                return 93750 + ((price - 1500000) * 0.12)
+                return 91250 + ((price - 1500000) * 0.12)
     elif not second_property:
-        # Standard residential rates (England, effective from Oct 2022)
-        if price <= 125000:
-            return 0
-        elif price <= 250000:
-            return (price - 125000) * 0.02
-        elif price <= 925000:
-            return 2500 + ((price - 250000) * 0.05)
-        elif price <= 1500000:
-            return 36250 + ((price - 925000) * 0.10)
-        else:
-            return 93750 + ((price - 1500000) * 0.12)
-    else:
-        # Additional property rates (5% surcharge on entire amount)
-        # Updated 2024 rates for second homes/BTL
+        # Standard residential rates (primary residence, no surcharge)
         if price <= 250000:
-            return price * 0.05  # 5% on everything up to 250k
+            return 0
         elif price <= 925000:
-            return (250000 * 0.05) + ((price - 250000) * 0.10)
+            return (price - 250000) * 0.05
         elif price <= 1500000:
-            return (250000 * 0.05) + (675000 * 0.10) + ((price - 925000) * 0.15)
+            return 33750 + ((price - 925000) * 0.10)
         else:
-            return (250000 * 0.05) + (675000 * 0.10) + (575000 * 0.15) + ((price - 1500000) * 0.17)
+            return 91250 + ((price - 1500000) * 0.12)
+    else:
+        # Additional property / investment rates (standard + 5% surcharge)
+        # £0-£125k: 0% + 5% = 5%
+        # £125k-£250k: 2% + 5% = 7%
+        # £250k-£925k: 5% + 5% = 10%
+        # £925k-£1.5m: 10% + 5% = 15%
+        # Above £1.5m: 12% + 5% = 17%
+        if price <= 125000:
+            return price * 0.05
+        elif price <= 250000:
+            return (125000 * 0.05) + ((price - 125000) * 0.07)
+        elif price <= 925000:
+            return (125000 * 0.05) + (125000 * 0.07) + ((price - 250000) * 0.10)
+        elif price <= 1500000:
+            return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + ((price - 925000) * 0.15)
+        else:
+            return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + (575000 * 0.15) + ((price - 1500000) * 0.17)
 
 def calculate_deal_score(deal_type, gross_yield, net_yield, monthly_cashflow, cash_on_cash, risk_level, brr_metrics=None, flip_metrics=None):
     """
@@ -2154,9 +2163,12 @@ def analyze_deal(data):
         postcode = ""  # Clear invalid postcode rather than error
     
     # Purchase costs
-    buyer_type = data.get('buyerType', 'second_home')
-    is_first_time = buyer_type == 'first_time'
-    stamp_duty = calculate_stamp_duty(purchase_price, second_property=not is_first_time, first_time_buyer=is_first_time)
+    buyer_type = data.get('buyerType', 'additional')
+    # Frontend sends "first-time" (hyphen) — normalise to match
+    is_first_time = buyer_type in ('first-time', 'first_time', 'first-time-buyer')
+    is_additional = buyer_type in ('additional', 'second_home', 'investor')
+    stamp_duty = calculate_stamp_duty(purchase_price, second_property=is_additional, first_time_buyer=is_first_time)
+    print(f"[SDLT] buyerType={buyer_type}, is_first_time={is_first_time}, is_additional={is_additional}, price={purchase_price}, sdlt={stamp_duty}")
     legal_fees = float(data.get('legalFees', 1500))
     valuation_fee = float(data.get('valuationFee', 500))
     arrangement_fee = float(data.get('arrangementFee', 1995))
@@ -2270,18 +2282,34 @@ def analyze_deal(data):
     # Income and expenses (skipped for R2SA which calculates directly above)
     if deal_type != 'R2SA':
         annual_rent = monthly_rent * 12
-        management_costs = annual_rent * 0.10
-        void_costs = (monthly_rent / 4.33) * 2  # 2 weeks void
-        maintenance_reserve = annual_rent * 0.08
-        insurance = 480
+        mgmt_fee_pct = float(data.get('managementFeePercent', 10)) / 100
+        management_costs = annual_rent * mgmt_fee_pct
+        user_void_weeks = float(data.get('voidWeeks', 4))
+        maintenance_costs = float(data.get('maintenance', 0)) * 12
+        insurance = float(data.get('insurance', 40)) * 12
+        bills = float(data.get('bills', 0)) * 12
+        ground_rent = float(data.get('groundRent', 0)) * 12
+
+        if deal_type == 'HMO' and room_count > 0 and avg_room_rate > 0:
+            # HMO: assume 1 room void at a time for voidWeeks per year
+            # void allowance = (pricePerRoom × voidWeeks) / 52 per month → annualised
+            void_costs = avg_room_rate * user_void_weeks * (12.0 / 52.0)
+            print(f"[HMO Void] 1 room × £{avg_room_rate}/mo × {user_void_weeks}wk/yr = £{void_costs:.0f}/yr "
+                  f"(£{void_costs/12:.0f}/mo)")
+        else:
+            # BTL/BRRRR: whole property void for voidWeeks per year
+            void_costs = monthly_rent * user_void_weeks / 4.33
+
+        maintenance_reserve = maintenance_costs if maintenance_costs > 0 else annual_rent * 0.08
         total_annual_expenses = (management_costs + void_costs + maintenance_reserve
-                                 + insurance + annual_mortgage)
+                                 + insurance + bills + ground_rent + annual_mortgage)
         net_annual_income = annual_rent - total_annual_expenses
         monthly_cashflow = net_annual_income / 12
 
         # Key metrics
         gross_yield = (annual_rent / purchase_price) * 100 if purchase_price > 0 else 0
-        cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee
+        refurb_budget = float(data.get('refurbishmentBudget', 0) or data.get('refurbCosts', 0) or 0)
+        cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee + refurb_budget
         cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
         net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
 
@@ -2291,16 +2319,17 @@ def analyze_deal(data):
         total_investment = purchase_price + refurb_costs + stamp_duty + legal_fees + valuation_fee + arrangement_fee
         equity_created = arv - total_investment
         refinance_amount = arv * 0.75
-        money_left_in = total_investment - refinance_amount
-        brr_roi = (equity_created / total_investment) * 100 if total_investment > 0 else 0
-        
+        money_left_in = max(total_investment - refinance_amount, 0)
+        # ROI on money left in deal = annual cashflow / money left in × 100
+        brr_roi = (net_annual_income / money_left_in) * 100 if money_left_in > 0 else float('inf')
+
         brr_metrics = {
             'arv': round(arv, 0),
             'total_investment': round(total_investment, 0),
             'equity_created': round(equity_created, 0),
             'refinance_amount': round(refinance_amount, 0),
             'money_left_in': round(money_left_in, 0),
-            'brr_roi': round(brr_roi, 2)
+            'brr_roi': round(brr_roi, 2) if brr_roi != float('inf') else 999.99,
         }
     
     # Flip specific metrics
@@ -3719,6 +3748,120 @@ def download_pdf():
             'success': False,
             'message': 'An error occurred generating the PDF. Please try again.'
         }), 500
+
+@app.route('/api/analyse/pdf-upload', methods=['POST'])
+@limiter.limit("5 per minute")
+def pdf_upload():
+    """Extract property details from an uploaded deal PDF using Claude vision.
+    Expects JSON: { pdfBase64: string, filename: string }
+    Returns extracted property fields for form pre-filling.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json(silent=True) or {}
+        pdf_base64 = data.get('pdfBase64', '')
+        filename = data.get('filename', 'document.pdf')
+
+        if not pdf_base64:
+            return jsonify({'success': False, 'message': 'pdfBase64 is required'}), 400
+
+        # Check size (~10MB base64 ≈ ~13.3MB string)
+        if len(pdf_base64) > 15_000_000:
+            return jsonify({'success': False, 'message': 'PDF exceeds 10MB limit'}), 400
+
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            return jsonify({'success': False, 'message': 'AI service not configured'}), 500
+
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+
+        print(f"[PDF-UPLOAD] Processing {filename} ({len(pdf_base64)//1024}KB base64)")
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract property details from this deal document and return ONLY "
+                            "a JSON object with these fields:\n"
+                            "{\n"
+                            '  "address": "",\n'
+                            '  "postcode": "",\n'
+                            '  "purchasePrice": 0,\n'
+                            '  "bedrooms": 0,\n'
+                            '  "propertyType": "",\n'
+                            '  "tenureType": "",\n'
+                            '  "monthlyRent": 0,\n'
+                            '  "floorSizeSqft": 0,\n'
+                            '  "condition": "",\n'
+                            '  "strategy": "",\n'
+                            '  "refurbBudget": 0,\n'
+                            '  "leaseYearsRemaining": 0\n'
+                            "}\n"
+                            "For propertyType use one of: house, flat, commercial.\n"
+                            "For tenureType use one of: freehold, leasehold.\n"
+                            "For condition use one of: excellent, good, cosmetic, full-refurb, structural.\n"
+                            "For strategy use one of: btl, brr, hmo, flip, r2sa, development.\n"
+                            "Use null for any field not found in the document. "
+                            "Return only the JSON object, no other text."
+                        ),
+                    },
+                ],
+            }],
+        )
+
+        # Parse Claude's response
+        response_text = message.content[0].text.strip()
+        print(f"[PDF-UPLOAD] Claude response: {response_text[:500]}")
+
+        # Extract JSON from response (handle markdown code blocks)
+        json_str = response_text
+        if '```' in json_str:
+            import re
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', json_str)
+            if json_match:
+                json_str = json_match.group(1).strip()
+
+        extracted = json.loads(json_str)
+
+        # Track which fields were found
+        fields_found = [k for k, v in extracted.items() if v is not None and v != 0 and v != ""]
+        fields_missing = [k for k, v in extracted.items() if v is None or v == 0 or v == ""]
+
+        print(f"[PDF-UPLOAD] Fields found: {fields_found}")
+        print(f"[PDF-UPLOAD] Fields missing: {fields_missing}")
+
+        return jsonify({
+            'success': True,
+            'extracted': extracted,
+            'fieldsFound': fields_found,
+            'fieldsMissing': fields_missing,
+            'filename': filename,
+        })
+
+    except json.JSONDecodeError as e:
+        print(f"[PDF-UPLOAD] JSON parse error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to parse AI response as JSON'}), 500
+    except Exception as e:
+        print(f"[PDF-UPLOAD] Error: {e}")
+        app.logger.error(f'PDF upload error: {e}')
+        return jsonify({'success': False, 'message': 'Error processing PDF'}), 500
+
 
 @app.route('/api/health')
 def health_check():
