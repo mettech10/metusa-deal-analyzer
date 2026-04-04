@@ -2631,6 +2631,9 @@ def analyze_deal(data):
         'internal_area': internal_area,
         'analysis_date': datetime.now().strftime('%Y-%m-%d'),
         'regional_benchmark': regional_benchmark,
+        'postcode_benchmark': get_benchmark_for_postcode(
+            postcode, property_type_detail or 'all', bedrooms
+        ),
         'risk_flags': risk_flags,
         'next_steps': [
             "Verify rental comparables in the area",
@@ -3031,6 +3034,170 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
                  f"the {bench['region']} regional benchmarks respectively."
         )
     }
+
+
+# ── Supabase Benchmark Database Lookup ────────────────────────────────────
+
+def get_benchmark_for_postcode(postcode: str, property_type: str = 'all', bedrooms: int = None) -> dict | None:
+    """
+    Look up postcode-district-level benchmarks from the Metalyzi Benchmark Database
+    (postcode_benchmarks table in Supabase).
+
+    Fallback chain:
+      1. Exact match: district + property_type + bedrooms
+      2. Same district + property_type + bedrooms=null (all beds)
+      3. Same district + property_type='all' + bedrooms=null
+      4. Nearest matching district (same first 1-2 letters)
+      5. None (no data available)
+
+    Returns a dict with benchmark fields, or None if no data found.
+    """
+    if not _SUPABASE_URL or not _SUPABASE_KEY or not postcode:
+        return None
+
+    district = postcode.strip().upper().split()[0] if ' ' in postcode else postcode.strip().upper()
+    if not district:
+        return None
+
+    # Normalize property type
+    pt = (property_type or 'all').lower().strip()
+    if pt not in ('terraced', 'semi-detached', 'detached', 'flat', 'all'):
+        pt = 'all'
+
+    headers = {k: v for k, v in _sb_headers().items() if k != 'Prefer'}
+
+    def _query_benchmark(dist, ptype, beds):
+        """Query Supabase for a specific benchmark record."""
+        params = {
+            'postcode_district': f'eq.{dist}',
+            'property_type': f'eq.{ptype}',
+            'select': '*',
+            'limit': '1',
+            'order': 'last_updated.desc',
+        }
+        if beds is not None:
+            params['bedrooms'] = f'eq.{beds}'
+        else:
+            params['bedrooms'] = 'is.null'
+
+        try:
+            resp = requests.get(
+                f'{_SUPABASE_URL}/rest/v1/postcode_benchmarks',
+                params=params,
+                headers=headers,
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                rows = resp.json()
+                if rows:
+                    return rows[0]
+        except Exception as e:
+            app.logger.warning(f'[Benchmark] query error: {e}')
+        return None
+
+    # Attempt 1: exact match
+    result = _query_benchmark(district, pt, bedrooms)
+    if result:
+        result['_match'] = 'exact'
+        return result
+
+    # Attempt 2: same district + type, all bedrooms
+    if bedrooms is not None:
+        result = _query_benchmark(district, pt, None)
+        if result:
+            result['_match'] = 'district+type'
+            return result
+
+    # Attempt 3: same district, all types, all bedrooms
+    if pt != 'all':
+        result = _query_benchmark(district, 'all', None)
+        if result:
+            result['_match'] = 'district-only'
+            return result
+
+    # Attempt 4: neighbouring district (same letter prefix)
+    alpha_prefix = ''.join(c for c in district if c.isalpha())
+    if alpha_prefix:
+        try:
+            resp = requests.get(
+                f'{_SUPABASE_URL}/rest/v1/postcode_benchmarks',
+                params={
+                    'postcode_district': f'like.{alpha_prefix}%',
+                    'property_type': 'eq.all',
+                    'bedrooms': 'is.null',
+                    'select': '*',
+                    'limit': '1',
+                    'order': 'transaction_count_12m.desc.nullslast',
+                },
+                headers=headers,
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                rows = resp.json()
+                if rows:
+                    rows[0]['_match'] = f'nearest-{rows[0]["postcode_district"]}'
+                    return rows[0]
+        except Exception:
+            pass
+
+    return None
+
+
+def format_benchmark_context(benchmark: dict, deal_gross_yield: float = None, purchase_price: float = None) -> str:
+    """
+    Format benchmark data into a text block for the AI prompt.
+    Returns a string ready to insert into the prompt.
+    """
+    if not benchmark:
+        return "\nBENCHMARK DATA: Not available for this postcode district. Provide analysis based on deal figures only without benchmark comparison."
+
+    district = benchmark.get('postcode_district', '?')
+    match_type = benchmark.get('_match', 'unknown')
+
+    lines = [f"\nBENCHMARK DATA FOR {district} (source: Metalyzi Benchmark Database, match: {match_type}):"]
+
+    med_yield = benchmark.get('gross_yield_median')
+    if med_yield:
+        lines.append(f"- Median gross yield in {district}: {med_yield}%")
+        if deal_gross_yield is not None:
+            if deal_gross_yield > float(med_yield) * 1.1:
+                lines.append(f"  → This deal's yield ({deal_gross_yield:.1f}%) is ABOVE the district median — attractive")
+            elif deal_gross_yield < float(med_yield) * 0.9:
+                lines.append(f"  → This deal's yield ({deal_gross_yield:.1f}%) is BELOW the district median — needs justification")
+            else:
+                lines.append(f"  → This deal's yield ({deal_gross_yield:.1f}%) is IN LINE with the district median")
+
+    med_price = benchmark.get('median_sold_price')
+    if med_price:
+        lines.append(f"- Median sold price in {district}: £{float(med_price):,.0f}")
+        if purchase_price:
+            diff_pct = ((purchase_price - float(med_price)) / float(med_price)) * 100
+            lines.append(f"  → Purchase price is {diff_pct:+.1f}% vs district median")
+
+    med_rent = benchmark.get('median_monthly_rent')
+    if med_rent:
+        lines.append(f"- Median monthly rent: £{float(med_rent):,.0f} pcm")
+
+    lq_rent = benchmark.get('lower_quartile_rent')
+    uq_rent = benchmark.get('upper_quartile_rent')
+    if lq_rent and uq_rent:
+        lines.append(f"- Rent range (LQ–UQ): £{float(lq_rent):,.0f}–£{float(uq_rent):,.0f} pcm")
+
+    void = benchmark.get('void_rate_pct')
+    if void:
+        lines.append(f"- Typical void rate: {void}%")
+
+    growth = benchmark.get('price_growth_5yr_pct')
+    if growth:
+        lines.append(f"- 5-year price growth: {growth}% per annum")
+
+    txn_count = benchmark.get('transaction_count_12m')
+    if txn_count:
+        lines.append(f"- Transaction volume (12 months): {txn_count} sales")
+        if int(txn_count) < 20:
+            lines.append("  → Low transaction volume — limited data confidence")
+
+    return '\n'.join(lines)
 
 
 def generate_risk_flags(deal_type: str, gross_yield: float, net_yield: float,
@@ -4822,6 +4989,20 @@ RENT-TO-SA STRATEGY:
     }.get(deal_type, {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0})
 
     # ------------------------------------------------------------------ #
+    # Postcode-level benchmark from Metalyzi Benchmark Database           #
+    # ------------------------------------------------------------------ #
+    postcode_benchmark = get_benchmark_for_postcode(
+        property_data.get('postcode', ''),
+        property_data.get('property_type', 'all'),
+        property_data.get('bedrooms')
+    )
+    benchmark_context = format_benchmark_context(
+        postcode_benchmark,
+        deal_gross_yield=_n(calculated_metrics.get('gross_yield')),
+        purchase_price=_n(property_data.get('purchasePrice'))
+    )
+
+    # ------------------------------------------------------------------ #
     # Article 4 planning context for the prompt                           #
     # ------------------------------------------------------------------ #
     _a4p      = calculated_metrics.get('article_4', {})
@@ -4886,6 +5067,7 @@ Deal Score:         {calculated_metrics.get('deal_score', 0)}/100
 System Verdict:     {calculated_metrics.get('verdict', 'REVIEW')}
 {strategy_context}
 {market_context}
+{benchmark_context}
 
 == PLANNING & ARTICLE 4 ==
 Article 4 Direction: {planning_status}
@@ -6307,6 +6489,61 @@ def regional_benchmark_lookup():
     except Exception as e:
         app.logger.error(f'[regional-benchmark] Error: {str(e)}')
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ── Benchmark Update Cron Endpoint ────────────────────────────────────────
+@app.route('/api/benchmarks/update', methods=['POST'])
+def trigger_benchmark_update():
+    """
+    Trigger a benchmark database update. Protected by a shared secret.
+    Can be called by Render Cron, Supabase Edge Function, or manually.
+
+    Headers required:
+      X-Cron-Secret: <BENCHMARK_CRON_SECRET env var>
+
+    Query params (optional):
+      source: 'all' | 'land-registry' | 'voa' (default: 'all')
+      seed: '1' to run seed mode for priority districts
+    """
+    secret = os.environ.get('BENCHMARK_CRON_SECRET', '')
+    provided = request.headers.get('X-Cron-Secret', '')
+
+    if not secret or provided != secret:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    source = request.args.get('source', 'all')
+    seed = request.args.get('seed', '') == '1'
+
+    try:
+        # Import and run the pipeline
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'scripts'))
+        from update_benchmarks import run_pipeline
+        result = run_pipeline(source=source, seed=seed)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        app.logger.error(f'[Benchmark Update] Error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/benchmarks/lookup', methods=['GET'])
+def lookup_benchmark():
+    """
+    Public endpoint to look up benchmark data for a postcode.
+    Query params: postcode (required), property_type (optional), bedrooms (optional)
+    """
+    postcode = request.args.get('postcode', '').strip()
+    if not postcode:
+        return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+    property_type = request.args.get('property_type', 'all')
+    bedrooms_str = request.args.get('bedrooms')
+    bedrooms = int(bedrooms_str) if bedrooms_str and bedrooms_str.isdigit() else None
+
+    benchmark = get_benchmark_for_postcode(postcode, property_type, bedrooms)
+    if benchmark:
+        return jsonify({'success': True, 'benchmark': benchmark})
+    else:
+        return jsonify({'success': True, 'benchmark': None, 'message': 'No benchmark data available for this postcode'})
 
 
 if __name__ == '__main__':
