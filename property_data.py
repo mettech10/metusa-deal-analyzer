@@ -307,22 +307,37 @@ def get_market_context(postcode: str, bedrooms: int) -> Dict:
     
     # Extract sold prices (for comparables)
     if 'data' in sold:
-        raw_sales = sold['data']
-        prices_list = [p.get('price', 0) for p in raw_sales if p.get('price')]
-        if prices_list:
-            context['avg_sold_price'] = sum(prices_list) / len(prices_list)
-            context['sold_price_count'] = len(prices_list)
-            # Format comparable sales for display
+        sold_data = sold['data']
+        # PropertyData returns {data: {raw_data: [...], average: ..., ...}}
+        # Handle both dict (PropertyData format) and list (legacy format)
+        if isinstance(sold_data, dict):
+            raw_sales = sold_data.get('raw_data', [])
+            # Use the API's own average if available
+            if sold_data.get('average'):
+                context['avg_sold_price'] = sold_data['average']
+                context['sold_price_count'] = sold_data.get('points_analysed', len(raw_sales))
+        else:
+            raw_sales = sold_data  # Legacy: data is already a list
+
+        # Calculate average from raw sales if not already set
+        if 'avg_sold_price' not in context and isinstance(raw_sales, list):
+            prices_list = [p.get('price', 0) for p in raw_sales if isinstance(p, dict) and p.get('price')]
+            if prices_list:
+                context['avg_sold_price'] = sum(prices_list) / len(prices_list)
+                context['sold_price_count'] = len(prices_list)
+
+        # Format comparable sales for display
+        if isinstance(raw_sales, list):
             context['comparable_sales'] = [
                 {
-                    'address': f"{s.get('street', 'Unknown')}, {postcode}",
+                    'address': f"{s.get('address', s.get('street', 'Unknown'))}, {postcode}",
                     'price': s.get('price', 0),
-                    'type': s.get('type', 'N/A').replace('_', ' ').title(),
+                    'type': str(s.get('type', 'N/A')).replace('_', ' ').title(),
                     'date': s.get('date', 'N/A'),
                     'bedrooms': s.get('bedrooms', bedrooms)
                 }
                 for s in raw_sales[:10]  # Top 10 sales
-                if s.get('price')
+                if isinstance(s, dict) and s.get('price')
             ]
     
     # Extract current market prices (comparable listings)
