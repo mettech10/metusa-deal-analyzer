@@ -1281,7 +1281,7 @@ APIFY_API_TOKEN = os.environ.get('APIFY_API_TOKEN', '')
 APIFY_RIGHTMOVE_ACTOR_ID    = 'dhrumil/rightmove-scraper'
 APIFY_ONTHEMARKET_ACTOR_ID  = 'fatihtahta/onthemarket-scraper'
 APIFY_SPAREROOM_ACTOR_ID    = 'memo23/spareroom-scraper'
-APIFY_ZOOPLA_ACTOR_ID       = 'dhrumil/zoopla-scraper'
+APIFY_ZOOPLA_ACTOR_ID       = 'getdataforme/zoopla-actor'  # $15/mo (cheapest with individual URL support)
 APIFY_AIRBNB_ACTOR_ID       = 'tri_angle/airbnb-scraper'
 
 # Rental comparables actor — automation-lab/rightmove-scraper
