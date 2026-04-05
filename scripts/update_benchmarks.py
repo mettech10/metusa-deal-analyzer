@@ -46,6 +46,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from collections import defaultdict
 from statistics import median, mean
+from typing import List, Dict, Optional, Tuple, Set
 
 import requests
 
@@ -105,7 +106,7 @@ def sb_headers():
     }
 
 
-def sb_upsert_benchmarks(records: list[dict]) -> int:
+def sb_upsert_benchmarks(records: List[dict]) -> int:
     """Upsert benchmark records into postcode_benchmarks. Returns count upserted."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         log.error('SUPABASE_URL or SUPABASE_SERVICE_KEY not set')
@@ -167,7 +168,7 @@ def sb_get_existing_districts() -> set:
 
 # ── Utility Functions ──────────────────────────────────────────────────────
 
-def extract_postcode_district(postcode: str) -> str | None:
+def extract_postcode_district(postcode: str) -> Optional[str]:
     """Extract the district part from a UK postcode. E.g. 'M14 5SG' -> 'M14'"""
     if not postcode:
         return None
@@ -199,7 +200,7 @@ def data_month_str():
 
 # ── SOURCE 1: Land Registry Price Paid Data ────────────────────────────────
 
-def fetch_land_registry_sparql(districts: list[str], months_back: int = 24) -> dict:
+def fetch_land_registry_sparql(districts: List[str], months_back: int = 24) -> dict:
     """
     Fetch Land Registry sold price data for specific districts via SPARQL.
     Returns dict keyed by (district, property_type) with list of prices.
@@ -218,6 +219,7 @@ def fetch_land_registry_sparql(districts: list[str], months_back: int = 24) -> d
             query = f"""
             PREFIX lrppi: <http://landregistry.data.gov.uk/def/ppi/>
             PREFIX lrcommon: <http://landregistry.data.gov.uk/def/common/>
+            PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
             SELECT ?price ?date ?type WHERE {{
               ?txn lrppi:pricePaid ?price ;
@@ -274,7 +276,7 @@ def fetch_land_registry_sparql(districts: list[str], months_back: int = 24) -> d
     return dict(results), errors
 
 
-def fetch_land_registry_csv(districts: list[str] | None = None, use_complete: bool = False) -> tuple[dict, list]:
+def fetch_land_registry_csv(districts: Optional[List[str]] = None, use_complete: bool = False) -> Tuple[dict, list]:
     """
     Fetch Land Registry data from CSV bulk download.
     Returns aggregated price data by (district, property_type).
@@ -371,7 +373,7 @@ def fetch_land_registry_csv(districts: list[str] | None = None, use_complete: bo
     return dict(results), errors
 
 
-def aggregate_prices(price_data: dict) -> list[dict]:
+def aggregate_prices(price_data: dict) -> List[dict]:
     """
     Aggregate raw price lists into benchmark records.
     Input: dict of (district, property_type) -> [prices]
@@ -469,7 +471,7 @@ for la, districts in LA_TO_DISTRICTS.items():
             DISTRICT_TO_LA[d] = la
 
 
-def fetch_voa_rental_data() -> tuple[dict, list]:
+def fetch_voa_rental_data() -> Tuple[dict, list]:
     """
     Fetch VOA Private Rental Market Statistics.
     Returns dict keyed by local_authority -> {bedrooms -> {median, lower_q, upper_q}}
@@ -610,7 +612,7 @@ def _voa_fallback_data() -> dict:
     }
 
 
-def merge_rental_into_benchmarks(rental_data: dict, existing_records: dict) -> list[dict]:
+def merge_rental_into_benchmarks(rental_data: dict, existing_records: dict) -> List[dict]:
     """
     Merge VOA rental data into benchmark records.
     existing_records: dict of (district, prop_type) -> record dict
@@ -665,7 +667,7 @@ def merge_rental_into_benchmarks(rental_data: dict, existing_records: dict) -> l
 
 # ── YIELD CALCULATION ──────────────────────────────────────────────────────
 
-def calculate_yields(records: list[dict]) -> list[dict]:
+def calculate_yields(records: List[dict]) -> List[dict]:
     """
     Calculate gross yield benchmarks for records that have both price and rent data.
     Modifies records in place and returns them.

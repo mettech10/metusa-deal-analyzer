@@ -3038,7 +3038,7 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
 
 # ── Supabase Benchmark Database Lookup ────────────────────────────────────
 
-def get_benchmark_for_postcode(postcode: str, property_type: str = 'all', bedrooms: int = None) -> dict | None:
+def get_benchmark_for_postcode(postcode: str, property_type: str = 'all', bedrooms: int = None):
     """
     Look up postcode-district-level benchmarks from the Metalyzi Benchmark Database
     (postcode_benchmarks table in Supabase).
