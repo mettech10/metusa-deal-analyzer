@@ -744,8 +744,9 @@ def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
     import random
     from bs4 import BeautifulSoup
 
+    # OpenRent migrated from .com to .co.uk (301 redirect)
     search_url = (
-        f'https://www.openrent.com/properties-to-rent/{district.lower()}'
+        f'https://www.openrent.co.uk/properties-to-rent/{district.lower()}'
         f'?term={district.upper()}'
         f'&prices_min=0&prices_max=2500'
         f'&bedrooms_min=0&bedrooms_max=0'
@@ -874,9 +875,8 @@ def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
 def scrape_spareroom_with_apify(district: str, max_results: int = 12) -> list:
     """Scrape room listings from SpareRoom using the Apify SpareRoom actor.
 
-    Unlike direct HTTP scraping (which SpareRoom blocks with JS rendering),
-    the Apify actor runs in a real browser environment on Apify's servers.
-    This also avoids the IP-blocking issues seen with OpenRent on Render.
+    The actor expects startUrls — pre-built SpareRoom search URLs.
+    This runs on Apify's infrastructure, bypassing IP blocks from Render.
 
     Args:
         district: Postcode district e.g. "M14", "LS6", "SK16"
@@ -887,58 +887,72 @@ def scrape_spareroom_with_apify(district: str, max_results: int = 12) -> list:
     """
     print(f"[SpareRoom/Apify] Searching rooms for district {district}, max={max_results}")
 
+    # Build SpareRoom search URL — rooms offered, near this postcode district
+    search_url = (
+        f'https://www.spareroom.co.uk/flatshare/?search_by=postcode'
+        f'&search={district}'
+        f'&miles_from_max=2&rooms_for=0&rooms_offered=1&mode=list'
+    )
+
     items = _apify_run_actor(
         APIFY_SPAREROOM_ACTOR_ID,
         {
-            'searchQuery': district,
-            'maxResults': max_results,
-            'roomsFor': 'anyone',
-            'searchType': 'offered',
+            'startUrls': [{'url': search_url}],
+            'maxItems': max_results,
         },
-        timeout_secs=55,
+        timeout_secs=60,
     )
 
     if not items:
         print(f"[SpareRoom/Apify] No items returned for {district}")
         return []
 
+    # Log the raw keys from the first item to help debug field mapping
+    print(f"[SpareRoom/Apify] Raw item keys: {sorted(items[0].keys())}")
+    print(f"[SpareRoom/Apify] First item sample: {json.dumps(items[0], default=str)[:800]}")
+
     results = []
     for item in items:
-        # Normalise fields — SpareRoom actor returns varied shapes
+        # Normalise fields — SpareRoom actor may return varied shapes
         title = (
             item.get('title')
             or item.get('adTitle')
             or item.get('ad_title')
+            or item.get('heading')
             or 'Room to rent'
         )
 
         # Extract rent — could be weekly or monthly
         rent_pcm = None
-        rent_raw = item.get('rent') or item.get('price') or item.get('rentPcm') or item.get('monthlyRent')
-        rent_pw = item.get('rentPw') or item.get('weeklyRent')
+        rent_raw = (
+            item.get('rent') or item.get('price') or item.get('rentPcm')
+            or item.get('monthlyRent') or item.get('monthly_rent')
+            or item.get('price_per_month')
+        )
+        rent_pw = item.get('rentPw') or item.get('weeklyRent') or item.get('price_per_week')
 
         if rent_raw:
             try:
-                val = int(str(rent_raw).replace('£', '').replace(',', '').strip().split()[0])
+                val = int(re.sub(r'[^\d]', '', str(rent_raw).split('.')[0]))
                 # If the actor labels it as weekly, convert; otherwise assume monthly
-                per = str(item.get('rentPer', item.get('rent_per', 'month'))).lower()
-                if 'week' in per or (val < 250 and not rent_pw):
+                per = str(item.get('rentPer', item.get('rent_per', item.get('price_period', 'month')))).lower()
+                if 'week' in per or ('pw' in str(rent_raw).lower()):
                     rent_pcm = round(val * 52 / 12)
-                else:
+                elif val > 0:
                     rent_pcm = val
             except Exception:
                 pass
 
         if not rent_pcm and rent_pw:
             try:
-                val = int(str(rent_pw).replace('£', '').replace(',', '').strip().split()[0])
+                val = int(re.sub(r'[^\d]', '', str(rent_pw).split('.')[0]))
                 rent_pcm = round(val * 52 / 12)
             except Exception:
                 pass
 
         # Room type
         room_type = 'double'
-        type_text = str(item.get('roomType', item.get('type', ''))).lower()
+        type_text = str(item.get('roomType', item.get('type', item.get('room_type', '')))).lower()
         if 'single' in type_text:
             room_type = 'single'
         elif 'en-suite' in type_text or 'ensuite' in type_text:
@@ -947,7 +961,8 @@ def scrape_spareroom_with_apify(district: str, max_results: int = 12) -> list:
             room_type = 'studio'
 
         # Bills
-        bills_text = str(item.get('bills', item.get('billsIncluded', ''))).lower()
+        bills_val = item.get('bills', item.get('billsIncluded', item.get('bills_included', '')))
+        bills_text = str(bills_val).lower()
         if 'inc' in bills_text or 'yes' in bills_text or bills_text == 'true':
             bills_included = True
         elif 'exc' in bills_text or 'no' in bills_text or bills_text == 'false':
@@ -956,16 +971,25 @@ def scrape_spareroom_with_apify(district: str, max_results: int = 12) -> list:
             bills_included = None
 
         # URL & image
-        listing_url = item.get('url') or item.get('listingUrl') or item.get('link') or ''
+        listing_url = (
+            item.get('url') or item.get('listingUrl') or item.get('link')
+            or item.get('listing_url') or item.get('detailUrl') or ''
+        )
         if listing_url and not listing_url.startswith('http'):
             listing_url = f'https://www.spareroom.co.uk{listing_url}'
 
-        image_url = item.get('image') or item.get('imageUrl') or item.get('mainImage') or ''
+        image_url = (
+            item.get('image') or item.get('imageUrl') or item.get('mainImage')
+            or item.get('image_url') or item.get('photo') or ''
+        )
 
         # Area
-        area = item.get('area') or item.get('location') or item.get('postcode') or district.upper()
+        area = (
+            item.get('area') or item.get('location') or item.get('postcode')
+            or item.get('where') or item.get('neighbourhood') or district.upper()
+        )
         if isinstance(area, dict):
-            area = area.get('name', district.upper())
+            area = area.get('name', area.get('postcode', district.upper()))
 
         results.append({
             'title': str(title)[:120],
