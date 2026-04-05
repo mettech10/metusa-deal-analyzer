@@ -4946,6 +4946,10 @@ def get_comparables():
                     timeout_secs=60,
                 )
                 if rm_items:
+                    # Log the raw keys from first item for debugging
+                    print(f"[HMO/RM] Raw keys: {sorted(rm_items[0].keys())}")
+                    print(f"[HMO/RM] Sample item: {json.dumps(rm_items[0], default=str)[:600]}")
+
                     for item in rm_items:
                         rent_raw = (
                             item.get('price') or item.get('monthlyRent')
@@ -4961,11 +4965,14 @@ def get_comparables():
                             except Exception:
                                 pass
 
+                        address = (
+                            item.get('displayAddress') or item.get('address')
+                            or item.get('propertyAddress') or ''
+                        )
                         title = (
                             item.get('propertyTitle') or item.get('title')
-                            or item.get('address') or 'Room to rent'
+                            or address or 'Room to rent'
                         )
-                        address = item.get('address') or item.get('displayAddress') or ''
                         prop_type = str(item.get('propertySubType', item.get('propertyType', ''))).lower()
 
                         listing_url = item.get('propertyUrl') or item.get('url') or ''
