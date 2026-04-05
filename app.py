@@ -2496,6 +2496,9 @@ def analyze_deal(data):
         article_4_area=article_4_info['is_article_4']
     )
     
+    # Property type detail (e.g. terraced, semi-detached, flat) for benchmark lookup
+    property_type_detail = data.get('property_type', '')
+
     # Get refurb estimates
     property_type_for_refurb = data.get('property_type', 'terraced').lower()
     internal_area_raw = data.get('internal_area')
