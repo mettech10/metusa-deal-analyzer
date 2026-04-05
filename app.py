@@ -600,6 +600,118 @@ def scrape_onthemarket_with_apify(url: str) -> dict:
     return data
 
 
+def scrape_zoopla_with_apify(url: str) -> dict:
+    """Scrape a single Zoopla listing using the Apify Zoopla actor.
+    Returns a rich dict with all available property fields.
+    """
+    print(f"[Apify/Zoopla] Scraping {url}")
+    items = _apify_run_actor(
+        APIFY_ZOOPLA_ACTOR_ID,
+        {'startUrls': [{'url': url}], 'maxItems': 1},
+        timeout_secs=60,
+    )
+    if not items:
+        return None
+
+    item = items[0]
+
+    # ── Images ───────────────────────────────────────────────────────────────
+    images_raw = item.get('images') or item.get('propertyImages') or item.get('photos') or []
+    if isinstance(images_raw, list):
+        image_urls = [
+            (img.get('srcUrl') or img.get('url') or img.get('src') or img) if isinstance(img, dict) else str(img)
+            for img in images_raw
+        ]
+        image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        image_urls = []
+
+    floorplan_raw = item.get('floorplans') or item.get('floorPlanImages') or item.get('floorPlan') or []
+    if isinstance(floorplan_raw, list):
+        floorplan_urls = [
+            (fp.get('srcUrl') or fp.get('url') or fp.get('src') or fp) if isinstance(fp, dict) else str(fp)
+            for fp in floorplan_raw
+        ]
+        floorplan_urls = [u for u in floorplan_urls if isinstance(u, str) and u.startswith('http')]
+    elif isinstance(floorplan_raw, str) and floorplan_raw.startswith('http'):
+        floorplan_urls = [floorplan_raw]
+    else:
+        floorplan_urls = []
+
+    # ── Agent ────────────────────────────────────────────────────────────────
+    agent_raw = item.get('agent') or item.get('contactInfo') or item.get('branchDetails') or {}
+    if isinstance(agent_raw, str):
+        agent = {'name': agent_raw}
+    elif isinstance(agent_raw, dict):
+        agent = agent_raw
+    else:
+        agent = {}
+
+    # ── Key features ────────────────────────────────────────────────────────
+    features_raw = item.get('keyFeatures') or item.get('features') or item.get('bulletPoints') or []
+    if isinstance(features_raw, str):
+        features = [f.strip() for f in features_raw.split('\n') if f.strip()]
+    elif isinstance(features_raw, list):
+        features = [str(f) for f in features_raw if f]
+    else:
+        features = []
+
+    # ── Tenure / lease ───────────────────────────────────────────────────────
+    tenure_raw = item.get('tenure') or item.get('tenureType') or ''
+    if isinstance(tenure_raw, dict):
+        tenure_type = tenure_raw.get('tenureType') or tenure_raw.get('type') or ''
+        lease_years = _parse_int(tenure_raw.get('yearsRemainingOnLease') or tenure_raw.get('leaseYearsRemaining'))
+    else:
+        tenure_type = str(tenure_raw)
+        lease_years = None
+
+    # ── Floor area ───────────────────────────────────────────────────────────
+    sqft = _parse_int(
+        item.get('floorAreaSqft') or item.get('floorArea') or item.get('sizeSqFeetMax')
+        or item.get('sizeSqFeetMin') or item.get('sqft')
+    )
+    sqm = item.get('floorAreaSqm') or item.get('sqm') or item.get('sizeMetric')
+    if sqm is None and sqft:
+        sqm = round(sqft / 10.764, 1)
+    sqm = round(float(sqm), 1) if sqm else None
+
+    # ── Address / postcode ───────────────────────────────────────────────────
+    address = (item.get('displayAddress') or item.get('address') or
+               item.get('title') or item.get('propertyAddress') or 'Address not available')
+    postcode = item.get('postcode') or item.get('outcode') or None
+    # Try to extract postcode from address if not provided
+    if not postcode and address:
+        import re as _re
+        pc_match = _re.search(r'[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}', address.upper())
+        if pc_match:
+            postcode = pc_match.group(0)
+
+    data = {
+        'address':        address,
+        'postcode':       postcode,
+        'price':          _parse_price(item.get('price') or item.get('priceAmount') or item.get('priceActual')),
+        'property_type':  item.get('propertyType') or item.get('property_type') or item.get('type') or None,
+        'bedrooms':       _parse_int(item.get('bedrooms') or item.get('beds') or item.get('numBedrooms')),
+        'description':    item.get('description') or item.get('summary') or item.get('detailedDescription') or None,
+        'sqm':            sqm,
+        'sqft':           sqft,
+        'bathrooms':      _parse_int(item.get('bathrooms') or item.get('baths') or item.get('numBathrooms')),
+        'tenure_type':    tenure_type or None,
+        'lease_years':    lease_years,
+        'key_features':   features,
+        'images':         image_urls,
+        'floorplans':     floorplan_urls,
+        'agent_name':     agent.get('name') or agent.get('agentName') or item.get('agentName') or item.get('branchName') or None,
+        'agent_phone':    agent.get('telephone') or agent.get('phone') or item.get('agentPhone') or None,
+        'agent_address':  agent.get('address') or agent.get('branchAddress') or None,
+        'listing_url':    url,
+        'source':         'zoopla',
+    }
+    print(f"[Apify/Zoopla] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+          f"postcode={data['postcode']}, images={len(image_urls)}")
+    return data
+
+
 def get_spareroom_search_url(postcode: str) -> str:
     """Build a SpareRoom search URL for a given postcode.
     SpareRoom renders local results via client-side JavaScript, making automated
@@ -1169,6 +1281,8 @@ APIFY_API_TOKEN = os.environ.get('APIFY_API_TOKEN', '')
 APIFY_RIGHTMOVE_ACTOR_ID    = 'dhrumil/rightmove-scraper'
 APIFY_ONTHEMARKET_ACTOR_ID  = 'fatihtahta/onthemarket-scraper'
 APIFY_SPAREROOM_ACTOR_ID    = 'memo23/spareroom-scraper'
+APIFY_ZOOPLA_ACTOR_ID       = 'dhrumil/zoopla-scraper'
+APIFY_AIRBNB_ACTOR_ID       = 'tri_angle/airbnb-scraper'
 
 # Rental comparables actor — automation-lab/rightmove-scraper
 # Chosen over dhrumil/rightmove-scraper for rental comps because it accepts
@@ -4543,6 +4657,8 @@ def extract_url():
             apify_fn = scrape_rightmove_with_apify
         elif 'onthemarket.com' in url:
             apify_fn = scrape_onthemarket_with_apify
+        elif 'zoopla.co.uk' in url:
+            apify_fn = scrape_zoopla_with_apify
         else:
             apify_fn = None  # No Apify actor for this site; fall back to Firecrawl
 
