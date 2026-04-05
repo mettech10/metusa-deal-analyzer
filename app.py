@@ -2779,8 +2779,16 @@ def analyze_deal(data):
     }
 
     # ── Regional benchmark comparison ─────────────────────────────────────────
+    # If the frontend sent its own calculated metrics (_frontendMetrics), use
+    # those for the benchmark comparison so the "Your deal" figures in the
+    # benchmark panel exactly match the headline metric cards.
+    fe = data.get('_frontendMetrics') or {}
+    bench_yield = float(fe['grossYield']) if fe.get('grossYield') is not None else gross_yield
+    bench_cashflow = float(fe['monthlyCashFlow']) if fe.get('monthlyCashFlow') is not None else monthly_cashflow
+    print(f"[Benchmark] Using yield={bench_yield:.2f}% cashflow=£{bench_cashflow:.0f}/mo "
+          f"(source={'frontend' if fe else 'backend'})")
     regional_benchmark = compare_to_regional_benchmark(
-        postcode, deal_type, gross_yield, monthly_cashflow
+        postcode, deal_type, bench_yield, bench_cashflow
     )
 
     # ── Risk flag dashboard ───────────────────────────────────────────────────
@@ -2863,10 +2871,10 @@ def analyze_deal(data):
         'annual_rent': f"{annual_rent:,.0f}",
         'total_annual_expenses': f"{total_annual_expenses:,.0f}",
         'net_annual_income': f"{net_annual_income:,.0f}",
-        'monthly_cashflow': round(monthly_cashflow, 0),
-        'gross_yield': f"{gross_yield:.2f}",
-        'net_yield': f"{net_yield:.2f}",
-        'cash_on_cash': f"{cash_on_cash:.2f}",
+        'monthly_cashflow': round(bench_cashflow, 0),
+        'gross_yield': f"{bench_yield:.2f}",
+        'net_yield': f"{float(fe.get('netYield', net_yield)):.2f}",
+        'cash_on_cash': f"{float(fe.get('cashOnCashReturn', cash_on_cash)):.2f}",
         'verdict': verdict,
         'risk_level': risk_level,
         'strengths': strengths,
