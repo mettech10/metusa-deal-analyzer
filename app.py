@@ -600,6 +600,118 @@ def scrape_onthemarket_with_apify(url: str) -> dict:
     return data
 
 
+def scrape_zoopla_with_apify(url: str) -> dict:
+    """Scrape a single Zoopla listing using the Apify Zoopla actor.
+    Returns a rich dict with all available property fields.
+    """
+    print(f"[Apify/Zoopla] Scraping {url}")
+    items = _apify_run_actor(
+        APIFY_ZOOPLA_ACTOR_ID,
+        {'startUrls': [{'url': url}], 'maxItems': 1},
+        timeout_secs=60,
+    )
+    if not items:
+        return None
+
+    item = items[0]
+
+    # ── Images ───────────────────────────────────────────────────────────────
+    images_raw = item.get('images') or item.get('propertyImages') or item.get('photos') or []
+    if isinstance(images_raw, list):
+        image_urls = [
+            (img.get('srcUrl') or img.get('url') or img.get('src') or img) if isinstance(img, dict) else str(img)
+            for img in images_raw
+        ]
+        image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
+    else:
+        image_urls = []
+
+    floorplan_raw = item.get('floorplans') or item.get('floorPlanImages') or item.get('floorPlan') or []
+    if isinstance(floorplan_raw, list):
+        floorplan_urls = [
+            (fp.get('srcUrl') or fp.get('url') or fp.get('src') or fp) if isinstance(fp, dict) else str(fp)
+            for fp in floorplan_raw
+        ]
+        floorplan_urls = [u for u in floorplan_urls if isinstance(u, str) and u.startswith('http')]
+    elif isinstance(floorplan_raw, str) and floorplan_raw.startswith('http'):
+        floorplan_urls = [floorplan_raw]
+    else:
+        floorplan_urls = []
+
+    # ── Agent ────────────────────────────────────────────────────────────────
+    agent_raw = item.get('agent') or item.get('contactInfo') or item.get('branchDetails') or {}
+    if isinstance(agent_raw, str):
+        agent = {'name': agent_raw}
+    elif isinstance(agent_raw, dict):
+        agent = agent_raw
+    else:
+        agent = {}
+
+    # ── Key features ────────────────────────────────────────────────────────
+    features_raw = item.get('keyFeatures') or item.get('features') or item.get('bulletPoints') or []
+    if isinstance(features_raw, str):
+        features = [f.strip() for f in features_raw.split('\n') if f.strip()]
+    elif isinstance(features_raw, list):
+        features = [str(f) for f in features_raw if f]
+    else:
+        features = []
+
+    # ── Tenure / lease ───────────────────────────────────────────────────────
+    tenure_raw = item.get('tenure') or item.get('tenureType') or ''
+    if isinstance(tenure_raw, dict):
+        tenure_type = tenure_raw.get('tenureType') or tenure_raw.get('type') or ''
+        lease_years = _parse_int(tenure_raw.get('yearsRemainingOnLease') or tenure_raw.get('leaseYearsRemaining'))
+    else:
+        tenure_type = str(tenure_raw)
+        lease_years = None
+
+    # ── Floor area ───────────────────────────────────────────────────────────
+    sqft = _parse_int(
+        item.get('floorAreaSqft') or item.get('floorArea') or item.get('sizeSqFeetMax')
+        or item.get('sizeSqFeetMin') or item.get('sqft')
+    )
+    sqm = item.get('floorAreaSqm') or item.get('sqm') or item.get('sizeMetric')
+    if sqm is None and sqft:
+        sqm = round(sqft / 10.764, 1)
+    sqm = round(float(sqm), 1) if sqm else None
+
+    # ── Address / postcode ───────────────────────────────────────────────────
+    address = (item.get('displayAddress') or item.get('address') or
+               item.get('title') or item.get('propertyAddress') or 'Address not available')
+    postcode = item.get('postcode') or item.get('outcode') or None
+    # Try to extract postcode from address if not provided
+    if not postcode and address:
+        import re as _re
+        pc_match = _re.search(r'[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}', address.upper())
+        if pc_match:
+            postcode = pc_match.group(0)
+
+    data = {
+        'address':        address,
+        'postcode':       postcode,
+        'price':          _parse_price(item.get('price') or item.get('priceAmount') or item.get('priceActual')),
+        'property_type':  item.get('propertyType') or item.get('property_type') or item.get('type') or None,
+        'bedrooms':       _parse_int(item.get('bedrooms') or item.get('beds') or item.get('numBedrooms')),
+        'description':    item.get('description') or item.get('summary') or item.get('detailedDescription') or None,
+        'sqm':            sqm,
+        'sqft':           sqft,
+        'bathrooms':      _parse_int(item.get('bathrooms') or item.get('baths') or item.get('numBathrooms')),
+        'tenure_type':    tenure_type or None,
+        'lease_years':    lease_years,
+        'key_features':   features,
+        'images':         image_urls,
+        'floorplans':     floorplan_urls,
+        'agent_name':     agent.get('name') or agent.get('agentName') or item.get('agentName') or item.get('branchName') or None,
+        'agent_phone':    agent.get('telephone') or agent.get('phone') or item.get('agentPhone') or None,
+        'agent_address':  agent.get('address') or agent.get('branchAddress') or None,
+        'listing_url':    url,
+        'source':         'zoopla',
+    }
+    print(f"[Apify/Zoopla] Extracted: price={data['price']}, beds={data['bedrooms']}, "
+          f"postcode={data['postcode']}, images={len(image_urls)}")
+    return data
+
+
 def get_spareroom_search_url(postcode: str) -> str:
     """Build a SpareRoom search URL for a given postcode.
     SpareRoom renders local results via client-side JavaScript, making automated
@@ -1169,6 +1281,8 @@ APIFY_API_TOKEN = os.environ.get('APIFY_API_TOKEN', '')
 APIFY_RIGHTMOVE_ACTOR_ID    = 'dhrumil/rightmove-scraper'
 APIFY_ONTHEMARKET_ACTOR_ID  = 'fatihtahta/onthemarket-scraper'
 APIFY_SPAREROOM_ACTOR_ID    = 'memo23/spareroom-scraper'
+APIFY_ZOOPLA_ACTOR_ID       = 'dhrumil/zoopla-scraper'
+APIFY_AIRBNB_ACTOR_ID       = 'tri_angle/airbnb-scraper'
 
 # Rental comparables actor — automation-lab/rightmove-scraper
 # Chosen over dhrumil/rightmove-scraper for rental comps because it accepts
@@ -2968,16 +3082,34 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
                                    deal_monthly_cashflow: float) -> dict:
     """
     Compare deal metrics against the regional benchmark database.
-    Returns a panel-ready dict for the frontend with:
-        - regional_median_yield, your_yield, yield_vs_median (%, above/below)
-        - regional_avg_cashflow, your_cashflow, cashflow_vs_avg (£, above/below)
-        - yield_percentile (estimated), cashflow_percentile (estimated)
-        - region_name, data_source
+    First tries real data from postcode_benchmarks (Supabase), then
+    falls back to the hardcoded REGIONAL_BENCHMARKS dictionary.
     """
     bench = get_regional_benchmark(postcode, deal_type)
 
     median_yield = bench['median_yield']
     median_cashflow = bench['median_cashflow']
+    data_source = bench['data_source']
+
+    # Try to override with real database data from postcode_benchmarks
+    try:
+        db_bench = get_benchmark_for_postcode(postcode, 'all', None)
+        if db_bench:
+            # Use gross_yield_median if available
+            db_yield = None
+            if db_bench.get('gross_yield_median'):
+                db_yield = float(db_bench['gross_yield_median'])
+            elif db_bench.get('median_monthly_rent') and db_bench.get('median_sold_price'):
+                rent = float(db_bench['median_monthly_rent'])
+                price = float(db_bench['median_sold_price'])
+                if price > 0:
+                    db_yield = round((rent * 12) / price * 100, 2)
+
+            if db_yield is not None:
+                median_yield = db_yield
+                data_source = 'Government data: Land Registry + VOA'
+    except Exception:
+        pass  # Fall back to hardcoded
 
     yield_diff = round(deal_gross_yield - median_yield, 2)
     cashflow_diff = round(deal_monthly_cashflow - median_cashflow, 0)
@@ -3011,7 +3143,7 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
     return {
         'region_name': bench['region'],
         'postcode_area': postcode.strip().upper().split()[0] if postcode else 'N/A',
-        'data_source': bench['data_source'],
+        'data_source': data_source,
         # Yield comparison
         'regional_median_yield': median_yield,
         'your_yield': round(deal_gross_yield, 2),
@@ -4525,6 +4657,8 @@ def extract_url():
             apify_fn = scrape_rightmove_with_apify
         elif 'onthemarket.com' in url:
             apify_fn = scrape_onthemarket_with_apify
+        elif 'zoopla.co.uk' in url:
+            apify_fn = scrape_zoopla_with_apify
         else:
             apify_fn = None  # No Apify actor for this site; fall back to Firecrawl
 
@@ -6547,6 +6681,159 @@ def lookup_benchmark():
         return jsonify({'success': True, 'benchmark': benchmark})
     else:
         return jsonify({'success': True, 'benchmark': None, 'message': 'No benchmark data available for this postcode'})
+
+
+# ── Airbnb / SA Nightly Rate Comparables ────────────────────────────────────
+
+@app.route('/api/sa-comparables', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_sa_comparables():
+    """Get Airbnb nightly rate comparables for a given area.
+    Uses the tri_angle/airbnb-scraper Apify actor ($30/mo subscription required).
+    Falls back to a search link if the actor is unavailable.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 2))
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        # Extract district (e.g. "SK16" from "SK16 4QL")
+        district = postcode.split()[0] if ' ' in postcode else postcode
+
+        if not APIFY_API_TOKEN:
+            return jsonify({
+                'success': True,
+                'listings': [],
+                'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2&min_bedrooms={bedrooms}',
+                'message': 'Airbnb comparables require Apify API token — use the search link instead'
+            })
+
+        # Run the Airbnb scraper actor
+        print(f"[SA Comparables] Searching Airbnb for {district}, {bedrooms} beds")
+        items = _apify_run_actor(
+            APIFY_AIRBNB_ACTOR_ID,
+            {
+                'location': district + ', United Kingdom',
+                'maxResults': 10,
+                'minBedrooms': max(1, bedrooms - 1),
+                'maxBedrooms': bedrooms + 1,
+                'currency': 'GBP',
+            },
+            timeout_secs=60,
+        )
+
+        if not items:
+            return jsonify({
+                'success': True,
+                'listings': [],
+                'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2&min_bedrooms={bedrooms}',
+                'message': 'No Airbnb listings found — the actor may require a paid subscription ($30/mo). Use the search link instead.'
+            })
+
+        # Parse listings
+        listings = []
+        for item in items[:10]:
+            nightly = None
+            price_raw = item.get('price') or item.get('pricing') or {}
+            if isinstance(price_raw, dict):
+                nightly = price_raw.get('rate') or price_raw.get('amount') or price_raw.get('pricePerNight')
+            elif isinstance(price_raw, (int, float)):
+                nightly = price_raw
+            elif isinstance(price_raw, str):
+                try:
+                    nightly = float(price_raw.replace('£', '').replace(',', '').split()[0])
+                except Exception:
+                    pass
+
+            if nightly is None:
+                nightly = item.get('pricePerNight') or item.get('price_per_night') or 0
+                if isinstance(nightly, str):
+                    try:
+                        nightly = float(nightly.replace('£', '').replace(',', ''))
+                    except Exception:
+                        nightly = 0
+
+            rating = item.get('rating') or item.get('stars') or item.get('reviewScore')
+            reviews = item.get('reviewsCount') or item.get('numberOfReviews') or item.get('reviews_count') or 0
+
+            thumbnail = None
+            images = item.get('images') or item.get('photos') or item.get('thumbnailUrl') or []
+            if isinstance(images, list) and images:
+                first = images[0]
+                thumbnail = first.get('url') or first.get('src') or first if isinstance(first, (str, dict)) else None
+                if isinstance(thumbnail, dict):
+                    thumbnail = thumbnail.get('url') or thumbnail.get('src')
+            elif isinstance(images, str):
+                thumbnail = images
+
+            listings.append({
+                'title': item.get('name') or item.get('title') or 'Airbnb Listing',
+                'nightly_rate': round(float(nightly), 0) if nightly else 0,
+                'property_type': item.get('roomType') or item.get('type') or item.get('propertyType') or 'Entire home',
+                'bedrooms': item.get('bedrooms') or item.get('beds') or bedrooms,
+                'rating': round(float(rating), 1) if rating else None,
+                'reviews': int(reviews) if reviews else 0,
+                'url': item.get('url') or item.get('listingUrl') or '',
+                'thumbnail': thumbnail,
+            })
+
+        # Calculate summary stats
+        rates = [l['nightly_rate'] for l in listings if l['nightly_rate'] > 0]
+        review_counts = [l['reviews'] for l in listings if l['reviews'] > 0]
+        avg_rate = round(sum(rates) / len(rates), 0) if rates else 0
+        min_rate = min(rates) if rates else 0
+        max_rate = max(rates) if rates else 0
+        avg_reviews = round(sum(review_counts) / len(review_counts), 0) if review_counts else 0
+        avg_rating_val = None
+        rating_vals = [l['rating'] for l in listings if l['rating']]
+        if rating_vals:
+            avg_rating_val = round(sum(rating_vals) / len(rating_vals), 1)
+
+        # Demand signal
+        if avg_reviews >= 50:
+            demand = 'high'
+            demand_label = 'High demand area'
+        elif avg_reviews >= 20:
+            demand = 'moderate'
+            demand_label = 'Moderate demand'
+        else:
+            demand = 'low'
+            demand_label = 'Low demand — verify local SA viability'
+
+        return jsonify({
+            'success': True,
+            'listings': listings,
+            'summary': {
+                'count': len(listings),
+                'avg_nightly_rate': avg_rate,
+                'min_nightly_rate': min_rate,
+                'max_nightly_rate': max_rate,
+                'avg_rating': avg_rating_val,
+                'avg_reviews': avg_reviews,
+                'demand': demand,
+                'demand_label': demand_label,
+            },
+            'district': district,
+            'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2&min_bedrooms={bedrooms}',
+        })
+
+    except Exception as e:
+        print(f"[SA Comparables] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        district = postcode.split()[0] if ' ' in postcode else postcode if postcode else ''
+        return jsonify({
+            'success': True,
+            'listings': [],
+            'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2',
+            'message': str(e)
+        })
 
 
 if __name__ == '__main__':
