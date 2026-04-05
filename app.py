@@ -2968,16 +2968,34 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
                                    deal_monthly_cashflow: float) -> dict:
     """
     Compare deal metrics against the regional benchmark database.
-    Returns a panel-ready dict for the frontend with:
-        - regional_median_yield, your_yield, yield_vs_median (%, above/below)
-        - regional_avg_cashflow, your_cashflow, cashflow_vs_avg (£, above/below)
-        - yield_percentile (estimated), cashflow_percentile (estimated)
-        - region_name, data_source
+    First tries real data from postcode_benchmarks (Supabase), then
+    falls back to the hardcoded REGIONAL_BENCHMARKS dictionary.
     """
     bench = get_regional_benchmark(postcode, deal_type)
 
     median_yield = bench['median_yield']
     median_cashflow = bench['median_cashflow']
+    data_source = bench['data_source']
+
+    # Try to override with real database data from postcode_benchmarks
+    try:
+        db_bench = get_benchmark_for_postcode(postcode, 'all', None)
+        if db_bench:
+            # Use gross_yield_median if available
+            db_yield = None
+            if db_bench.get('gross_yield_median'):
+                db_yield = float(db_bench['gross_yield_median'])
+            elif db_bench.get('median_monthly_rent') and db_bench.get('median_sold_price'):
+                rent = float(db_bench['median_monthly_rent'])
+                price = float(db_bench['median_sold_price'])
+                if price > 0:
+                    db_yield = round((rent * 12) / price * 100, 2)
+
+            if db_yield is not None:
+                median_yield = db_yield
+                data_source = 'Government data: Land Registry + VOA'
+    except Exception:
+        pass  # Fall back to hardcoded
 
     yield_diff = round(deal_gross_yield - median_yield, 2)
     cashflow_diff = round(deal_monthly_cashflow - median_cashflow, 0)
@@ -3011,7 +3029,7 @@ def compare_to_regional_benchmark(postcode: str, deal_type: str,
     return {
         'region_name': bench['region'],
         'postcode_area': postcode.strip().upper().split()[0] if postcode else 'N/A',
-        'data_source': bench['data_source'],
+        'data_source': data_source,
         # Yield comparison
         'regional_median_yield': median_yield,
         'your_yield': round(deal_gross_yield, 2),
