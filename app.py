@@ -798,8 +798,8 @@ def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
         if not is_room:
             continue
 
-        # Monthly rent
-        price_match = re.search(r'£([\d,]+)\s*per month', text)
+        # Monthly rent (handles "£580 per month" and "from £700 per month")
+        price_match = re.search(r'(?:from\s+)?£([\d,]+)\s*per month', text, re.I)
         rent_pcm = int(price_match.group(1).replace(',', '')) if price_match else None
 
         # Title: prefer img alt text (clean), fallback to regex on card text
@@ -868,6 +868,121 @@ def scrape_openrent_rooms(district: str, max_results: int = 15) -> list:
             break
 
     print(f"[OpenRent] Found {len(results)} room listings for {district}")
+    return results
+
+
+def scrape_spareroom_with_apify(district: str, max_results: int = 12) -> list:
+    """Scrape room listings from SpareRoom using the Apify SpareRoom actor.
+
+    Unlike direct HTTP scraping (which SpareRoom blocks with JS rendering),
+    the Apify actor runs in a real browser environment on Apify's servers.
+    This also avoids the IP-blocking issues seen with OpenRent on Render.
+
+    Args:
+        district: Postcode district e.g. "M14", "LS6", "SK16"
+        max_results: Maximum number of room listings to return
+
+    Returns:
+        List of room listing dicts with title, rentPcm, roomType, etc.
+    """
+    print(f"[SpareRoom/Apify] Searching rooms for district {district}, max={max_results}")
+
+    items = _apify_run_actor(
+        APIFY_SPAREROOM_ACTOR_ID,
+        {
+            'searchQuery': district,
+            'maxResults': max_results,
+            'roomsFor': 'anyone',
+            'searchType': 'offered',
+        },
+        timeout_secs=55,
+    )
+
+    if not items:
+        print(f"[SpareRoom/Apify] No items returned for {district}")
+        return []
+
+    results = []
+    for item in items:
+        # Normalise fields — SpareRoom actor returns varied shapes
+        title = (
+            item.get('title')
+            or item.get('adTitle')
+            or item.get('ad_title')
+            or 'Room to rent'
+        )
+
+        # Extract rent — could be weekly or monthly
+        rent_pcm = None
+        rent_raw = item.get('rent') or item.get('price') or item.get('rentPcm') or item.get('monthlyRent')
+        rent_pw = item.get('rentPw') or item.get('weeklyRent')
+
+        if rent_raw:
+            try:
+                val = int(str(rent_raw).replace('£', '').replace(',', '').strip().split()[0])
+                # If the actor labels it as weekly, convert; otherwise assume monthly
+                per = str(item.get('rentPer', item.get('rent_per', 'month'))).lower()
+                if 'week' in per or (val < 250 and not rent_pw):
+                    rent_pcm = round(val * 52 / 12)
+                else:
+                    rent_pcm = val
+            except Exception:
+                pass
+
+        if not rent_pcm and rent_pw:
+            try:
+                val = int(str(rent_pw).replace('£', '').replace(',', '').strip().split()[0])
+                rent_pcm = round(val * 52 / 12)
+            except Exception:
+                pass
+
+        # Room type
+        room_type = 'double'
+        type_text = str(item.get('roomType', item.get('type', ''))).lower()
+        if 'single' in type_text:
+            room_type = 'single'
+        elif 'en-suite' in type_text or 'ensuite' in type_text:
+            room_type = 'en-suite'
+        elif 'studio' in type_text:
+            room_type = 'studio'
+
+        # Bills
+        bills_text = str(item.get('bills', item.get('billsIncluded', ''))).lower()
+        if 'inc' in bills_text or 'yes' in bills_text or bills_text == 'true':
+            bills_included = True
+        elif 'exc' in bills_text or 'no' in bills_text or bills_text == 'false':
+            bills_included = False
+        else:
+            bills_included = None
+
+        # URL & image
+        listing_url = item.get('url') or item.get('listingUrl') or item.get('link') or ''
+        if listing_url and not listing_url.startswith('http'):
+            listing_url = f'https://www.spareroom.co.uk{listing_url}'
+
+        image_url = item.get('image') or item.get('imageUrl') or item.get('mainImage') or ''
+
+        # Area
+        area = item.get('area') or item.get('location') or item.get('postcode') or district.upper()
+        if isinstance(area, dict):
+            area = area.get('name', district.upper())
+
+        results.append({
+            'title': str(title)[:120],
+            'rentPcm': rent_pcm,
+            'roomType': room_type,
+            'billsIncluded': bills_included,
+            'area': str(area)[:60],
+            'distanceKm': None,
+            'listingUrl': listing_url,
+            'imageUrl': image_url,
+            'source': 'spareroom',
+        })
+
+        if len(results) >= max_results:
+            break
+
+    print(f"[SpareRoom/Apify] Parsed {len(results)} rooms for {district}")
     return results
 
 
@@ -4761,8 +4876,34 @@ def get_comparables():
         parts = postcode.upper().split()
         district = parts[0] if parts else postcode.upper()
 
-        # Primary: OpenRent room scraping (server-rendered, reliable)
-        listings = scrape_openrent_rooms(district, max_results=max_results)
+        # ── Strategy: try multiple sources, return first success ──
+        # 1. SpareRoom Apify actor (runs on Apify infra, avoids IP blocks)
+        # 2. OpenRent direct scraping (works from non-blocked IPs)
+        # 3. Fallback: return SpareRoom manual search link
+
+        listings = []
+        source = 'fallback'
+
+        # 1) SpareRoom via Apify
+        try:
+            sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
+            if sr_listings:
+                listings = sr_listings
+                source = 'spareroom'
+                print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
+        except Exception as e:
+            print(f"[HMO] SpareRoom Apify error for {district}: {e}")
+
+        # 2) OpenRent direct scrape (secondary)
+        if not listings:
+            try:
+                or_listings = scrape_openrent_rooms(district, max_results=max_results)
+                if or_listings:
+                    listings = or_listings
+                    source = 'openrent'
+                    print(f"[HMO] OpenRent returned {len(listings)} rooms for {district}")
+            except Exception as e:
+                print(f"[HMO] OpenRent error for {district}: {e}")
 
         if listings:
             # Build summary stats
@@ -4776,6 +4917,12 @@ def get_comparables():
                     'maxRent': max(rents),
                 }
 
+            search_url = (
+                f'https://www.openrent.com/properties-to-rent/{district.lower()}?term={district}&isRoomOnly=true'
+                if source == 'openrent'
+                else get_spareroom_search_url(postcode)
+            )
+
             return jsonify({
                 'success': True,
                 'postcode': postcode,
@@ -4783,13 +4930,13 @@ def get_comparables():
                 'listings': listings,
                 'count': len(listings),
                 'summary': summary,
-                'source': 'openrent',
-                'searchUrl': f'https://www.openrent.com/properties-to-rent/{district.lower()}?term={district}&isRoomOnly=true',
+                'source': source,
+                'searchUrl': search_url,
             })
 
-        # Fallback: return SpareRoom manual search link
+        # 3) Fallback: return SpareRoom manual search link
         spareroom_url = get_spareroom_search_url(postcode)
-        print(f"[HMO] OpenRent returned 0 rooms for {district}, falling back to manual links")
+        print(f"[HMO] Both sources returned 0 rooms for {district}, falling back to manual links")
 
         return jsonify({
             'success': True,
