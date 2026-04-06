@@ -1845,7 +1845,7 @@ def check_article_4(postcode):
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
             prompt = (
                 f'You are a UK property and planning expert. Determine the Article 4 Direction status '
                 f'for HMO (House in Multiple Occupation C3\u2192C4) conversions at UK postcode: {postcode_clean}\n\n'
@@ -2294,7 +2294,7 @@ def get_location_from_ai(postcode):
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
             context = f' (postcodes.io admin_district: "{admin_district}")' if admin_district else ''
             prompt = (
                 f'Given the UK postcode "{postcode}"{context}, provide the following in JSON:\n'
@@ -4230,8 +4230,8 @@ def pdf_upload():
         print(f"[PDF-UPLOAD] Processing {filename} ({len(pdf_base64)//1024}KB base64)")
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            model="claude-sonnet-4-5-20250514",
+            max_tokens=1000,
             messages=[{
                 "role": "user",
                 "content": [
@@ -5145,11 +5145,11 @@ Respond with a JSON object (no markdown, raw JSON only) with exactly these field
 
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
-        model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+        model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
 
         message = client.messages.create(
             model=model_id,
-            max_tokens=512,
+            max_tokens=1500,
             messages=[{'role': 'user', 'content': prompt}],
         )
         raw_text = message.content[0].text.strip()
@@ -5500,10 +5500,10 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
         try:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
             message = client.messages.create(
                 model=model_id,
-                max_tokens=1024,
+                max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}]
             )
             raw = message.content[0].text.strip()
