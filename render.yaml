@@ -32,7 +32,28 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: BENCHMARK_CRON_SECRET
         sync: false
       - key: NOTIFICATION_EMAIL
         sync: false
+      # ── Bright Data Browser API (SpareRoom scraper) ──────────────────
+      - key: BRIGHTDATA_API_KEY
+        sync: false
+      - key: BRIGHTDATA_USERNAME
+        sync: false
+      - key: BRIGHTDATA_PASSWORD
+        sync: false
+      - key: BRIGHTDATA_ZONE
+        value: scraping_browser
+      - key: BRIGHTDATA_HOST
+        value: brd.superproxy.io
+      - key: BRIGHTDATA_PORT
+        value: "9222"
+      - key: SCRAPER_SECRET
+        sync: false
+      - key: SCRAPER_CONCURRENCY
+        value: "5"
+      - key: SCRAPER_DELAY_MS
+        value: "1500"

@@ -32,6 +32,22 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
+# Bright Data SpareRoom scraper (replaces Apify memo23/spareroom-scraper)
+try:
+    from spareroom_scraper import scrape_spareroom_live, SpareRoomScraper
+    from brightdata_browser import scraper_health_check as brightdata_health_check
+    BRIGHTDATA_SCRAPER_AVAILABLE = True
+except ImportError as _brd_import_err:
+    BRIGHTDATA_SCRAPER_AVAILABLE = False
+    print(f"[BrightData] Scraper import failed: {_brd_import_err}")
+
+    def scrape_spareroom_live(postcode, max_results=12):  # type: ignore
+        return []
+
+    def brightdata_health_check():  # type: ignore
+        return {"connected": False, "message": "module import failed",
+                "playwright": False, "credentials": False}
+
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
     Shared by scrape_with_jina() and scrape_with_firecrawl().
@@ -4317,6 +4333,152 @@ def health_check():
     """Health check endpoint — kept public for uptime monitoring, returns minimal info only."""
     return jsonify({'status': 'ok'})
 
+
+# ─── SpareRoom / Bright Data scraper endpoints ────────────────────────────────
+def _check_scraper_secret() -> bool:
+    """Auth helper for scraper admin endpoints.
+    Accepts either `X-Scraper-Secret` header or `Authorization: Bearer <secret>`.
+    """
+    expected = os.environ.get('SCRAPER_SECRET', '')
+    if not expected:
+        return False
+    header_secret = request.headers.get('X-Scraper-Secret', '')
+    if header_secret and hmac.compare_digest(header_secret, expected):
+        return True
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        token = auth[7:].strip()
+        if hmac.compare_digest(token, expected):
+            return True
+    return False
+
+
+@app.route('/api/scraper/health', methods=['GET'])
+@limiter.limit("30 per minute")
+def scraper_health():
+    """Public health check for the Bright Data SpareRoom scraper.
+    Returns connectivity status WITHOUT exposing credentials.
+    """
+    if not BRIGHTDATA_SCRAPER_AVAILABLE:
+        return jsonify({
+            'service': 'spareroom-brightdata',
+            'connected': False,
+            'message': 'scraper module not importable on this deploy',
+            'timestamp': datetime.utcnow().isoformat(),
+        }), 503
+
+    try:
+        status = brightdata_health_check()
+    except Exception as e:
+        return jsonify({
+            'service': 'spareroom-brightdata',
+            'connected': False,
+            'message': f'health check exception: {type(e).__name__}',
+            'timestamp': datetime.utcnow().isoformat(),
+        }), 500
+
+    status['service'] = 'spareroom-brightdata'
+    status['timestamp'] = datetime.utcnow().isoformat()
+    # Never leak the actual creds — scraper_health_check already only returns
+    # a boolean `credentials` flag, but double-check we're not echoing secrets.
+    status.pop('username', None)
+    status.pop('password', None)
+    return jsonify(status), (200 if status.get('connected') else 503)
+
+
+@app.route('/api/scraper/live', methods=['POST'])
+@limiter.limit("10 per minute")
+def scraper_live():
+    """Run a live SpareRoom scrape for a single postcode.
+    Body: { "postcode": "M14 4AB", "maxResults": 12 }
+
+    Authed via SCRAPER_SECRET header. Intended for debugging and for frontend
+    hotspot pages — the /api/comparables endpoint already uses the scraper
+    internally, so you typically don't need this for the main HMO flow.
+    """
+    if not _check_scraper_secret():
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    if not BRIGHTDATA_SCRAPER_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
+
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+    data = request.get_json(silent=True) or {}
+    postcode = (data.get('postcode') or '').strip()
+    if not postcode:
+        return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+    try:
+        max_results = min(int(data.get('maxResults', 12)), 50)
+    except (TypeError, ValueError):
+        max_results = 12
+
+    try:
+        listings = scrape_spareroom_live(postcode, max_results=max_results)
+    except Exception as e:
+        app.logger.error(f'[scraper/live] {type(e).__name__}: {e}')
+        return jsonify({'success': False, 'message': 'scrape failed'}), 500
+
+    return jsonify({
+        'success': True,
+        'postcode': postcode,
+        'count': len(listings),
+        'listings': listings,
+        'source': 'spareroom-brightdata',
+    })
+
+
+@app.route('/api/scraper/trigger-bulk', methods=['POST'])
+@limiter.limit("5 per hour")
+def scraper_trigger_bulk():
+    """Trigger a bulk SpareRoom scrape run across all UK HMO hotspots.
+    Authed via SCRAPER_SECRET. Intended to be called by a Render cron job.
+
+    Body (optional):
+      { "locations": ["M14", "LS6", ...], "maxPages": 2 }
+
+    Returns the run summary from spareroom_bulk_job.run_bulk_scrape.
+    """
+    if not _check_scraper_secret():
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    if not BRIGHTDATA_SCRAPER_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
+
+    try:
+        from spareroom_bulk_job import run_bulk_scrape, UK_HMO_LOCATIONS
+    except ImportError as e:
+        return jsonify({'success': False, 'message': f'bulk job not importable: {e}'}), 503
+
+    data = request.get_json(silent=True) or {}
+    locations = data.get('locations')
+    if locations is not None:
+        if not isinstance(locations, list) or not all(isinstance(x, str) for x in locations):
+            return jsonify({'success': False, 'message': 'locations must be a list of strings'}), 400
+        if len(locations) > 200:
+            return jsonify({'success': False, 'message': 'max 200 locations per run'}), 400
+    try:
+        max_pages = min(max(int(data.get('maxPages', 2)), 1), 5)
+    except (TypeError, ValueError):
+        max_pages = 2
+
+    print(f"[scraper/trigger-bulk] Starting bulk run — "
+          f"{len(locations) if locations else len(UK_HMO_LOCATIONS)} locations, "
+          f"{max_pages} pages each")
+    try:
+        summary = run_bulk_scrape(
+            locations=locations,
+            max_pages_per_location=max_pages,
+        )
+    except Exception as e:
+        app.logger.error(f'[scraper/trigger-bulk] {type(e).__name__}: {e}')
+        return jsonify({'success': False, 'message': 'bulk run failed', 'error': str(e)[:200]}), 500
+
+    return jsonify({'success': True, 'summary': summary})
+
+
 @app.route('/api/test-apify')
 @admin_required
 def test_apify():
@@ -4916,15 +5078,29 @@ def get_comparables():
         listings = []
         source = 'fallback'
 
-        # 1) SpareRoom via Apify
+        # 1) SpareRoom via Bright Data Browser API (replaces Apify actor)
         try:
-            sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
+            sr_listings = scrape_spareroom_live(district, max_results=max_results)
             if sr_listings:
                 listings = sr_listings
                 source = 'spareroom'
-                print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
+                print(f"[HMO] SpareRoom BrightData returned {len(listings)} rooms for {district}")
         except Exception as e:
-            print(f"[HMO] SpareRoom Apify error for {district}: {e}")
+            print(f"[HMO] SpareRoom BrightData error for {district}: {e}")
+
+        # ─── LEGACY: Apify SpareRoom actor (disabled 2026-04-11) ───────────
+        # Kept for rollback. The memo23/spareroom-scraper actor began
+        # returning empty datasets consistently — replaced with Bright Data
+        # Browser API above. To re-enable, uncomment and comment out the
+        # scrape_spareroom_live block above.
+        # try:
+        #     sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
+        #     if sr_listings:
+        #         listings = sr_listings
+        #         source = 'spareroom'
+        #         print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
+        # except Exception as e:
+        #     print(f"[HMO] SpareRoom Apify error for {district}: {e}")
 
         # 2) OpenRent direct scrape (secondary)
         if not listings:
