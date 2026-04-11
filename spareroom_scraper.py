@@ -162,28 +162,29 @@ def _area_code(district_or_postcode: str) -> str:
 
 
 def _build_search_url(location: str, offset: int = 0) -> str:
-    """SpareRoom search URL. Matches the shape the Apify actor used.
+    """SpareRoom search URL using the ``search_type=rooms&where=`` variant.
 
-    ``location`` can be a full postcode ("M14 4AB") or a district ("M14", "SK16")
-    or a place name ("Manchester", "Leeds").
+    This variant honours ``per=100`` and returns 100 organic + sponsored
+    listings per page. The older ``search_by=postcode`` variant was found to
+    cap results at ~10 per page and heavily over-index on sponsored listings,
+    causing the area-code filter to strip everything and trigger the Rightmove
+    fallback every time.
 
-    ``per=100`` is essential for postcode searches — SpareRoom puts ~10–20
-    sponsored listings from other cities at the top of every result page.
-    Without per=100 we'd only see sponsored listings after filtering and the
-    endpoint would fall back to Rightmove every time.
+    ``location`` can be:
+      - a full postcode ("M14 4AB") — district extracted for the query
+      - a district ("M14", "LS6", "SE15")
+      - a place name ("Manchester", "Leeds", "Birmingham")
     """
-    loc = _sanitise(location, 40).replace(" ", "+")
-    # Use search_by=postcode only for postcode-ish inputs (letters+digits),
-    # otherwise fall back to the generic location search.
-    if re.match(r"^[A-Za-z]{1,2}\d", loc):
-        return (
-            f"https://www.spareroom.co.uk/flatshare/?search_by=postcode"
-            f"&search={loc}&miles_from_max=2&rooms_for=0&rooms_offered=1"
-            f"&mode=list&per=100&offset={offset}"
-        )
+    # For postcode inputs, use just the district part in the query to keep
+    # the radius wide enough to hit organic listings.
+    raw = _sanitise(location, 40)
+    first_token = raw.split()[0] if raw else ""
+    query_loc = first_token if re.match(r"^[A-Za-z]{1,2}\d", first_token) else raw
+    loc = query_loc.replace(" ", "+")
     return (
         f"https://www.spareroom.co.uk/flatshare/?search_type=rooms"
         f"&where={loc}&per=100&offset={offset}&mode=list"
+        f"&rooms_for=0&rooms_offered=1"
     )
 
 
