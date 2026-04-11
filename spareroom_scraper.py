@@ -166,6 +166,11 @@ def _build_search_url(location: str, offset: int = 0) -> str:
 
     ``location`` can be a full postcode ("M14 4AB") or a district ("M14", "SK16")
     or a place name ("Manchester", "Leeds").
+
+    ``per=100`` is essential for postcode searches — SpareRoom puts ~10–20
+    sponsored listings from other cities at the top of every result page.
+    Without per=100 we'd only see sponsored listings after filtering and the
+    endpoint would fall back to Rightmove every time.
     """
     loc = _sanitise(location, 40).replace(" ", "+")
     # Use search_by=postcode only for postcode-ish inputs (letters+digits),
@@ -174,7 +179,7 @@ def _build_search_url(location: str, offset: int = 0) -> str:
         return (
             f"https://www.spareroom.co.uk/flatshare/?search_by=postcode"
             f"&search={loc}&miles_from_max=2&rooms_for=0&rooms_offered=1"
-            f"&mode=list&offset={offset}"
+            f"&mode=list&per=100&offset={offset}"
         )
     return (
         f"https://www.spareroom.co.uk/flatshare/?search_type=rooms"
