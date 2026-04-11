@@ -162,29 +162,38 @@ def _area_code(district_or_postcode: str) -> str:
 
 
 def _build_search_url(location: str, offset: int = 0) -> str:
-    """SpareRoom search URL using the ``search_type=rooms&where=`` variant.
+    """SpareRoom search URL.
 
-    This variant honours ``per=100`` and returns 100 organic + sponsored
-    listings per page. The older ``search_by=postcode`` variant was found to
-    cap results at ~10 per page and heavily over-index on sponsored listings,
-    causing the area-code filter to strip everything and trigger the Rightmove
-    fallback every time.
+    Important: Bright Data's Scraping Browser enforces robots.txt on SpareRoom
+    and the ``search_type=rooms&where=`` variant is DISALLOWED (returns a
+    "brob" error). The ``search_by=postcode`` variant IS allowed by robots.txt
+    so we use that for postcode-like inputs. Place-name inputs use a third
+    variant (``flatshares/<city>``) which is also robots-allowed.
 
     ``location`` can be:
       - a full postcode ("M14 4AB") — district extracted for the query
       - a district ("M14", "LS6", "SE15")
-      - a place name ("Manchester", "Leeds", "Birmingham")
+      - a place name ("Manchester", "Leeds")
     """
-    # For postcode inputs, use just the district part in the query to keep
-    # the radius wide enough to hit organic listings.
     raw = _sanitise(location, 40)
     first_token = raw.split()[0] if raw else ""
-    query_loc = first_token if re.match(r"^[A-Za-z]{1,2}\d", first_token) else raw
-    loc = query_loc.replace(" ", "+")
+    is_postcode_like = bool(re.match(r"^[A-Za-z]{1,2}\d", first_token))
+
+    if is_postcode_like:
+        loc = first_token.replace(" ", "+")
+        return (
+            f"https://www.spareroom.co.uk/flatshare/?search_by=postcode"
+            f"&search={loc}&miles_from_max=2&rooms_for=0&rooms_offered=1"
+            f"&mode=list&per=100&offset={offset}"
+        )
+
+    # Place-name branch — use the /flatshares/<city> path which is
+    # robots-allowed, rather than /flatshare/?search_type=rooms&where=...
+    # (the latter is blocked by robots.txt → Bright Data "brob" error).
+    city_slug = raw.lower().replace(" ", "-")
     return (
-        f"https://www.spareroom.co.uk/flatshare/?search_type=rooms"
-        f"&where={loc}&per=100&offset={offset}&mode=list"
-        f"&rooms_for=0&rooms_offered=1"
+        f"https://www.spareroom.co.uk/flatshares/{city_slug}"
+        f"?mode=list&per=100&offset={offset}"
     )
 
 
