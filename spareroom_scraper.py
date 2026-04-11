@@ -145,6 +145,22 @@ def _extract_listing_id(url: str) -> Optional[str]:
     return None
 
 
+def _area_code(district_or_postcode: str) -> str:
+    """Extract the alpha area code from a postcode district or full postcode.
+
+    Used to filter out sponsored/featured SpareRoom listings from other cities:
+        "M14"       -> "M"        (Manchester)
+        "M14 5RE"   -> "M"        (Manchester)
+        "SE15"      -> "SE"       (South East London)
+        "LS6"       -> "LS"       (Leeds)
+        "Manchester"-> ""         (place name — no filtering)
+    """
+    if not district_or_postcode:
+        return ""
+    m = re.match(r"\s*([A-Za-z]{1,2})\d", district_or_postcode.strip())
+    return m.group(1).upper() if m else ""
+
+
 def _build_search_url(location: str, offset: int = 0) -> str:
     """SpareRoom search URL. Matches the shape the Apify actor used.
 
@@ -240,9 +256,24 @@ PARSE_JS = r"""
 
 
 def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dict[str, Any]]:
-    """Turn the raw card objects pulled from the DOM into the canonical shape."""
+    """Turn the raw card objects pulled from the DOM into the canonical shape.
+
+    Filters out SpareRoom sponsored/featured listings whose postcode area code
+    doesn't match the searched location. SpareRoom injects paid listings from
+    all over the UK at the top of every search, ignoring the 2-mile radius
+    filter — we reject them here so HMO rent averages stay geographically
+    accurate.
+
+    The filter only runs when ``location`` is postcode-like (e.g. "M14", "LS6",
+    "SE15"). For place-name searches like "Manchester" we can't derive an area
+    code, so no filtering is applied.
+    """
     out: List[Dict[str, Any]] = []
     seen_ids: set = set()
+
+    # Area code of the searched location — empty string for place-name searches
+    search_code = _area_code(location)
+    rejected_wrong_area = 0
 
     for card in raw_cards:
         href = _abs_url(card.get("href", ""))
@@ -283,6 +314,16 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
         if pc_match:
             area = pc_match.group(1).strip()
 
+        # ── Area-code filter: reject sponsored listings from other cities ──
+        # Only runs for postcode searches. The old Apify actor suffered from
+        # the same sponsored-listing noise; filtering here keeps HMO rent
+        # averages tied to the actual searched area.
+        if search_code:
+            card_code = _area_code(area)
+            if card_code and card_code != search_code:
+                rejected_wrong_area += 1
+                continue
+
         out.append({
             "title": title,
             "rentPcm": rent_pcm,
@@ -298,6 +339,10 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
             "_availableFrom": available_from,
             "_numberOfRooms": num_rooms,
         })
+
+    if rejected_wrong_area > 0:
+        print(f"[SpareRoom] Filtered {rejected_wrong_area} sponsored/other-area "
+              f"listings (search code={search_code!r})")
 
     return out
 
