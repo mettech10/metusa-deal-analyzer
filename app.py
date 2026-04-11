@@ -48,6 +48,12 @@ except ImportError as _brd_import_err:
         return {"connected": False, "message": "module import failed",
                 "playwright": False, "credentials": False}
 
+    class SpareRoomScraper:  # type: ignore
+        def scrape_live_debug(self, postcode, max_results=12):
+            return {"listings": [], "raw_cards_count": 0, "filtered_count": 0,
+                    "elapsed_ms": 0, "url": "", "page_title": "",
+                    "page_url": "", "error": "module import failed"}
+
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
     Shared by scrape_with_jina() and scrape_with_firecrawl().
@@ -4384,6 +4390,56 @@ def scraper_health():
     status.pop('username', None)
     status.pop('password', None)
     return jsonify(status), (200 if status.get('connected') else 503)
+
+
+@app.route('/api/scraper/debug', methods=['GET'])
+@limiter.limit("6 per minute")
+def scraper_debug():
+    """Diagnostic endpoint for the Bright Data SpareRoom scraper.
+    Returns raw card count, filter count, page URL/title, and any error.
+    Useful for debugging sponsored-listing filter ratios and SpareRoom
+    layout changes. Rate-limited to 6/min to prevent abuse.
+    """
+    if not BRIGHTDATA_SCRAPER_AVAILABLE:
+        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
+
+    postcode = (request.args.get('postcode') or '').strip()
+    if not postcode:
+        return jsonify({'success': False, 'message': 'postcode query param required'}), 400
+
+    try:
+        scraper = SpareRoomScraper()
+        debug = scraper.scrape_live_debug(postcode, max_results=20)
+    except Exception as e:
+        app.logger.error(f'[scraper/debug] {type(e).__name__}: {e}')
+        return jsonify({'success': False, 'message': 'debug scrape failed', 'error': str(e)[:200]}), 500
+
+    # Summarise for the response — include a few sample listings so we can see
+    # what actually survived the filter.
+    listings = debug.get('listings', [])
+    sample = [
+        {
+            'area': l.get('area'),
+            'rentPcm': l.get('rentPcm'),
+            'roomType': l.get('roomType'),
+            'title': (l.get('title') or '')[:60],
+        }
+        for l in listings[:5]
+    ]
+
+    return jsonify({
+        'success': True,
+        'postcode': postcode,
+        'url': debug.get('url'),
+        'page_url': debug.get('page_url'),
+        'page_title': debug.get('page_title'),
+        'raw_cards_count': debug.get('raw_cards_count'),
+        'filtered_count': debug.get('filtered_count'),
+        'returned_count': len(listings),
+        'elapsed_ms': debug.get('elapsed_ms'),
+        'error': debug.get('error'),
+        'sample': sample,
+    })
 
 
 @app.route('/api/scraper/live', methods=['POST'])

@@ -373,23 +373,56 @@ class SpareRoomScraper:
         30-second hard ceiling. Returns a list of listing dicts in the canonical
         shape — EMPTY list on any failure (caller's existing fallback handles it).
         """
-        if not PLAYWRIGHT_AVAILABLE:
-            print("[SpareRoom] Playwright unavailable")
-            return []
+        debug = self.scrape_live_debug(postcode, max_results=max_results)
+        return debug.get("listings", [])
 
+    def scrape_live_debug(
+        self,
+        postcode: str,
+        max_results: int = 12,
+    ) -> Dict[str, Any]:
+        """Same as scrape_live but returns full intermediate state.
+
+        Used by the /api/scraper/debug endpoint so we can see where results
+        are being lost without needing to read Render logs. Return shape:
+            {
+              listings:        [...canonical dicts...],
+              raw_cards_count: int,
+              filtered_count:  int,
+              elapsed_ms:      int,
+              url:             str,
+              page_title:      str,
+              page_url:        str (after any redirects),
+              error:           str | None,
+            }
+        """
         district = self._district_from_postcode(postcode)
         url = _build_search_url(district, offset=0)
         print(f"[SpareRoom] LIVE scrape {district} — {url}")
 
+        result: Dict[str, Any] = {
+            "listings": [],
+            "raw_cards_count": 0,
+            "filtered_count": 0,
+            "elapsed_ms": 0,
+            "url": url,
+            "page_title": "",
+            "page_url": "",
+            "error": None,
+        }
+
+        if not PLAYWRIGHT_AVAILABLE:
+            result["error"] = "playwright unavailable"
+            return result
+
         t0 = time.time()
-        results: List[Dict[str, Any]] = []
 
         try:
             with BrightDataBrowser(timeout_ms=LIVE_TIMEOUT_SECS * 1000) as bd:
                 ctx = bd.get_context()
                 if ctx is None:
-                    print("[SpareRoom] Could not obtain browser context")
-                    return []
+                    result["error"] = "browser context unavailable"
+                    return result
 
                 page = ctx.new_page()
                 page.set_default_timeout(LIVE_TIMEOUT_SECS * 1000)
@@ -398,8 +431,9 @@ class SpareRoomScraper:
                     page.goto(url, wait_until="domcontentloaded",
                               timeout=LIVE_TIMEOUT_SECS * 1000)
                 except PlaywrightTimeout:
-                    print(f"[SpareRoom] Timeout loading {district}")
-                    return []
+                    result["error"] = f"timeout loading {district}"
+                    result["elapsed_ms"] = int((time.time() - t0) * 1000)
+                    return result
 
                 # Allow lazy images / JS hydration a moment to settle, but
                 # don't block on networkidle — SpareRoom has long-polling XHRs.
@@ -408,29 +442,42 @@ class SpareRoomScraper:
                 except PlaywrightTimeout:
                     pass
 
+                # Capture post-redirect page URL + title for diagnostics
+                try:
+                    result["page_title"] = (page.title() or "")[:200]
+                    result["page_url"] = page.url or ""
+                except Exception:
+                    pass
+
                 raw_cards = page.evaluate(PARSE_JS) or []
+                result["raw_cards_count"] = len(raw_cards)
                 print(f"[SpareRoom] Extracted {len(raw_cards)} raw cards for {district}")
 
-                results = _parse_raw_cards(raw_cards, district)
-                if len(results) > max_results:
-                    results = results[:max_results]
+                listings = _parse_raw_cards(raw_cards, district)
+                result["filtered_count"] = len(listings)
+                if len(listings) > max_results:
+                    listings = listings[:max_results]
 
                 # Strip internal underscore keys — live callers only need the
                 # canonical Apify-compatible shape.
-                for r in results:
+                for r in listings:
                     for k in list(r.keys()):
                         if k.startswith("_"):
                             r.pop(k, None)
 
-        except Exception as e:  # noqa: BLE001
-            elapsed = int((time.time() - t0) * 1000)
-            print(f"[SpareRoom] LIVE error for {district} after {elapsed}ms: "
-                  f"{type(e).__name__}: {e}")
-            return []
+                result["listings"] = listings
 
-        elapsed = int((time.time() - t0) * 1000)
-        print(f"[SpareRoom] LIVE {district}: {len(results)} rooms in {elapsed}ms")
-        return results
+        except Exception as e:  # noqa: BLE001
+            result["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+            result["elapsed_ms"] = int((time.time() - t0) * 1000)
+            print(f"[SpareRoom] LIVE error for {district}: {result['error']}")
+            return result
+
+        result["elapsed_ms"] = int((time.time() - t0) * 1000)
+        print(f"[SpareRoom] LIVE {district}: {len(result['listings'])} rooms "
+              f"({result['raw_cards_count']} raw, {result['filtered_count']} after filter) "
+              f"in {result['elapsed_ms']}ms")
+        return result
 
     # -- BULK MODE ------------------------------------------------------------
     def scrape_bulk(
