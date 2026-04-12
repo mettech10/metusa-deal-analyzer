@@ -250,6 +250,28 @@ export interface BackendResults {
   market_source?: string
   risk_flags?: RiskFlag[]
   regional_benchmark?: RegionalBenchmark
+
+  // Airroi SA/R2SA market intelligence
+  airroi_market?: {
+    avg_nightly_rate?: number
+    min_nightly_rate?: number
+    max_nightly_rate?: number
+    avg_occupancy?: number
+    avg_rating?: number
+    estimated_monthly_revenue?: number
+    listing_count?: number
+    revenue_validation?: {
+      user_entered: number
+      market_estimate: number
+      deviation_pct: number
+      direction: "above" | "below"
+      flag: string
+    }
+  }
+  airroi_nearby_listings?: Array<Record<string, unknown>>
+  airroi_market_summary?: Record<string, unknown>
+  airroi_occupancy_trend?: Record<string, unknown>
+  airroi_adr_trend?: Record<string, unknown>
 }
 
 export interface RiskFlag {

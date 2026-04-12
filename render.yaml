@@ -55,6 +55,9 @@ services:
       # blocking the search form when accessed from a non-UK IP.
       - key: BRIGHTDATA_COUNTRY
         value: gb
+      # ── Airroi API (Airbnb market data for SA/R2SA) ─────────────────
+      - key: AIRROI_API_KEY
+        sync: false
       - key: SCRAPER_SECRET
         sync: false
       - key: SCRAPER_CONCURRENCY

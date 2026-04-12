@@ -32,6 +32,15 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
+# Airroi API — Airbnb market intelligence for SA/R2SA analysis
+try:
+    from airroi_service import airroi_client, AirroiAPI
+    AIRROI_AVAILABLE = True
+except ImportError as _airroi_import_err:
+    AIRROI_AVAILABLE = False
+    airroi_client = None
+    print(f"[Airroi] Import failed: {_airroi_import_err}")
+
 # Bright Data SpareRoom scraper (replaces Apify memo23/spareroom-scraper)
 try:
     from spareroom_scraper import scrape_spareroom_live, SpareRoomScraper
@@ -5612,7 +5621,7 @@ HMO STRATEGY:
 - Room Count: {property_data.get('roomCount', 'N/A')}
 - Avg Room Rate: £{property_data.get('avgRoomRate', 0)}/month
 - Planning/Licensing: {_a4_line}"""
-    elif deal_type == 'R2SA':
+    elif deal_type in ('R2SA', 'SA'):
         r2sa = calculated_metrics.get('r2sa_metrics', {})
         if r2sa:
             strategy_context = f"""
@@ -5624,6 +5633,42 @@ RENT-TO-SA STRATEGY:
 - Setup/Furnishing Costs: £{r2sa.get('setup_costs', 0):,}
 - ROI on Setup Costs: {r2sa.get('r2sa_roi', 0):.1f}%%
 - Note: Investor rents from landlord and sublets as short-term SA (Airbnb/Booking.com). No purchase required."""
+
+        # Enrich with Airroi real Airbnb market data if available
+        airroi_market = market_data.get('airroi', {})
+        if airroi_market and airroi_market.get('avg_nightly_rate'):
+            avg_nightly = airroi_market.get('avg_nightly_rate', 0)
+            min_nightly = airroi_market.get('min_nightly_rate', 0)
+            max_nightly = airroi_market.get('max_nightly_rate', 0)
+            avg_occ = airroi_market.get('avg_occupancy')
+            avg_rating = airroi_market.get('avg_rating')
+            est_revenue = airroi_market.get('estimated_monthly_revenue')
+            listing_count = airroi_market.get('listing_count', 0)
+
+            occ_str = f"{avg_occ}%%" if avg_occ and avg_occ > 1 else (f"{avg_occ*100:.0f}%%" if avg_occ else "N/A")
+            rating_str = f"{avg_rating}/5" if avg_rating else "N/A"
+            rev_str = f"£{est_revenue:,.0f}" if est_revenue else "N/A"
+
+            strategy_context += f"""
+
+AIRBNB MARKET DATA (real data from Airroi — {listing_count} active listings analysed):
+- Average Nightly Rate: £{avg_nightly:,.0f}
+- Nightly Rate Range: £{min_nightly:,.0f} – £{max_nightly:,.0f}
+- Average Occupancy: {occ_str}
+- Average Guest Rating: {rating_str}
+- Estimated Monthly Revenue (rate × occupancy × 30): {rev_str}
+- Source: Airroi API (live Airbnb data)"""
+
+            # Add revenue validation flag if present
+            rev_val = airroi_market.get('revenue_validation')
+            if rev_val:
+                strategy_context += f"""
+
+⚠ REVENUE VALIDATION FLAG:
+- User-entered SA revenue: £{rev_val['user_entered']:,.0f}/month
+- Market-estimated revenue: £{rev_val['market_estimate']:,.0f}/month
+- Deviation: {rev_val['deviation_pct']}%% {rev_val['direction']} market
+- You MUST flag this discrepancy in your verdict and risks. If the user's figure is significantly above market, warn about over-optimistic projections."""
 
     # ------------------------------------------------------------------ #
     # Benchmarks for this deal type (to give Claude context)              #
@@ -6018,7 +6063,58 @@ def ai_analyze():
                     app.logger.warning(f'Could not fetch Land Registry data: {e}')
                     market_data = {'source': 'None', 'error': 'Market data unavailable'}
         
-        # Step 3: Get AI insights (with market data)
+        # Step 2b: Airroi Airbnb market data (SA/R2SA only — runs in parallel concept)
+        airroi_data = None
+        deal_type = data.get('dealType', 'BTL').upper()
+        if deal_type in ('SA', 'R2SA') and postcode and AIRROI_AVAILABLE and airroi_client and os.getenv('AIRROI_API_KEY'):
+            try:
+                app.logger.info(f"[Airroi] Fetching SA market intelligence for {postcode}")
+                airroi_data = airroi_client.get_sa_market_intelligence(postcode, bedrooms=bedrooms)
+
+                if airroi_data and airroi_data.get('success'):
+                    # Inject Airroi stats into market_data so the AI prompt can use them
+                    listing_stats = airroi_data.get('listing_stats', {})
+                    market_data['airroi'] = {
+                        'avg_nightly_rate': listing_stats.get('avg_nightly_rate'),
+                        'min_nightly_rate': listing_stats.get('min_nightly_rate'),
+                        'max_nightly_rate': listing_stats.get('max_nightly_rate'),
+                        'avg_occupancy': listing_stats.get('avg_occupancy'),
+                        'avg_rating': listing_stats.get('avg_rating'),
+                        'estimated_monthly_revenue': listing_stats.get('estimated_monthly_revenue'),
+                        'listing_count': listing_stats.get('count', 0),
+                    }
+
+                    # ── Input validation: flag if user SA revenue deviates from market ──
+                    user_sa_revenue = float(data.get('saMonthlySARevenue', 0))
+                    market_est = listing_stats.get('estimated_monthly_revenue')
+                    if user_sa_revenue > 0 and market_est and market_est > 0:
+                        deviation = abs(user_sa_revenue - market_est) / market_est
+                        if deviation > 0.30:
+                            direction = 'above' if user_sa_revenue > market_est else 'below'
+                            market_data['airroi']['revenue_validation'] = {
+                                'user_entered': user_sa_revenue,
+                                'market_estimate': market_est,
+                                'deviation_pct': round(deviation * 100, 1),
+                                'direction': direction,
+                                'flag': f"User SA revenue (£{user_sa_revenue:,.0f}) is {round(deviation*100)}% {direction} market estimate (£{market_est:,.0f})",
+                            }
+                            app.logger.warning(
+                                f"[Airroi] Revenue validation flag: user £{user_sa_revenue:,.0f} "
+                                f"vs market £{market_est:,.0f} ({round(deviation*100)}% {direction})"
+                            )
+
+                    app.logger.info(
+                        f"[Airroi] Got {listing_stats.get('count', 0)} nearby listings, "
+                        f"avg nightly £{listing_stats.get('avg_nightly_rate', '?')}"
+                    )
+                else:
+                    app.logger.warning(f"[Airroi] No data returned for {postcode}: {airroi_data.get('errors', [])}")
+
+            except Exception as e:
+                app.logger.warning(f"[Airroi] SA intelligence failed (non-blocking): {e}")
+                airroi_data = None
+
+        # Step 3: Get AI insights (with market data — now includes Airroi for SA/R2SA)
         ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
 
         # ------------------------------------------------------------------ #
@@ -6098,6 +6194,32 @@ def ai_analyze():
             'avg_sold_price': market_data.get('avg_sold_price'),
             'market_source': market_data.get('source', 'None')
         }
+
+        # Include Airroi SA market intelligence for SA/R2SA strategies
+        if airroi_data and airroi_data.get('success'):
+            results['airroi_market'] = market_data.get('airroi', {})
+            # Pass through nearby listings for the frontend SA comparables display
+            nearby = airroi_data.get('nearby_listings')
+            if nearby:
+                # Extract the actual listings array from Airroi's response
+                listings_arr = []
+                for key in ('data', 'listings', 'results'):
+                    candidate = nearby.get(key) if isinstance(nearby, dict) else None
+                    if isinstance(candidate, list):
+                        listings_arr = candidate
+                        break
+                if not listings_arr and isinstance(nearby, list):
+                    listings_arr = nearby
+                results['airroi_nearby_listings'] = listings_arr[:15]  # Cap at 15
+
+            # Market summary for SA metrics panel
+            if airroi_data.get('market_summary'):
+                results['airroi_market_summary'] = airroi_data['market_summary']
+            # Occupancy/ADR trends for charts
+            if airroi_data.get('occupancy_trend'):
+                results['airroi_occupancy_trend'] = airroi_data['occupancy_trend']
+            if airroi_data.get('adr_trend'):
+                results['airroi_adr_trend'] = airroi_data['adr_trend']
         
         return jsonify({
             'success': True,
@@ -7345,6 +7467,125 @@ def get_sa_comparables():
             'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2',
             'message': str(e)
         })
+
+
+# ─── Airroi API — Airbnb market intelligence for SA/R2SA ─────────────
+@app.route('/api/airroi/sa-intelligence', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_airroi_sa_intelligence():
+    """Full SA market intelligence via Airroi API.
+    Returns market summary, occupancy/ADR trends, and nearby listings
+    for a given UK postcode.  Used by SA and R2SA strategies only.
+
+    Cost per uncached call: ~$0.40 (cached repeats are free).
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 2))
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        if not AIRROI_AVAILABLE or airroi_client is None:
+            return jsonify({
+                'success': False,
+                'message': 'Airroi service is not available',
+                'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
+            })
+
+        if not os.getenv('AIRROI_API_KEY'):
+            return jsonify({
+                'success': True,
+                'data': None,
+                'message': 'AIRROI_API_KEY not configured — set it in environment variables',
+                'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
+            })
+
+        print(f"[Airroi] SA intelligence request for {postcode}, {bedrooms} beds")
+        result = airroi_client.get_sa_market_intelligence(postcode, bedrooms=bedrooms)
+
+        return jsonify({
+            'success': result.get('success', False),
+            'data': result,
+            'postcode': postcode,
+            'bedrooms': bedrooms,
+            'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
+        })
+
+    except Exception as e:
+        print(f"[Airroi] SA intelligence error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': str(e),
+            'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2',
+        })
+
+
+@app.route('/api/airroi/market-summary', methods=['POST'])
+@limiter.limit("20 per minute")
+def get_airroi_market_summary():
+    """Lightweight endpoint: just market summary for a postcode ($0.05)."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        if not AIRROI_AVAILABLE or airroi_client is None or not os.getenv('AIRROI_API_KEY'):
+            return jsonify({'success': False, 'message': 'Airroi API not configured'})
+
+        result = airroi_client.get_market_summary(postcode)
+        has_error = 'error' in result
+        return jsonify({
+            'success': not has_error,
+            'data': result if not has_error else None,
+            'error': result.get('error') if has_error else None,
+        })
+
+    except Exception as e:
+        print(f"[Airroi] Market summary error: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/airroi/nearby-listings', methods=['POST'])
+@limiter.limit("10 per minute")
+def get_airroi_nearby_listings():
+    """Nearby Airbnb listings for a postcode ($0.25)."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.get_json()
+        postcode = data.get('postcode', '').strip().upper()
+        bedrooms = int(data.get('bedrooms', 2))
+        radius_km = float(data.get('radius_km', 3.0))
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
+
+        if not AIRROI_AVAILABLE or airroi_client is None or not os.getenv('AIRROI_API_KEY'):
+            return jsonify({'success': False, 'message': 'Airroi API not configured'})
+
+        result = airroi_client.get_nearby_listings(postcode, radius_km=radius_km, bedrooms=bedrooms)
+        has_error = 'error' in result
+        return jsonify({
+            'success': not has_error,
+            'data': result if not has_error else None,
+            'error': result.get('error') if has_error else None,
+        })
+
+    except Exception as e:
+        print(f"[Airroi] Nearby listings error: {e}")
+        return jsonify({'success': False, 'message': str(e)})
 
 
 if __name__ == '__main__':
