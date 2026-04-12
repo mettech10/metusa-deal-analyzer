@@ -234,32 +234,51 @@ def _get_supabase() -> Optional[Any]:
 # client-side via JS to survive layout tweaks without re-deploying python.
 PARSE_JS = r"""
 () => {
-  // Promoted-listing keywords that appear in SpareRoom card markup:
-  //   bold-ad, featured, boosted, sponsored, promoted
-  const PROMO_RE = /\b(boosted|featured|sponsored|promoted|bold[-\s]?ad|new[\s-]?today)\b/i;
+  // Promoted / paid-ad badge text. "New today" is EXCLUDED — it's shown
+  // on genuine new listings, not just promoted ones, so treating it as
+  // paid would reject legit comps.
+  const PROMO_TEXT_RE = /\b(boosted|featured|sponsored|promoted|bold[-\s]?ad)\b/i;
+
+  // fad_click.pl URLs are SpareRoom's paid-ad redirect endpoint — if a
+  // card's primary link points here, it's a paid ad no matter what the
+  // text says.
+  const isPaidHref = (href) => /\/(?:flatshare|ad)\/fad_click\.pl/i.test(href || '');
+
+  const normaliseId = (href) => {
+    if (!href) return '';
+    const m = href.match(/flatshare_id=(\d+)/) || href.match(/fad_id=(\d+)/);
+    return m ? m[1] : href;  // stable key for dedupe
+  };
 
   const extract = (card, anchor) => {
     const a = anchor ||
-              card.querySelector('a[href*="flatshare_detail"], a[href*="/flatshare/"]') ||
+              card.querySelector('a[href*="flatshare_detail"], a[href*="fad_click.pl"], a[href*="/flatshare/"]') ||
               card.querySelector('a');
     const img = card.querySelector('img');
     const text = (card.innerText || '').trim();
+    const href = (a && a.href) || '';
 
     // ── Promoted / featured detection ────────────────────────────────
-    // Check class names on the card and any child, plus any tag with
-    // text matching the promoted regex (covers both badge labels and
-    // inline "Boosted!" strings).
+    // 1. Definitive: href points to fad_click.pl (paid-ad redirect)
+    // 2. Class names on the card itself (NOT descendants — too noisy)
+    // 3. Card inner text contains a promo badge word
     let isPromoted = false;
-    const classBlob = ((card.className || '') + ' ' +
-      Array.from(card.querySelectorAll('[class*="bold"], [class*="boost"], [class*="feature"], [class*="promo"], [class*="sponsor"]'))
-        .map(el => el.className || '').join(' ')).toLowerCase();
-    if (/bold[-_]?ad|boost|featur|promo|sponsor/.test(classBlob)) isPromoted = true;
-    if (!isPromoted && PROMO_RE.test(text)) isPromoted = true;
+    let promoReason = '';
+    if (isPaidHref(href)) {
+      isPromoted = true;
+      promoReason = 'fad_click_url';
+    } else {
+      const ownClass = (card.className || '').toLowerCase();
+      if (/bold[-_]?ad|boost|featur|promo|sponsor/.test(ownClass)) {
+        isPromoted = true;
+        promoReason = 'class:' + ownClass.slice(0, 40);
+      } else if (PROMO_TEXT_RE.test(text)) {
+        isPromoted = true;
+        promoReason = 'text_badge';
+      }
+    }
 
     // ── Explicit location element ────────────────────────────────────
-    // SpareRoom cards usually have a span/div with the neighbourhood
-    // name + postcode outcode. Try the common selectors, then fall back
-    // to anything containing a UK postcode outcode in innerText.
     let locationText = '';
     const locEl = card.querySelector(
       '.listingLocation, .listing-location, .location, ' +
@@ -268,35 +287,81 @@ PARSE_JS = r"""
     if (locEl) locationText = (locEl.innerText || '').trim();
 
     return {
-      href: (a && a.href) || '',
+      href: href,
       title: ((card.querySelector('h2, h3, .listingTitle, .listing-title') || a || {}).innerText || '').trim().slice(0, 160),
       text: text.slice(0, 1200),
       image: (img && (img.src || img.getAttribute('data-src'))) || '',
-      listingId: card.getAttribute('data-listing-id') || '',
+      listingId: card.getAttribute('data-listing-id') || normaliseId(href),
       locationText: locationText.slice(0, 120),
       isPromoted: isPromoted,
+      promoReason: promoReason,
+      dedupeKey: normaliseId(href),
     };
   };
 
-  const cards = Array.from(document.querySelectorAll(
+  // Pass 1: structured card containers
+  const cardsRaw = Array.from(document.querySelectorAll(
     'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
     'li.listing-result, li.panel-listing'
   ));
-  if (cards.length > 0) {
-    return cards.map(c => extract(c, null));
-  }
 
-  // Fallback: any anchor pointing at flatshare_detail
+  // Pass 2: anchor fallback — always run, then merge for maximum coverage
   const anchors = Array.from(document.querySelectorAll(
-    'a[href*="flatshare_detail.pl"], a[href*="/flatshare/flatshare_detail"]'
+    'a[href*="flatshare_detail.pl"]'
   ));
-  const seen = new Set();
-  return anchors.map(a => {
-    if (seen.has(a.href)) return null;
-    seen.add(a.href);
+
+  const results = [];
+  const seenKeys = new Set();
+  const pushUnique = (obj) => {
+    const k = obj.dedupeKey || obj.href;
+    if (!k || seenKeys.has(k)) return;
+    seenKeys.add(k);
+    results.push(obj);
+  };
+
+  cardsRaw.forEach(c => pushUnique(extract(c, null)));
+  anchors.forEach(a => {
     const card = a.closest('li, article, div') || a;
-    return extract(card, a);
-  }).filter(Boolean);
+    pushUnique(extract(card, a));
+  });
+
+  return results;
+}
+"""
+
+DIAG_JS = r"""
+() => {
+  const body = (document.body && document.body.innerText) || '';
+  return {
+    cards_selector_count: document.querySelectorAll(
+      'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
+      'li.listing-result, li.panel-listing'
+    ).length,
+    anchors_count: document.querySelectorAll('a[href*="flatshare_detail.pl"]').length,
+    paid_anchors_count: document.querySelectorAll('a[href*="fad_click.pl"]').length,
+    body_text_len: body.length,
+    title: document.title || '',
+    has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches/i.test(body),
+    main_list_classes: Array.from(document.querySelectorAll('ul, ol'))
+      .map(el => el.className || '')
+      .filter(c => /list|result|panel/i.test(c))
+      .slice(0, 10),
+    results_count_badge: (body.match(/(\d[\d,]*)\s+results?/i) || [])[0] || '',
+  };
+}
+"""
+
+SCROLL_JS = r"""
+async () => {
+  // SpareRoom lazy-loads additional cards as you scroll past the first
+  // "featured at top" bucket. Scroll in 4 chunks with brief pauses so
+  // everything below the fold hydrates before we extract.
+  const step = Math.max(600, window.innerHeight);
+  for (let y = 0; y < 5000; y += step) {
+    window.scrollTo(0, y);
+    await new Promise(r => setTimeout(r, 400));
+  }
+  window.scrollTo(0, 0);
 }
 """
 
@@ -518,6 +583,7 @@ class SpareRoomScraper:
             "error": None,
             "parse_stats": {},
             "raw_sample": [],
+            "dom_diag": {},
         }
 
         if not PLAYWRIGHT_AVAILABLE:
@@ -558,6 +624,20 @@ class SpareRoomScraper:
                 except Exception:
                     pass
 
+                # Scroll to trigger lazy-load of results below the featured
+                # section, then give the DOM a moment to settle.
+                try:
+                    page.evaluate(SCROLL_JS)
+                    page.wait_for_timeout(800)
+                except Exception as _scroll_err:  # noqa: BLE001
+                    print(f"[SpareRoom] scroll warn: {_scroll_err}")
+
+                # DOM diagnostics first — tells us what's on the page
+                try:
+                    result["dom_diag"] = page.evaluate(DIAG_JS) or {}
+                except Exception as _diag_err:  # noqa: BLE001
+                    result["dom_diag"] = {"error": str(_diag_err)[:200]}
+
                 raw_cards = page.evaluate(PARSE_JS) or []
                 result["raw_cards_count"] = len(raw_cards)
                 print(f"[SpareRoom] Extracted {len(raw_cards)} raw cards for {district}")
@@ -569,10 +649,11 @@ class SpareRoomScraper:
                         "title": (c.get("title") or "")[:80],
                         "locationText": (c.get("locationText") or "")[:60],
                         "isPromoted": bool(c.get("isPromoted")),
+                        "promoReason": c.get("promoReason") or "",
                         "listingId": c.get("listingId") or "",
                         "text_preview": (c.get("text") or "")[:200],
                     }
-                    for c in raw_cards[:5]
+                    for c in raw_cards[:8]
                 ]
 
                 stats: Dict[str, Any] = {}
