@@ -55,8 +55,8 @@ except ImportError:
 
 
 # ── Config ───────────────────────────────────────────────────────────────────
-LIVE_TIMEOUT_SECS = 30
-BULK_PAGE_TIMEOUT_SECS = 45
+LIVE_TIMEOUT_SECS = 60
+BULK_PAGE_TIMEOUT_SECS = 60
 BULK_SKIP_DAYS = 13
 DEFAULT_CONCURRENCY = int(os.environ.get("SCRAPER_CONCURRENCY", "5") or 5)
 DEFAULT_DELAY_MS = int(os.environ.get("SCRAPER_DELAY_MS", "1500") or 1500)
@@ -724,7 +724,7 @@ class SpareRoomScraper:
                 try:
                     page.goto("https://www.spareroom.co.uk/",
                               wait_until="domcontentloaded",
-                              timeout=15000)
+                              timeout=10000)
                     # Accept cookies on the homepage
                     for sel in (
                         "#onetrust-accept-btn-handler",
@@ -732,18 +732,13 @@ class SpareRoomScraper:
                     ):
                         try:
                             btn = page.locator(sel).first
-                            if btn and btn.is_visible(timeout=500):
-                                btn.click(timeout=2000)
+                            if btn and btn.is_visible(timeout=300):
+                                btn.click(timeout=1500)
                                 print(f"[SpareRoom] Warm-up: accepted cookies via {sel}")
                                 break
                         except Exception:
                             continue
-                    # Let the homepage settle so session cookies drop
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=5000)
-                    except PlaywrightTimeout:
-                        pass
-                    page.wait_for_timeout(1500)
+                    page.wait_for_timeout(800)
                 except Exception as _warm_err:  # noqa: BLE001
                     print(f"[SpareRoom] Warm-up warning: {_warm_err}")
 
