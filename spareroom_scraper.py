@@ -382,6 +382,21 @@ DIAG_JS = r"""
   // what's on the page past the usual header/nav chrome.
   const bodySnippet = body.slice(500, 2500);
 
+  // Scan raw HTML for any flatshare_id occurrences (even in data-*
+  // attributes, script tags, JSON blobs) — this tells us if the real
+  // results are in the DOM but not rendered as anchors.
+  const htmlIdMatches = Array.from(html.matchAll(/flatshare_id[=:"']?\s*["']?(\d{6,})/gi));
+  const uniqueHtmlIds = Array.from(new Set(htmlIdMatches.map(m => m[1])));
+
+  // Look for JSON-ish blobs that might contain results
+  const jsonMatches = Array.from(html.matchAll(/"listing[s]?"\s*:\s*\[/gi));
+
+  // Look for elements with display:none that might contain the results
+  const hiddenResults = document.querySelectorAll(
+    '[style*="display:none"] .listing-result, [style*="display: none"] .listing-result, ' +
+    '[hidden] .listing-result, .hidden .listing-result'
+  ).length;
+
   return {
     cards_selector_count: document.querySelectorAll(
       'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
@@ -394,6 +409,10 @@ DIAG_JS = r"""
     paid_anchors_count: document.querySelectorAll('a[href*="fad_click.pl"]').length,
     body_text_len: body.length,
     html_len: html.length,
+    unique_flatshare_ids_in_html: uniqueHtmlIds.length,
+    first_html_ids: uniqueHtmlIds.slice(0, 10),
+    json_blob_count: jsonMatches.length,
+    hidden_results_count: hiddenResults,
     title: document.title || '',
     has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches|widen your search|try a different/i.test(body),
     has_login_wall: hasLoginWall,
@@ -702,6 +721,33 @@ class SpareRoomScraper:
                     result["page_title"] = (page.title() or "")[:200]
                     result["page_url"] = page.url or ""
                 except Exception:
+                    pass
+
+                # Accept cookie consent via real Playwright click (more
+                # reliable than JS click — triggers the site's real event
+                # handlers). Best-effort; ignore if the button isn't there.
+                for sel in (
+                    "#onetrust-accept-btn-handler",
+                    "button#onetrust-accept-btn-handler",
+                    "button[class*='accept-all']",
+                    "button[aria-label*='accept' i]",
+                ):
+                    try:
+                        btn = page.locator(sel).first
+                        if btn and btn.is_visible(timeout=500):
+                            btn.click(timeout=2000)
+                            print(f"[SpareRoom] Accepted cookies via {sel}")
+                            page.wait_for_timeout(1000)
+                            break
+                    except Exception:
+                        continue
+
+                # Wait for any in-flight XHRs to settle (SpareRoom fetches
+                # the real results list via an XHR that only fires after
+                # cookie consent is accepted).
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except PlaywrightTimeout:
                     pass
 
                 # Scroll to trigger lazy-load of results below the featured
