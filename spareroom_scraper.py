@@ -1067,6 +1067,42 @@ class SpareRoomScraper:
 
         # Locate the main postcode input. SpareRoom's form has an input
         # named "search" or an id like "searchbox_input" / "SearchForm_search".
+        # Diagnostic: dump what forms/inputs actually exist on the page.
+        # This runs on every call so we can see the structure in production.
+        try:
+            form_diag = page.evaluate("""() => {
+                const forms = Array.from(document.querySelectorAll('form'));
+                return forms.slice(0, 3).map(f => ({
+                    action: f.getAttribute('action') || '',
+                    method: f.getAttribute('method') || 'GET',
+                    id: f.id || '',
+                    class: f.className || '',
+                    inputs: Array.from(f.querySelectorAll('input, select, button'))
+                        .slice(0, 20)
+                        .map(el => ({
+                            tag: el.tagName,
+                            type: el.type || '',
+                            name: el.name || '',
+                            id: el.id || '',
+                            placeholder: el.placeholder || '',
+                            value: (el.value || '').slice(0, 40),
+                            visible: !!(el.offsetWidth || el.offsetHeight),
+                        })),
+                }));
+            }""") or []
+            result["form_diag"] = form_diag
+            # Log a summary
+            for i, f in enumerate(form_diag):
+                visible_inputs = [inp for inp in f.get("inputs", []) if inp.get("visible")]
+                print(f"[SpareRoom] form-submit: form[{i}] action={f.get('action')!r} "
+                      f"visible_inputs={len(visible_inputs)}")
+                for inp in visible_inputs[:6]:
+                    print(f"                         - {inp.get('tag')} "
+                          f"type={inp.get('type')!r} name={inp.get('name')!r} "
+                          f"id={inp.get('id')!r}")
+        except Exception as _form_diag_err:  # noqa: BLE001
+            print(f"[SpareRoom] form-submit: form_diag failed: {_form_diag_err}")
+
         input_selectors = [
             "input[name='search']",
             "input[id='SearchForm_search']",
@@ -1082,6 +1118,7 @@ class SpareRoomScraper:
                 if inp and inp.is_visible(timeout=500):
                     inp.fill(district, timeout=2000)
                     filled_input = inp
+                    result["filled_selector"] = sel
                     print(f"[SpareRoom] form-submit: filled {sel} with {district!r}")
                     break
             except Exception:

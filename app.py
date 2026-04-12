@@ -4449,6 +4449,8 @@ def scraper_debug():
         'parse_stats': debug.get('parse_stats') or {},
         'raw_sample': debug.get('raw_sample') or [],
         'dom_diag': debug.get('dom_diag') or {},
+        'form_diag': debug.get('form_diag') or [],
+        'filled_selector': debug.get('filled_selector') or '',
     })
 
 
