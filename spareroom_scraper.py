@@ -654,15 +654,48 @@ class SpareRoomScraper:
         """Fetch SpareRoom listings for a single postcode, right now.
 
         Used by ``/api/comparables`` to replace ``scrape_spareroom_with_apify``.
-        60-second hard ceiling. Returns a list of listing dicts in the canonical
-        shape — EMPTY list on any failure (caller's existing fallback handles it).
+        60-second hard ceiling per attempt (2 attempts max). Returns a list of
+        listing dicts in the canonical shape — EMPTY list on any failure
+        (caller's existing fallback handles it).
 
         Always uses form-submission mode (mode="form") because SpareRoom
         serves a "featured ads only" teaser page for direct-URL navigation —
         the form gives us a real search_id token that unlocks actual results.
+
+        Retries once on transient errors (TargetClosedError, timeout, form
+        submission failure) since Bright Data's Scraping Browser sessions
+        can occasionally die mid-page-load.
         """
-        debug = self.scrape_live_debug(postcode, max_results=max_results, mode="form")
-        return debug.get("listings", [])
+        retries = 2
+        for attempt in range(1, retries + 1):
+            debug = self.scrape_live_debug(postcode, max_results=max_results, mode="form")
+            listings = debug.get("listings", [])
+            error = debug.get("error")
+
+            if listings:
+                return listings
+
+            if not error:
+                # No error but no results — genuine empty search
+                return []
+
+            # Retry on transient errors
+            is_transient = any(kw in (error or "") for kw in [
+                "TargetClosedError", "timeout", "could not submit",
+                "Execution context", "Target page",
+            ])
+            if is_transient and attempt < retries:
+                wait_secs = 5 * attempt
+                print(f"[SpareRoom] LIVE retry {attempt}/{retries} after "
+                      f"{wait_secs}s — error was: {error[:80]}")
+                time.sleep(wait_secs)
+                continue
+
+            # Non-transient error or last attempt — give up
+            print(f"[SpareRoom] LIVE giving up after {attempt} attempt(s): {error[:120]}")
+            return []
+
+        return []
 
     def scrape_live_debug(
         self,
