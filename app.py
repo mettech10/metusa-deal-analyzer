@@ -4439,6 +4439,8 @@ def scraper_debug():
         'elapsed_ms': debug.get('elapsed_ms'),
         'error': debug.get('error'),
         'sample': sample,
+        'parse_stats': debug.get('parse_stats') or {},
+        'raw_sample': debug.get('raw_sample') or [],
     })
 
 

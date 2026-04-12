@@ -306,7 +306,11 @@ _POSTCODE_RE = re.compile(
 )
 
 
-def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dict[str, Any]]:
+def _parse_raw_cards(
+    raw_cards: List[Dict[str, Any]],
+    location: str,
+    stats: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     """Turn the raw card objects pulled from the DOM into the canonical shape.
 
     Filters out SpareRoom sponsored/featured listings whose postcode area code
@@ -332,19 +336,35 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
     rejected_wrong_area = 0
     rejected_promoted = 0
     rejected_no_id = 0
+    rejected_dupes = 0
+    rejection_samples: List[Dict[str, Any]] = []
+
+    def _sample(reason: str, card: Dict[str, Any]) -> None:
+        if len(rejection_samples) < 6:
+            rejection_samples.append({
+                "reason": reason,
+                "href": (card.get("href") or "")[:160],
+                "title": (card.get("title") or "")[:80],
+                "locationText": (card.get("locationText") or "")[:60],
+                "isPromoted": bool(card.get("isPromoted")),
+                "text_preview": (card.get("text") or "")[:140],
+            })
 
     for card in raw_cards:
         # ── Pass 1: promoted / bold-ad drop ─────────────────────────────
         if card.get("isPromoted"):
             rejected_promoted += 1
+            _sample("promoted", card)
             continue
 
         href = _abs_url(card.get("href", ""))
         listing_id = card.get("listingId") or _extract_listing_id(href) or ""
         if not listing_id:
             rejected_no_id += 1
+            _sample("no_id", card)
             continue
         if listing_id in seen_ids:
+            rejected_dupes += 1
             continue
         seen_ids.add(listing_id)
 
@@ -398,6 +418,7 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
             card_code = _area_code(area)
             if card_code and card_code != search_code:
                 rejected_wrong_area += 1
+                _sample(f"wrong_area:{card_code}!={search_code}", card)
                 print(f"[SpareRoom]   skip {listing_id}: area={area!r} "
                       f"(code={card_code!r}) != search={search_code!r}")
                 continue
@@ -419,10 +440,22 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
         })
 
     total_seen = len(raw_cards)
-    if rejected_promoted or rejected_wrong_area or rejected_no_id:
+    if stats is not None:
+        stats.update({
+            "total_raw": total_seen,
+            "kept": len(out),
+            "rejected_promoted": rejected_promoted,
+            "rejected_wrong_area": rejected_wrong_area,
+            "rejected_no_id": rejected_no_id,
+            "rejected_dupes": rejected_dupes,
+            "search_code": search_code,
+            "rejection_samples": rejection_samples,
+        })
+    if rejected_promoted or rejected_wrong_area or rejected_no_id or rejected_dupes:
         print(f"[SpareRoom] Parse stats: {total_seen} raw → {len(out)} kept | "
               f"promoted={rejected_promoted} wrong_area={rejected_wrong_area} "
-              f"no_id={rejected_no_id} (search code={search_code!r})")
+              f"no_id={rejected_no_id} dupes={rejected_dupes} "
+              f"(search code={search_code!r})")
 
     return out
 
@@ -483,6 +516,8 @@ class SpareRoomScraper:
             "page_title": "",
             "page_url": "",
             "error": None,
+            "parse_stats": {},
+            "raw_sample": [],
         }
 
         if not PLAYWRIGHT_AVAILABLE:
@@ -527,7 +562,22 @@ class SpareRoomScraper:
                 result["raw_cards_count"] = len(raw_cards)
                 print(f"[SpareRoom] Extracted {len(raw_cards)} raw cards for {district}")
 
-                listings = _parse_raw_cards(raw_cards, district)
+                # Capture a small sample of raw cards for the debug endpoint
+                result["raw_sample"] = [
+                    {
+                        "href": (c.get("href") or "")[:160],
+                        "title": (c.get("title") or "")[:80],
+                        "locationText": (c.get("locationText") or "")[:60],
+                        "isPromoted": bool(c.get("isPromoted")),
+                        "listingId": c.get("listingId") or "",
+                        "text_preview": (c.get("text") or "")[:200],
+                    }
+                    for c in raw_cards[:5]
+                ]
+
+                stats: Dict[str, Any] = {}
+                listings = _parse_raw_cards(raw_cards, district, stats=stats)
+                result["parse_stats"] = stats
                 result["filtered_count"] = len(listings)
                 if len(listings) > max_results:
                     listings = listings[:max_results]
