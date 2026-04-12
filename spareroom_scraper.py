@@ -1104,9 +1104,9 @@ class SpareRoomScraper:
             print(f"[SpareRoom] form-submit: form_diag failed: {_form_diag_err}")
 
         input_selectors = [
+            "input#search_by_location_field",  # SpareRoom's actual id (confirmed via form_diag)
+            "#filterForm input[name='search']",
             "input[name='search']",
-            "input[id='SearchForm_search']",
-            "input[id*='searchbox']",
             "input[placeholder*='postcode' i]",
             "input[placeholder*='town' i]",
             "input[type='search']",
@@ -1127,74 +1127,71 @@ class SpareRoomScraper:
         if filled_input is None:
             return "could not find search input"
 
-        # Submit the form — 4 strategies tried in order until one navigates:
-        #   1. inp.press('Enter')       — element-level key event, most reliable
-        #   2. submit button click      — if the form has a visible submit btn
-        #   3. form.requestSubmit() JS  — fires native submit event handlers
-        #   4. form.submit() JS         — raw POST, bypasses JS handlers
-        submit_ok = False
-        start_url = page.url
-
-        def _wait_nav(label: str) -> bool:
-            try:
-                page.wait_for_function(
-                    "(startUrl) => location.href !== startUrl",
-                    arg=start_url,
-                    timeout=12000,
-                )
-                page.wait_for_load_state("domcontentloaded", timeout=8000)
-                print(f"[SpareRoom] form-submit: {label} navigated to {page.url[:80]}")
-                return True
-            except Exception as _nav_err:  # noqa: BLE001
-                print(f"[SpareRoom] form-submit: {label} did not navigate "
-                      f"({type(_nav_err).__name__})")
-                return False
-
-        # Strategy 1: press Enter on the input itself
+        # Ensure flatshare_type=offered is selected (the form has a radio
+        # that might default to "wanted" in some sessions)
         try:
-            filled_input.press("Enter", timeout=2000)
-            submit_ok = _wait_nav("Enter")
-        except Exception as e:  # noqa: BLE001
-            print(f"[SpareRoom] form-submit: Enter press threw: {e}")
+            page.check("input#flatshare_type-offered", timeout=1000)
+        except Exception:
+            pass
 
-        # Strategy 2: visible submit button
-        if not submit_ok:
-            for sel in (
-                "button[type='submit']",
-                "input[type='submit']",
-                "button.search-submit",
-                "button[class*='search' i]",
-                "button[class*='submit' i]",
-            ):
-                try:
-                    btn = page.locator(sel).first
-                    if btn and btn.is_visible(timeout=500):
-                        btn.click(timeout=3000)
-                        if _wait_nav(f"click:{sel}"):
-                            submit_ok = True
-                            break
-                except Exception:
-                    continue
+        # Submit the form using page.expect_navigation() which registers
+        # the listener BEFORE the action — no race conditions. We try
+        # three strategies in order until one navigates us to a results
+        # URL containing search_id.
+        submit_ok = False
 
-        # Strategy 3: JS form.requestSubmit()
+        # Strategy 1: click the real submit button (#submitButton)
         if not submit_ok:
             try:
-                page.evaluate("""() => {
-                    const inp = document.querySelector(
-                        "input[name='search'], input#SearchForm_search, " +
-                        "input[type='search']"
-                    );
-                    if (inp && inp.form) {
-                        if (typeof inp.form.requestSubmit === 'function') {
-                            inp.form.requestSubmit();
-                        } else {
-                            inp.form.submit();
-                        }
-                    }
-                }""")
-                submit_ok = _wait_nav("JS form.submit")
+                btn = page.locator("#submitButton").first
+                if btn.is_visible(timeout=1000):
+                    with page.expect_navigation(
+                        url=lambda u: "search_id=" in u or "search.pl" in u,
+                        timeout=15000,
+                        wait_until="domcontentloaded",
+                    ):
+                        btn.click(timeout=3000)
+                    submit_ok = True
+                    print(f"[SpareRoom] form-submit: #submitButton click → {page.url[:100]}")
             except Exception as e:  # noqa: BLE001
-                print(f"[SpareRoom] form-submit: JS submit threw: {e}")
+                print(f"[SpareRoom] form-submit: #submitButton failed: "
+                      f"{type(e).__name__}: {str(e)[:100]}")
+
+        # Strategy 2: press Enter on the input with navigation listener
+        if not submit_ok:
+            try:
+                with page.expect_navigation(
+                    url=lambda u: "search_id=" in u or "search.pl" in u,
+                    timeout=15000,
+                    wait_until="domcontentloaded",
+                ):
+                    filled_input.press("Enter", timeout=2000)
+                submit_ok = True
+                print(f"[SpareRoom] form-submit: Enter press → {page.url[:100]}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[SpareRoom] form-submit: Enter failed: "
+                      f"{type(e).__name__}: {str(e)[:100]}")
+
+        # Strategy 3: JS form.submit() on #filterForm
+        if not submit_ok:
+            try:
+                with page.expect_navigation(
+                    url=lambda u: "search_id=" in u or "search.pl" in u,
+                    timeout=15000,
+                    wait_until="domcontentloaded",
+                ):
+                    page.evaluate("""() => {
+                        const f = document.querySelector('#filterForm, form.search-widget-form');
+                        if (f) {
+                            if (typeof f.requestSubmit === 'function') f.requestSubmit();
+                            else f.submit();
+                        }
+                    }""")
+                submit_ok = True
+                print(f"[SpareRoom] form-submit: JS submit → {page.url[:100]}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[SpareRoom] form-submit: JS submit failed: "
+                      f"{type(e).__name__}: {str(e)[:100]}")
 
         if not submit_ok:
             return "could not submit search form"
