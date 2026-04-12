@@ -54,14 +54,26 @@ def _build_ws_url() -> Optional[str]:
 
     Returns None if required credentials are missing — callers should
     treat that as "scraper unavailable" and fall back gracefully.
+
+    If BRIGHTDATA_COUNTRY is set (e.g. "gb"), it's appended to the
+    username as -country-<code>. This forces Bright Data's residential
+    proxy to exit from the specified country — critical for SpareRoom
+    which shows a locale-chooser modal blocking the search form when
+    accessed from a non-UK IP.
     """
     username = _env("BRIGHTDATA_USERNAME")
     password = _env("BRIGHTDATA_PASSWORD")
     host = _env("BRIGHTDATA_HOST", "brd.superproxy.io")
     port = _env("BRIGHTDATA_PORT", "9222")
+    country = _env("BRIGHTDATA_COUNTRY", "").strip().lower()
 
     if not username or not password:
         return None
+
+    # Append -country-<code> if set and not already present
+    if country and "-country-" not in username:
+        username = f"{username}-country-{country}"
+        print(f"[BrightData] Forcing exit country: {country}")
 
     user_enc = urllib.parse.quote(username, safe="")
     pass_enc = urllib.parse.quote(password, safe="")

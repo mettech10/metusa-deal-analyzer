@@ -1065,6 +1065,31 @@ class SpareRoomScraper:
             except Exception:
                 continue
 
+        # Dismiss country-chooser modal if it popped up. SpareRoom shows
+        # this when accessed from a non-UK IP and it blocks the search
+        # form underneath. Select UK (country_id=1) and submit.
+        try:
+            country_form = page.locator("#country_id_form").first
+            if country_form.is_visible(timeout=500):
+                print(f"[SpareRoom] form-submit: country modal present — selecting UK")
+                uk_radio = page.locator(
+                    "#country_id_form input[name='country_id'][value='1']"
+                ).first
+                uk_radio.check(timeout=1500)
+                with page.expect_navigation(timeout=10000, wait_until="domcontentloaded"):
+                    page.locator("#country_id_form button[type='submit']").first.click(timeout=2000)
+                print(f"[SpareRoom] form-submit: country modal dismissed → {page.url[:80]}")
+                # Re-navigate to the search form in case the country submit
+                # landed us on the homepage
+                if "/flatshare" not in page.url:
+                    page.goto(
+                        "https://www.spareroom.co.uk/flatshare/",
+                        wait_until="domcontentloaded",
+                        timeout=10000,
+                    )
+        except Exception as _country_err:  # noqa: BLE001
+            print(f"[SpareRoom] form-submit: country modal check: {_country_err}")
+
         # Locate the main postcode input. SpareRoom's form has an input
         # named "search" or an id like "searchbox_input" / "SearchForm_search".
         # Diagnostic: dump what forms/inputs actually exist on the page.

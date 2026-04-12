@@ -51,6 +51,10 @@ services:
         value: brd.superproxy.io
       - key: BRIGHTDATA_PORT
         value: "9222"
+      # Force UK exit IP — SpareRoom shows a country-chooser modal
+      # blocking the search form when accessed from a non-UK IP.
+      - key: BRIGHTDATA_COUNTRY
+        value: gb
       - key: SCRAPER_SECRET
         sync: false
       - key: SCRAPER_CONCURRENCY
