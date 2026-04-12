@@ -181,12 +181,15 @@ def _build_search_url(location: str, offset: int = 0) -> str:
 
     if is_postcode_like:
         loc = first_token.replace(" ", "+")
-        # NOTE: keep this URL byte-identical to the first working test.
-        # Adding ``per=100`` appears to trigger Bright Data's robots.txt
-        # enforcement even though the base URL is allowed.
+        # 5-mile radius: the original 2 miles returned 0 genuine results in
+        # less dense areas (postcode search would fall back to nationwide
+        # "Featured/Boosted" ads, which we then rejected, leaving the page
+        # empty). 5 miles is a reasonable HMO comparable range.
+        # NOTE: do NOT add per=100 — it triggers Bright Data's robots.txt
+        # enforcement ("brob" error) even though the base URL is allowed.
         return (
             f"https://www.spareroom.co.uk/flatshare/?search_by=postcode"
-            f"&search={loc}&miles_from_max=2&rooms_for=0&rooms_offered=1"
+            f"&search={loc}&miles_from_max=5&rooms_for=0&rooms_offered=1"
             f"&mode=list&offset={offset}"
         )
 
@@ -299,11 +302,30 @@ PARSE_JS = r"""
     };
   };
 
-  // Pass 1: structured card containers
-  const cardsRaw = Array.from(document.querySelectorAll(
-    'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
-    'li.listing-result, li.panel-listing'
-  ));
+  // Pass 1: structured card containers.
+  // Prefer children of the main .listing-results container — everything
+  // outside of it (the "Featured at top" strip, sidebar recommendations,
+  // etc.) is noise we want to drop. Fall back to broader selectors only
+  // when the main list is empty/missing.
+  const mainList = document.querySelector('.listing-results, ul.listing-results, ol.listing-results');
+  let cardsRaw;
+  if (mainList) {
+    cardsRaw = Array.from(mainList.querySelectorAll(
+      'li[data-listing-id], li.listing-result, li.panel-listing, ' +
+      'article.panel-listing, article[class*="listing"]'
+    ));
+    // Also include direct <li> children that wrap anchors to flatshare_detail
+    if (cardsRaw.length === 0) {
+      cardsRaw = Array.from(mainList.querySelectorAll('li')).filter(
+        li => li.querySelector('a[href*="flatshare_detail.pl"]')
+      );
+    }
+  } else {
+    cardsRaw = Array.from(document.querySelectorAll(
+      'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
+      'li.listing-result, li.panel-listing'
+    ));
+  }
 
   // Pass 2: anchor fallback — always run, then merge for maximum coverage
   const anchors = Array.from(document.querySelectorAll(
@@ -332,16 +354,24 @@ PARSE_JS = r"""
 DIAG_JS = r"""
 () => {
   const body = (document.body && document.body.innerText) || '';
+  const mainList = document.querySelector('.listing-results, ul.listing-results, ol.listing-results');
+  const mainAnchors = mainList
+    ? Array.from(mainList.querySelectorAll('a[href*="flatshare_detail.pl"]'))
+    : [];
+  const allAnchors = Array.from(document.querySelectorAll('a[href*="flatshare_detail.pl"]'));
   return {
     cards_selector_count: document.querySelectorAll(
       'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
       'li.listing-result, li.panel-listing'
     ).length,
-    anchors_count: document.querySelectorAll('a[href*="flatshare_detail.pl"]').length,
+    anchors_count: allAnchors.length,
+    main_list_anchors: mainAnchors.length,
+    main_list_present: !!mainList,
+    main_list_li_count: mainList ? mainList.querySelectorAll('li').length : 0,
     paid_anchors_count: document.querySelectorAll('a[href*="fad_click.pl"]').length,
     body_text_len: body.length,
     title: document.title || '',
-    has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches/i.test(body),
+    has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches|widen your search|try a different/i.test(body),
     main_list_classes: Array.from(document.querySelectorAll('ul, ol'))
       .map(el => el.className || '')
       .filter(c => /list|result|panel/i.test(c))
