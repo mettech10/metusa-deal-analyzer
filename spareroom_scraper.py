@@ -383,19 +383,32 @@ DIAG_JS = r"""
   const bodySnippet = body.slice(500, 2500);
 
   // Scan raw HTML for any flatshare_id occurrences (even in data-*
-  // attributes, script tags, JSON blobs) — this tells us if the real
-  // results are in the DOM but not rendered as anchors.
-  const htmlIdMatches = Array.from(html.matchAll(/flatshare_id[=:"']?\s*["']?(\d{6,})/gi));
-  const uniqueHtmlIds = Array.from(new Set(htmlIdMatches.map(m => m[1])));
-
-  // Look for JSON-ish blobs that might contain results
-  const jsonMatches = Array.from(html.matchAll(/"listing[s]?"\s*:\s*\[/gi));
-
-  // Look for elements with display:none that might contain the results
-  const hiddenResults = document.querySelectorAll(
-    '[style*="display:none"] .listing-result, [style*="display: none"] .listing-result, ' +
-    '[hidden] .listing-result, .hidden .listing-result'
-  ).length;
+  // attributes, script tags, JSON blobs). Use a plain regex loop
+  // rather than matchAll for broader JS engine compatibility.
+  let uniqueHtmlIds = [];
+  let jsonBlobCount = 0;
+  let hiddenResults = 0;
+  try {
+    const idRe = /flatshare_id[=:][^0-9]{0,3}(\d{6,})/gi;
+    const found = new Set();
+    let m;
+    while ((m = idRe.exec(html)) !== null) {
+      found.add(m[1]);
+      if (found.size > 200) break;  // safety cap
+    }
+    uniqueHtmlIds = Array.from(found);
+    const jsonRe = /"listings?"\s*:\s*\[/gi;
+    while ((m = jsonRe.exec(html)) !== null) {
+      jsonBlobCount++;
+      if (jsonBlobCount > 20) break;
+    }
+    hiddenResults = document.querySelectorAll(
+      '[style*="display:none"] .listing-result, [style*="display: none"] .listing-result, ' +
+      '[hidden] .listing-result, .hidden .listing-result'
+    ).length;
+  } catch (e) {
+    uniqueHtmlIds = ['SCAN_ERR:' + (e.message || '').slice(0, 80)];
+  }
 
   return {
     cards_selector_count: document.querySelectorAll(
@@ -410,8 +423,8 @@ DIAG_JS = r"""
     body_text_len: body.length,
     html_len: html.length,
     unique_flatshare_ids_in_html: uniqueHtmlIds.length,
-    first_html_ids: uniqueHtmlIds.slice(0, 10),
-    json_blob_count: jsonMatches.length,
+    first_html_ids: uniqueHtmlIds.slice(0, 15),
+    json_blob_count: jsonBlobCount,
     hidden_results_count: hiddenResults,
     title: document.title || '',
     has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches|widen your search|try a different/i.test(body),
