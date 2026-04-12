@@ -181,10 +181,13 @@ def _build_search_url(location: str, offset: int = 0) -> str:
 
     if is_postcode_like:
         loc = first_token.replace(" ", "+")
+        # NOTE: keep this URL byte-identical to the first working test.
+        # Adding ``per=100`` appears to trigger Bright Data's robots.txt
+        # enforcement even though the base URL is allowed.
         return (
             f"https://www.spareroom.co.uk/flatshare/?search_by=postcode"
             f"&search={loc}&miles_from_max=2&rooms_for=0&rooms_offered=1"
-            f"&mode=list&per=100&offset={offset}"
+            f"&mode=list&offset={offset}"
         )
 
     # Place-name branch — use the /flatshares/<city> path which is
@@ -193,7 +196,7 @@ def _build_search_url(location: str, offset: int = 0) -> str:
     city_slug = raw.lower().replace(" ", "-")
     return (
         f"https://www.spareroom.co.uk/flatshares/{city_slug}"
-        f"?mode=list&per=100&offset={offset}"
+        f"?mode=list&offset={offset}"
     )
 
 
@@ -231,43 +234,76 @@ def _get_supabase() -> Optional[Any]:
 # client-side via JS to survive layout tweaks without re-deploying python.
 PARSE_JS = r"""
 () => {
+  // Promoted-listing keywords that appear in SpareRoom card markup:
+  //   bold-ad, featured, boosted, sponsored, promoted
+  const PROMO_RE = /\b(boosted|featured|sponsored|promoted|bold[-\s]?ad|new[\s-]?today)\b/i;
+
+  const extract = (card, anchor) => {
+    const a = anchor ||
+              card.querySelector('a[href*="flatshare_detail"], a[href*="/flatshare/"]') ||
+              card.querySelector('a');
+    const img = card.querySelector('img');
+    const text = (card.innerText || '').trim();
+
+    // ── Promoted / featured detection ────────────────────────────────
+    // Check class names on the card and any child, plus any tag with
+    // text matching the promoted regex (covers both badge labels and
+    // inline "Boosted!" strings).
+    let isPromoted = false;
+    const classBlob = ((card.className || '') + ' ' +
+      Array.from(card.querySelectorAll('[class*="bold"], [class*="boost"], [class*="feature"], [class*="promo"], [class*="sponsor"]'))
+        .map(el => el.className || '').join(' ')).toLowerCase();
+    if (/bold[-_]?ad|boost|featur|promo|sponsor/.test(classBlob)) isPromoted = true;
+    if (!isPromoted && PROMO_RE.test(text)) isPromoted = true;
+
+    // ── Explicit location element ────────────────────────────────────
+    // SpareRoom cards usually have a span/div with the neighbourhood
+    // name + postcode outcode. Try the common selectors, then fall back
+    // to anything containing a UK postcode outcode in innerText.
+    let locationText = '';
+    const locEl = card.querySelector(
+      '.listingLocation, .listing-location, .location, ' +
+      '[class*="ocation"], [class*="rea-name"], [class*="ostcode"]'
+    );
+    if (locEl) locationText = (locEl.innerText || '').trim();
+
+    return {
+      href: (a && a.href) || '',
+      title: ((card.querySelector('h2, h3, .listingTitle, .listing-title') || a || {}).innerText || '').trim().slice(0, 160),
+      text: text.slice(0, 1200),
+      image: (img && (img.src || img.getAttribute('data-src'))) || '',
+      listingId: card.getAttribute('data-listing-id') || '',
+      locationText: locationText.slice(0, 120),
+      isPromoted: isPromoted,
+    };
+  };
+
   const cards = Array.from(document.querySelectorAll(
     'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
     'li.listing-result, li.panel-listing'
   ));
-  if (cards.length === 0) {
-    // Fallback: any anchor pointing at flatshare_detail
-    const anchors = Array.from(document.querySelectorAll(
-      'a[href*="flatshare_detail.pl"], a[href*="/flatshare/flatshare_detail"]'
-    ));
-    const seen = new Set();
-    return anchors.map(a => {
-      const card = a.closest('li, article, div') || a;
-      if (seen.has(a.href)) return null;
-      seen.add(a.href);
-      const text = (card.innerText || '').trim();
-      return {
-        href: a.href || '',
-        title: (a.innerText || '').trim().slice(0, 160),
-        text: text.slice(0, 800),
-        image: (card.querySelector('img') || {}).src || '',
-      };
-    }).filter(Boolean);
+  if (cards.length > 0) {
+    return cards.map(c => extract(c, null));
   }
-  return cards.map(card => {
-    const a = card.querySelector('a[href*="flatshare_detail"], a[href*="/flatshare/"]') ||
-              card.querySelector('a');
-    const img = card.querySelector('img');
-    return {
-      href: (a && a.href) || '',
-      title: ((card.querySelector('h2, h3, .listingTitle, .listing-title') || a || {}).innerText || '').trim().slice(0, 160),
-      text: ((card.innerText) || '').trim().slice(0, 1200),
-      image: (img && (img.src || img.getAttribute('data-src'))) || '',
-      listingId: card.getAttribute('data-listing-id') || '',
-    };
-  });
+
+  // Fallback: any anchor pointing at flatshare_detail
+  const anchors = Array.from(document.querySelectorAll(
+    'a[href*="flatshare_detail.pl"], a[href*="/flatshare/flatshare_detail"]'
+  ));
+  const seen = new Set();
+  return anchors.map(a => {
+    if (seen.has(a.href)) return null;
+    seen.add(a.href);
+    const card = a.closest('li, article, div') || a;
+    return extract(card, a);
+  }).filter(Boolean);
 }
 """
+
+
+_POSTCODE_RE = re.compile(
+    r"\b([A-Z]{1,2}\d{1,2}[A-Z]?)(?:\s*\d[A-Z]{2})?\b"
+)
 
 
 def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dict[str, Any]]:
@@ -279,9 +315,14 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
     filter — we reject them here so HMO rent averages stay geographically
     accurate.
 
-    The filter only runs when ``location`` is postcode-like (e.g. "M14", "LS6",
-    "SE15"). For place-name searches like "Manchester" we can't derive an area
-    code, so no filtering is applied.
+    Two rejection passes:
+      1. Promoted / bold-ad / boosted / featured / sponsored badge → drop
+         unconditionally. These are never useful comps.
+      2. Postcode area mismatch (e.g. card says "PE3" when we searched "M14")
+         → drop. Only applies when ``location`` is postcode-like.
+
+    For place-name searches like "Manchester" we can't derive an area code,
+    so only the promoted filter runs.
     """
     out: List[Dict[str, Any]] = []
     seen_ids: set = set()
@@ -289,16 +330,27 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
     # Area code of the searched location — empty string for place-name searches
     search_code = _area_code(location)
     rejected_wrong_area = 0
+    rejected_promoted = 0
+    rejected_no_id = 0
 
     for card in raw_cards:
+        # ── Pass 1: promoted / bold-ad drop ─────────────────────────────
+        if card.get("isPromoted"):
+            rejected_promoted += 1
+            continue
+
         href = _abs_url(card.get("href", ""))
         listing_id = card.get("listingId") or _extract_listing_id(href) or ""
-        if not listing_id or listing_id in seen_ids:
+        if not listing_id:
+            rejected_no_id += 1
+            continue
+        if listing_id in seen_ids:
             continue
         seen_ids.add(listing_id)
 
         text = card.get("text") or ""
         title = _sanitise(card.get("title") or "Room to rent", 120)
+        location_text = card.get("locationText") or ""
 
         # Price — look for £xxx in the card text
         price_match = re.search(
@@ -308,11 +360,9 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
         )
         rent_pcm = _parse_price_to_pcm(price_match.group(0)) if price_match else None
 
-        # Room type — search the card text and title
+        # Room type + bills — search the card text and title
         combined = f"{title} {text}".lower()
         room_type = _classify_room_type(combined)
-
-        # Bills
         bills = _classify_bills(combined)
 
         # Available from — "Available now", "Available 15 Apr"
@@ -323,20 +373,33 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
         rooms_match = re.search(r"(\d+)\s*(?:bed)?rooms?", combined)
         num_rooms = int(rooms_match.group(1)) if rooms_match else None
 
-        # Area label — first line of the card that looks like a postcode or place
-        area = location.upper()
-        pc_match = re.search(r"([A-Z]{1,2}\d{1,2}[A-Z]?\s*\d?[A-Z]{0,2})", text)
+        # ── Area label extraction ──────────────────────────────────────
+        # Priority:
+        #   1. Dedicated location element scraped by PARSE_JS (most accurate)
+        #   2. First UK postcode outcode in the card text
+        #   3. Fall back to the searched location (last resort)
+        area = ""
+        pc_match = _POSTCODE_RE.search(location_text.upper())
         if pc_match:
-            area = pc_match.group(1).strip()
+            area = pc_match.group(0).strip()
+        else:
+            pc_match = _POSTCODE_RE.search(text.upper())
+            if pc_match:
+                area = pc_match.group(0).strip()
+        if not area:
+            # No postcode found — use the location label text if we have one,
+            # otherwise fall back to the searched location
+            area = location_text.strip().upper() or location.upper()
 
-        # ── Area-code filter: reject sponsored listings from other cities ──
-        # Only runs for postcode searches. The old Apify actor suffered from
-        # the same sponsored-listing noise; filtering here keeps HMO rent
-        # averages tied to the actual searched area.
+        # ── Pass 2: area-code filter ───────────────────────────────────
+        # Only runs when we searched by postcode. Keeps HMO rent averages
+        # tied to the actual searched neighbourhood.
         if search_code:
             card_code = _area_code(area)
             if card_code and card_code != search_code:
                 rejected_wrong_area += 1
+                print(f"[SpareRoom]   skip {listing_id}: area={area!r} "
+                      f"(code={card_code!r}) != search={search_code!r}")
                 continue
 
         out.append({
@@ -355,9 +418,11 @@ def _parse_raw_cards(raw_cards: List[Dict[str, Any]], location: str) -> List[Dic
             "_numberOfRooms": num_rooms,
         })
 
-    if rejected_wrong_area > 0:
-        print(f"[SpareRoom] Filtered {rejected_wrong_area} sponsored/other-area "
-              f"listings (search code={search_code!r})")
+    total_seen = len(raw_cards)
+    if rejected_promoted or rejected_wrong_area or rejected_no_id:
+        print(f"[SpareRoom] Parse stats: {total_seen} raw → {len(out)} kept | "
+              f"promoted={rejected_promoted} wrong_area={rejected_wrong_area} "
+              f"no_id={rejected_no_id} (search code={search_code!r})")
 
     return out
 
