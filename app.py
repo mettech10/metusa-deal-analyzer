@@ -4407,9 +4407,16 @@ def scraper_debug():
     if not postcode:
         return jsonify({'success': False, 'message': 'postcode query param required'}), 400
 
+    # mode=form submits SpareRoom's real search form instead of navigating
+    # to the URL directly. Used when the direct-URL variant returns a
+    # "featured ads only" teaser page.
+    mode = (request.args.get('mode') or 'url').strip().lower()
+    if mode not in ('url', 'form'):
+        mode = 'url'
+
     try:
         scraper = SpareRoomScraper()
-        debug = scraper.scrape_live_debug(postcode, max_results=20)
+        debug = scraper.scrape_live_debug(postcode, max_results=20, mode=mode)
     except Exception as e:
         app.logger.error(f'[scraper/debug] {type(e).__name__}: {e}')
         return jsonify({'success': False, 'message': 'debug scrape failed', 'error': str(e)[:200]}), 500

@@ -664,6 +664,7 @@ class SpareRoomScraper:
         self,
         postcode: str,
         max_results: int = 12,
+        mode: str = "url",
     ) -> Dict[str, Any]:
         """Same as scrape_live but returns full intermediate state.
 
@@ -714,13 +715,24 @@ class SpareRoomScraper:
                 page = ctx.new_page()
                 page.set_default_timeout(LIVE_TIMEOUT_SECS * 1000)
 
-                try:
-                    page.goto(url, wait_until="domcontentloaded",
-                              timeout=LIVE_TIMEOUT_SECS * 1000)
-                except PlaywrightTimeout:
-                    result["error"] = f"timeout loading {district}"
-                    result["elapsed_ms"] = int((time.time() - t0) * 1000)
-                    return result
+                if mode == "form":
+                    # Form-submission mode: navigate to the search form,
+                    # fill the postcode input, and submit as a real user
+                    # would. Returns a URL with a valid search_id that
+                    # unlocks the real results list.
+                    form_err = self._submit_search_form(page, district, result)
+                    if form_err:
+                        result["error"] = form_err
+                        result["elapsed_ms"] = int((time.time() - t0) * 1000)
+                        return result
+                else:
+                    try:
+                        page.goto(url, wait_until="domcontentloaded",
+                                  timeout=LIVE_TIMEOUT_SECS * 1000)
+                    except PlaywrightTimeout:
+                        result["error"] = f"timeout loading {district}"
+                        result["elapsed_ms"] = int((time.time() - t0) * 1000)
+                        return result
 
                 # Allow lazy images / JS hydration a moment to settle, but
                 # don't block on networkidle — SpareRoom has long-polling XHRs.
@@ -1021,6 +1033,105 @@ class SpareRoomScraper:
             }).execute()
         except Exception as e:  # noqa: BLE001
             print(f"[SpareRoom] log_run error: {e}")
+
+    # -- form submission mode -------------------------------------------------
+    def _submit_search_form(self, page, district: str, result: Dict[str, Any]) -> Optional[str]:
+        """Navigate to SpareRoom's search form and submit it like a real user.
+
+        Returns an error message on failure, None on success.
+        """
+        try:
+            print(f"[SpareRoom] Form-submit mode: navigating to search form")
+            page.goto(
+                "https://www.spareroom.co.uk/flatshare/",
+                wait_until="domcontentloaded",
+                timeout=15000,
+            )
+        except PlaywrightTimeout:
+            return f"timeout loading search form"
+
+        # Accept cookie banner if present
+        for sel in (
+            "#onetrust-accept-btn-handler",
+            "button#onetrust-accept-btn-handler",
+        ):
+            try:
+                btn = page.locator(sel).first
+                if btn and btn.is_visible(timeout=300):
+                    btn.click(timeout=1500)
+                    print(f"[SpareRoom] form-submit: accepted cookies")
+                    page.wait_for_timeout(400)
+                    break
+            except Exception:
+                continue
+
+        # Locate the main postcode input. SpareRoom's form has an input
+        # named "search" or an id like "searchbox_input" / "SearchForm_search".
+        input_selectors = [
+            "input[name='search']",
+            "input[id='SearchForm_search']",
+            "input[id*='searchbox']",
+            "input[placeholder*='postcode' i]",
+            "input[placeholder*='town' i]",
+            "input[type='search']",
+        ]
+        filled = False
+        for sel in input_selectors:
+            try:
+                inp = page.locator(sel).first
+                if inp and inp.is_visible(timeout=500):
+                    inp.fill(district, timeout=2000)
+                    print(f"[SpareRoom] form-submit: filled {sel} with {district!r}")
+                    filled = True
+                    break
+            except Exception:
+                continue
+
+        if not filled:
+            return "could not find search input"
+
+        # Submit the form — try Enter key first, fall back to button click
+        submit_ok = False
+        try:
+            page.keyboard.press("Enter")
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+            submit_ok = True
+            print(f"[SpareRoom] form-submit: Enter submission succeeded")
+        except Exception as _enter_err:  # noqa: BLE001
+            print(f"[SpareRoom] form-submit: Enter failed: {_enter_err}")
+
+        if not submit_ok:
+            # Fall back: click any submit button
+            for sel in (
+                "button[type='submit']",
+                "input[type='submit']",
+                "button.search-submit",
+                "button[class*='search' i]",
+            ):
+                try:
+                    btn = page.locator(sel).first
+                    if btn and btn.is_visible(timeout=500):
+                        btn.click(timeout=3000)
+                        page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        submit_ok = True
+                        print(f"[SpareRoom] form-submit: clicked {sel}")
+                        break
+                except Exception:
+                    continue
+
+        if not submit_ok:
+            return "could not submit search form"
+
+        # Let results settle
+        try:
+            page.wait_for_load_state("load", timeout=8000)
+        except PlaywrightTimeout:
+            pass
+        page.wait_for_timeout(500)
+
+        result["url"] = page.url
+        print(f"[SpareRoom] form-submit: landed on {page.url[:120]}")
+        return None
 
     # -- utils ----------------------------------------------------------------
     @staticmethod
