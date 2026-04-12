@@ -354,11 +354,34 @@ PARSE_JS = r"""
 DIAG_JS = r"""
 () => {
   const body = (document.body && document.body.innerText) || '';
+  const html = (document.documentElement && document.documentElement.outerHTML) || '';
   const mainList = document.querySelector('.listing-results, ul.listing-results, ol.listing-results');
   const mainAnchors = mainList
     ? Array.from(mainList.querySelectorAll('a[href*="flatshare_detail.pl"]'))
     : [];
   const allAnchors = Array.from(document.querySelectorAll('a[href*="flatshare_detail.pl"]'));
+
+  // Cookie-consent / login-wall detection
+  const cookieBtn = document.querySelector(
+    '#onetrust-accept-btn-handler, [id*="cookie-accept"], [id*="accept-cookie"], ' +
+    'button[class*="cookie-accept"], button[class*="accept-all"], ' +
+    'button[data-testid*="accept"]'
+  );
+  const hasLoginWall = /please\s+sign\s+in|log\s*in\s+to\s+view|create\s+an?\s+account/i.test(body);
+  const hasCookieBanner = /we\s+use\s+cookies|cookie\s+preferences|accept\s+cookies|manage\s+cookies/i.test(body);
+
+  // Grab a snapshot of the first .listing-results child's outerHTML so
+  // we can see what SpareRoom is actually rendering (trimmed to 800 chars).
+  let mainListHtmlPreview = '';
+  if (mainList) {
+    const firstLi = mainList.querySelector('li');
+    if (firstLi) mainListHtmlPreview = (firstLi.outerHTML || '').slice(0, 800);
+  }
+
+  // Also grab a body text snippet from offset 500-2500 so we can see
+  // what's on the page past the usual header/nav chrome.
+  const bodySnippet = body.slice(500, 2500);
+
   return {
     cards_selector_count: document.querySelectorAll(
       'li[data-listing-id], article.panel-listing, article[class*="listing"], ' +
@@ -370,28 +393,55 @@ DIAG_JS = r"""
     main_list_li_count: mainList ? mainList.querySelectorAll('li').length : 0,
     paid_anchors_count: document.querySelectorAll('a[href*="fad_click.pl"]').length,
     body_text_len: body.length,
+    html_len: html.length,
     title: document.title || '',
     has_no_results_msg: /no\s+results|0\s+results|couldn't find|no matches|widen your search|try a different/i.test(body),
+    has_login_wall: hasLoginWall,
+    has_cookie_banner: hasCookieBanner,
+    cookie_btn_present: !!cookieBtn,
+    cookie_btn_selector: cookieBtn ? (cookieBtn.id || cookieBtn.className || 'found').slice(0, 80) : '',
     main_list_classes: Array.from(document.querySelectorAll('ul, ol'))
       .map(el => el.className || '')
       .filter(c => /list|result|panel/i.test(c))
       .slice(0, 10),
     results_count_badge: (body.match(/(\d[\d,]*)\s+results?/i) || [])[0] || '',
+    main_list_html_preview: mainListHtmlPreview,
+    body_snippet: bodySnippet,
   };
 }
 """
 
 SCROLL_JS = r"""
 async () => {
+  // Accept cookie consent if present — SpareRoom's OneTrust banner can
+  // block the results list from rendering.
+  const cookieBtn = document.querySelector(
+    '#onetrust-accept-btn-handler, [id*="cookie-accept"], [id*="accept-cookie"], ' +
+    'button[class*="accept-all"], button[class*="cookie-accept"]'
+  );
+  if (cookieBtn) {
+    try { cookieBtn.click(); } catch(e) {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  // Dismiss any overlay that might cover the main list
+  document.querySelectorAll(
+    '[class*="modal"][class*="open"], [class*="overlay"][class*="show"]'
+  ).forEach(el => {
+    const close = el.querySelector('[class*="close"], button[aria-label*="close" i]');
+    if (close) { try { close.click(); } catch(e) {} }
+  });
+
   // SpareRoom lazy-loads additional cards as you scroll past the first
-  // "featured at top" bucket. Scroll in 4 chunks with brief pauses so
-  // everything below the fold hydrates before we extract.
+  // "featured at top" bucket. Scroll in chunks with pauses so everything
+  // below the fold hydrates before we extract.
   const step = Math.max(600, window.innerHeight);
-  for (let y = 0; y < 5000; y += step) {
+  for (let y = 0; y < 8000; y += step) {
     window.scrollTo(0, y);
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 500));
   }
   window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 500));
 }
 """
 
