@@ -4408,11 +4408,12 @@ def scraper_debug():
         return jsonify({'success': False, 'message': 'postcode query param required'}), 400
 
     # mode=form submits SpareRoom's real search form instead of navigating
-    # to the URL directly. Used when the direct-URL variant returns a
-    # "featured ads only" teaser page.
-    mode = (request.args.get('mode') or 'url').strip().lower()
+    # to the URL directly. Defaults to "form" because direct-URL navigation
+    # returns a "featured ads only" teaser page on Bright Data's Scraping
+    # Browser. Pass mode=url explicitly for diagnostics.
+    mode = (request.args.get('mode') or 'form').strip().lower()
     if mode not in ('url', 'form'):
-        mode = 'url'
+        mode = 'form'
 
     try:
         scraper = SpareRoomScraper()

@@ -654,10 +654,14 @@ class SpareRoomScraper:
         """Fetch SpareRoom listings for a single postcode, right now.
 
         Used by ``/api/comparables`` to replace ``scrape_spareroom_with_apify``.
-        30-second hard ceiling. Returns a list of listing dicts in the canonical
+        60-second hard ceiling. Returns a list of listing dicts in the canonical
         shape — EMPTY list on any failure (caller's existing fallback handles it).
+
+        Always uses form-submission mode (mode="form") because SpareRoom
+        serves a "featured ads only" teaser page for direct-URL navigation —
+        the form gives us a real search_id token that unlocks actual results.
         """
-        debug = self.scrape_live_debug(postcode, max_results=max_results)
+        debug = self.scrape_live_debug(postcode, max_results=max_results, mode="form")
         return debug.get("listings", [])
 
     def scrape_live_debug(
