@@ -1168,6 +1168,7 @@ export function AnalysisResults({
 
   const hasSoldComparables = (backendData?.sold_comparables?.length ?? 0) > 0
   const hasRentComparables = (backendData?.rent_comparables?.length ?? 0) > 0
+  const isHmoStrategy = data.investmentType === "hmo"
   const hasRefurb = !!backendData?.refurb_estimates && Object.keys(backendData.refurb_estimates).length > 0
   const hasStrategies =
     !!backendData?.strategy_recommendations &&
@@ -1254,13 +1255,13 @@ export function AnalysisResults({
       <Tabs defaultValue="cashflow" className="w-full">
         <TabsList
           className={`w-full grid ${
-            hasSoldComparables || hasRentComparables ? "grid-cols-4" : "grid-cols-3"
+            hasSoldComparables || hasRentComparables || isHmoStrategy ? "grid-cols-4" : "grid-cols-3"
           }`}
         >
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="costs">Costs</TabsTrigger>
           <TabsTrigger value="projection">5-Year</TabsTrigger>
-          {(hasSoldComparables || hasRentComparables) && (
+          {(hasSoldComparables || hasRentComparables || isHmoStrategy) && (
             <TabsTrigger value="comparables">Comparables</TabsTrigger>
           )}
         </TabsList>
@@ -1439,12 +1440,13 @@ export function AnalysisResults({
           </Card>
         </TabsContent>
 
-        {(hasSoldComparables || hasRentComparables) && (
+        {(hasSoldComparables || hasRentComparables || isHmoStrategy) && (
           <TabsContent value="comparables" className="mt-4">
             <PropertyComparables
               postcode={data.postcode}
               bedrooms={data.bedrooms}
               currentPrice={data.purchasePrice}
+              investmentType={data.investmentType}
             />
           </TabsContent>
         )}
