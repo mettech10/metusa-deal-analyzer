@@ -714,34 +714,6 @@ class SpareRoomScraper:
                 page = ctx.new_page()
                 page.set_default_timeout(LIVE_TIMEOUT_SECS * 1000)
 
-                # ── Session warm-up ──────────────────────────────────
-                # SpareRoom fingerprints automated browsers and serves a
-                # "nationwide featured ads only" teaser page for every
-                # postcode search on a cold session. Warm up by visiting
-                # the homepage first, accepting cookies, and letting the
-                # real-user session cookies drop before navigating to
-                # the search URL.
-                try:
-                    page.goto("https://www.spareroom.co.uk/",
-                              wait_until="domcontentloaded",
-                              timeout=10000)
-                    # Accept cookies on the homepage
-                    for sel in (
-                        "#onetrust-accept-btn-handler",
-                        "button#onetrust-accept-btn-handler",
-                    ):
-                        try:
-                            btn = page.locator(sel).first
-                            if btn and btn.is_visible(timeout=300):
-                                btn.click(timeout=1500)
-                                print(f"[SpareRoom] Warm-up: accepted cookies via {sel}")
-                                break
-                        except Exception:
-                            continue
-                    page.wait_for_timeout(800)
-                except Exception as _warm_err:  # noqa: BLE001
-                    print(f"[SpareRoom] Warm-up warning: {_warm_err}")
-
                 try:
                     page.goto(url, wait_until="domcontentloaded",
                               timeout=LIVE_TIMEOUT_SECS * 1000)

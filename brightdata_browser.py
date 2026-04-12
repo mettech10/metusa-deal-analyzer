@@ -148,22 +148,20 @@ class BrightDataBrowser:
                 return None
 
         try:
+            # IMPORTANT: Bright Data's Scraping Browser manages its own
+            # fingerprint (UA, webdriver flag, plugins, canvas hash, etc.)
+            # automatically. Overriding these with our own values BREAKS
+            # their anti-bot protection and causes target sites (like
+            # SpareRoom) to fall back to a "bot teaser" response.
+            #
+            # We deliberately DO NOT pass user_agent or add_init_script.
+            # Only locale/timezone/viewport — purely presentational hints
+            # that don't conflict with BD's fingerprint management.
             self._context = self._browser.new_context(
                 viewport=VIEWPORT,
-                user_agent=CHROME_UA,
                 locale="en-GB",
                 timezone_id="Europe/London",
             )
-            # Match the automation-hiding script from playwright_scraper.py
-            self._context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                window.chrome = { runtime: {} };
-            """)
             return self._context
         except Exception as e:  # noqa: BLE001
             print(f"[BrightData] new_context failed: {type(e).__name__}: {e}")
