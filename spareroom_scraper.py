@@ -1278,10 +1278,88 @@ class SpareRoomScraper:
         return parts[0]
 
 
+# ── Cache helpers for live scrapes ────────────────────────────────────────────
+
+LIVE_CACHE_TTL_HOURS = 24  # Serve cached listings for up to 24 hours
+
+
+def _cache_lookup(district: str, max_results: int) -> Optional[List[Dict[str, Any]]]:
+    """Check Supabase spareroom_listings for recent cached data."""
+    supa = _get_supabase()
+    if supa is None:
+        return None
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=LIVE_CACHE_TTL_HOURS)).isoformat()
+        resp = (
+            supa.table("spareroom_listings")
+            .select("*")
+            .eq("location", district.upper())
+            .gte("scraped_at", cutoff)
+            .order("scraped_at", desc=True)
+            .limit(max_results)
+            .execute()
+        )
+        rows = resp.data if resp and resp.data else []
+        if not rows:
+            return None
+
+        # Map DB rows back to the canonical listing dict shape
+        listings = []
+        for r in rows:
+            listings.append({
+                "title": r.get("title") or "Room to rent",
+                "rentPcm": r.get("rent_pcm"),
+                "roomType": r.get("room_type") or "double",
+                "billsIncluded": r.get("bills_included"),
+                "area": r.get("area") or district,
+                "_availableFrom": r.get("available_from"),
+                "_numberOfRooms": r.get("number_of_rooms"),
+                "listingUrl": r.get("listing_url") or "",
+                "imageUrl": r.get("image_url") or "",
+                "_listingId": r.get("listing_id"),
+                "_cached": True,
+            })
+        print(f"[SpareRoom] Cache HIT for {district}: {len(listings)} listings (within {LIVE_CACHE_TTL_HOURS}h)")
+        return listings
+    except Exception as e:
+        print(f"[SpareRoom] Cache lookup error: {e}")
+        return None
+
+
+def _cache_store(district: str, listings: List[Dict[str, Any]]) -> None:
+    """Store live-scraped listings into Supabase for future cache hits."""
+    supa = _get_supabase()
+    if supa is None or not listings:
+        return
+    try:
+        scraper = SpareRoomScraper()
+        scraper._upsert_listings(supa, district.upper(), listings)
+    except Exception as e:
+        print(f"[SpareRoom] Cache store error: {e}")
+
+
 # ── module-level convenience for app.py ──────────────────────────────────────
 def scrape_spareroom_live(postcode: str, max_results: int = 12) -> List[Dict[str, Any]]:
     """Drop-in replacement for ``scrape_spareroom_with_apify``.
 
-    Same signature, same return shape. Swap the import and you're done.
+    Same signature, same return shape. Now also:
+    1. Checks Supabase cache first (serves data < 24h old)
+    2. On fresh scrape, stores results to Supabase for future requests
     """
-    return SpareRoomScraper().scrape_live(postcode=postcode, max_results=max_results)
+    district = (postcode or "").upper().strip().split()[0] if postcode else ""
+    if not district:
+        return []
+
+    # 1) Check cache
+    cached = _cache_lookup(district, max_results)
+    if cached:
+        return cached
+
+    # 2) Fresh scrape
+    results = SpareRoomScraper().scrape_live(postcode=postcode, max_results=max_results)
+
+    # 3) Store to cache (async-safe, non-blocking on failure)
+    if results:
+        _cache_store(district, results)
+
+    return results

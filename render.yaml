@@ -64,3 +64,44 @@ services:
         value: "5"
       - key: SCRAPER_DELAY_MS
         value: "1500"
+
+  # ── SpareRoom bulk scraper cron job (weekly, populates spareroom_listings) ──
+  # Runs every Monday at 03:00 UTC. The 13-day skip check inside scrape_bulk()
+  # means each location only re-scrapes every ~2 weeks even if run more often.
+  - type: cron
+    name: spareroom-bulk-scraper
+    runtime: python
+    schedule: "0 3 * * 1"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python spareroom_bulk_job.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        fromService:
+          name: metusa-deal-analyzer
+          type: web
+          envVarKey: NEXT_PUBLIC_SUPABASE_URL
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromService:
+          name: metusa-deal-analyzer
+          type: web
+          envVarKey: SUPABASE_SERVICE_ROLE_KEY
+      - key: BRIGHTDATA_USERNAME
+        fromService:
+          name: metusa-deal-analyzer
+          type: web
+          envVarKey: BRIGHTDATA_USERNAME
+      - key: BRIGHTDATA_PASSWORD
+        fromService:
+          name: metusa-deal-analyzer
+          type: web
+          envVarKey: BRIGHTDATA_PASSWORD
+      - key: BRIGHTDATA_ZONE
+        value: scraping_browser
+      - key: BRIGHTDATA_HOST
+        value: brd.superproxy.io
+      - key: BRIGHTDATA_PORT
+        value: "9222"
+      - key: BRIGHTDATA_COUNTRY
+        value: gb
