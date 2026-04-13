@@ -4924,15 +4924,31 @@ def get_comparables():
         listings = []
         source = 'fallback'
 
-        # 1) SpareRoom via Apify
-        try:
-            sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
-            if sr_listings:
-                listings = sr_listings
-                source = 'spareroom'
-                print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
-        except Exception as e:
-            print(f"[HMO] SpareRoom Apify error for {district}: {e}")
+        # 0) SpareRoom live scraper (Bright Data Scraping Browser)
+        if SPAREROOM_AVAILABLE:
+            try:
+                scraper = SpareRoomScraper()
+                live_listings = scraper.scrape_live(postcode, max_results=max_results)
+                if live_listings:
+                    # Normalise keys to match the format the frontend expects
+                    for ll in live_listings:
+                        ll.setdefault('source', 'spareroom-live')
+                    listings = live_listings
+                    source = 'spareroom-live'
+                    print(f"[HMO] SpareRoom live scraper returned {len(listings)} rooms for {district}")
+            except Exception as e:
+                print(f"[HMO] SpareRoom live scraper error for {district}: {e}")
+
+        # 1) SpareRoom via Apify (only if live scraper didn't return results)
+        if not listings:
+            try:
+                sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
+                if sr_listings:
+                    listings = sr_listings
+                    source = 'spareroom'
+                    print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
+            except Exception as e:
+                print(f"[HMO] SpareRoom Apify error for {district}: {e}")
 
         # 2) OpenRent direct scrape (secondary)
         if not listings:
