@@ -32,37 +32,6 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
-# Airroi API — Airbnb market intelligence for SA/R2SA analysis
-try:
-    from airroi_service import airroi_client, AirroiAPI
-    AIRROI_AVAILABLE = True
-except ImportError as _airroi_import_err:
-    AIRROI_AVAILABLE = False
-    airroi_client = None
-    print(f"[Airroi] Import failed: {_airroi_import_err}")
-
-# Bright Data SpareRoom scraper (replaces Apify memo23/spareroom-scraper)
-try:
-    from spareroom_scraper import scrape_spareroom_live, SpareRoomScraper
-    from brightdata_browser import scraper_health_check as brightdata_health_check
-    BRIGHTDATA_SCRAPER_AVAILABLE = True
-except ImportError as _brd_import_err:
-    BRIGHTDATA_SCRAPER_AVAILABLE = False
-    print(f"[BrightData] Scraper import failed: {_brd_import_err}")
-
-    def scrape_spareroom_live(postcode, max_results=12):  # type: ignore
-        return []
-
-    def brightdata_health_check():  # type: ignore
-        return {"connected": False, "message": "module import failed",
-                "playwright": False, "credentials": False}
-
-    class SpareRoomScraper:  # type: ignore
-        def scrape_live_debug(self, postcode, max_results=12):
-            return {"listings": [], "raw_cards_count": 0, "filtered_count": 0,
-                    "elapsed_ms": 0, "url": "", "page_title": "",
-                    "page_url": "", "error": "module import failed"}
-
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
     Shared by scrape_with_jina() and scrape_with_firecrawl().
@@ -4348,215 +4317,6 @@ def health_check():
     """Health check endpoint — kept public for uptime monitoring, returns minimal info only."""
     return jsonify({'status': 'ok'})
 
-
-# ─── SpareRoom / Bright Data scraper endpoints ────────────────────────────────
-def _check_scraper_secret() -> bool:
-    """Auth helper for scraper admin endpoints.
-    Accepts either `X-Scraper-Secret` header or `Authorization: Bearer <secret>`.
-    """
-    expected = os.environ.get('SCRAPER_SECRET', '')
-    if not expected:
-        return False
-    header_secret = request.headers.get('X-Scraper-Secret', '')
-    if header_secret and hmac.compare_digest(header_secret, expected):
-        return True
-    auth = request.headers.get('Authorization', '')
-    if auth.startswith('Bearer '):
-        token = auth[7:].strip()
-        if hmac.compare_digest(token, expected):
-            return True
-    return False
-
-
-@app.route('/api/scraper/health', methods=['GET'])
-@limiter.limit("30 per minute")
-def scraper_health():
-    """Public health check for the Bright Data SpareRoom scraper.
-    Returns connectivity status WITHOUT exposing credentials.
-    """
-    if not BRIGHTDATA_SCRAPER_AVAILABLE:
-        return jsonify({
-            'service': 'spareroom-brightdata',
-            'connected': False,
-            'message': 'scraper module not importable on this deploy',
-            'timestamp': datetime.utcnow().isoformat(),
-        }), 503
-
-    try:
-        status = brightdata_health_check()
-    except Exception as e:
-        return jsonify({
-            'service': 'spareroom-brightdata',
-            'connected': False,
-            'message': f'health check exception: {type(e).__name__}',
-            'timestamp': datetime.utcnow().isoformat(),
-        }), 500
-
-    status['service'] = 'spareroom-brightdata'
-    status['timestamp'] = datetime.utcnow().isoformat()
-    # Never leak the actual creds — scraper_health_check already only returns
-    # a boolean `credentials` flag, but double-check we're not echoing secrets.
-    status.pop('username', None)
-    status.pop('password', None)
-    return jsonify(status), (200 if status.get('connected') else 503)
-
-
-@app.route('/api/scraper/debug', methods=['GET'])
-@limiter.limit("6 per minute")
-def scraper_debug():
-    """Diagnostic endpoint for the Bright Data SpareRoom scraper.
-    Returns raw card count, filter count, page URL/title, and any error.
-    Useful for debugging sponsored-listing filter ratios and SpareRoom
-    layout changes. Rate-limited to 6/min to prevent abuse.
-    """
-    if not BRIGHTDATA_SCRAPER_AVAILABLE:
-        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
-
-    postcode = (request.args.get('postcode') or '').strip()
-    if not postcode:
-        return jsonify({'success': False, 'message': 'postcode query param required'}), 400
-
-    # mode=form submits SpareRoom's real search form instead of navigating
-    # to the URL directly. Defaults to "form" because direct-URL navigation
-    # returns a "featured ads only" teaser page on Bright Data's Scraping
-    # Browser. Pass mode=url explicitly for diagnostics.
-    mode = (request.args.get('mode') or 'form').strip().lower()
-    if mode not in ('url', 'form'):
-        mode = 'form'
-
-    try:
-        scraper = SpareRoomScraper()
-        debug = scraper.scrape_live_debug(postcode, max_results=20, mode=mode)
-    except Exception as e:
-        app.logger.error(f'[scraper/debug] {type(e).__name__}: {e}')
-        return jsonify({'success': False, 'message': 'debug scrape failed', 'error': str(e)[:200]}), 500
-
-    # Summarise for the response — include a few sample listings so we can see
-    # what actually survived the filter.
-    listings = debug.get('listings', [])
-    sample = [
-        {
-            'area': l.get('area'),
-            'rentPcm': l.get('rentPcm'),
-            'roomType': l.get('roomType'),
-            'title': (l.get('title') or '')[:60],
-        }
-        for l in listings[:5]
-    ]
-
-    return jsonify({
-        'success': True,
-        'postcode': postcode,
-        'url': debug.get('url'),
-        'page_url': debug.get('page_url'),
-        'page_title': debug.get('page_title'),
-        'raw_cards_count': debug.get('raw_cards_count'),
-        'filtered_count': debug.get('filtered_count'),
-        'returned_count': len(listings),
-        'elapsed_ms': debug.get('elapsed_ms'),
-        'error': debug.get('error'),
-        'sample': sample,
-        'parse_stats': debug.get('parse_stats') or {},
-        'raw_sample': debug.get('raw_sample') or [],
-        'dom_diag': debug.get('dom_diag') or {},
-        'form_diag': debug.get('form_diag') or [],
-        'filled_selector': debug.get('filled_selector') or '',
-    })
-
-
-@app.route('/api/scraper/live', methods=['POST'])
-@limiter.limit("10 per minute")
-def scraper_live():
-    """Run a live SpareRoom scrape for a single postcode.
-    Body: { "postcode": "M14 4AB", "maxResults": 12 }
-
-    Authed via SCRAPER_SECRET header. Intended for debugging and for frontend
-    hotspot pages — the /api/comparables endpoint already uses the scraper
-    internally, so you typically don't need this for the main HMO flow.
-    """
-    if not _check_scraper_secret():
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
-
-    if not BRIGHTDATA_SCRAPER_AVAILABLE:
-        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
-
-    if not request.is_json:
-        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-
-    data = request.get_json(silent=True) or {}
-    postcode = (data.get('postcode') or '').strip()
-    if not postcode:
-        return jsonify({'success': False, 'message': 'postcode is required'}), 400
-
-    try:
-        max_results = min(int(data.get('maxResults', 12)), 50)
-    except (TypeError, ValueError):
-        max_results = 12
-
-    try:
-        listings = scrape_spareroom_live(postcode, max_results=max_results)
-    except Exception as e:
-        app.logger.error(f'[scraper/live] {type(e).__name__}: {e}')
-        return jsonify({'success': False, 'message': 'scrape failed'}), 500
-
-    return jsonify({
-        'success': True,
-        'postcode': postcode,
-        'count': len(listings),
-        'listings': listings,
-        'source': 'spareroom-brightdata',
-    })
-
-
-@app.route('/api/scraper/trigger-bulk', methods=['POST'])
-@limiter.limit("5 per hour")
-def scraper_trigger_bulk():
-    """Trigger a bulk SpareRoom scrape run across all UK HMO hotspots.
-    Authed via SCRAPER_SECRET. Intended to be called by a Render cron job.
-
-    Body (optional):
-      { "locations": ["M14", "LS6", ...], "maxPages": 2 }
-
-    Returns the run summary from spareroom_bulk_job.run_bulk_scrape.
-    """
-    if not _check_scraper_secret():
-        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
-
-    if not BRIGHTDATA_SCRAPER_AVAILABLE:
-        return jsonify({'success': False, 'message': 'Scraper module unavailable'}), 503
-
-    try:
-        from spareroom_bulk_job import run_bulk_scrape, UK_HMO_LOCATIONS
-    except ImportError as e:
-        return jsonify({'success': False, 'message': f'bulk job not importable: {e}'}), 503
-
-    data = request.get_json(silent=True) or {}
-    locations = data.get('locations')
-    if locations is not None:
-        if not isinstance(locations, list) or not all(isinstance(x, str) for x in locations):
-            return jsonify({'success': False, 'message': 'locations must be a list of strings'}), 400
-        if len(locations) > 200:
-            return jsonify({'success': False, 'message': 'max 200 locations per run'}), 400
-    try:
-        max_pages = min(max(int(data.get('maxPages', 2)), 1), 5)
-    except (TypeError, ValueError):
-        max_pages = 2
-
-    print(f"[scraper/trigger-bulk] Starting bulk run — "
-          f"{len(locations) if locations else len(UK_HMO_LOCATIONS)} locations, "
-          f"{max_pages} pages each")
-    try:
-        summary = run_bulk_scrape(
-            locations=locations,
-            max_pages_per_location=max_pages,
-        )
-    except Exception as e:
-        app.logger.error(f'[scraper/trigger-bulk] {type(e).__name__}: {e}')
-        return jsonify({'success': False, 'message': 'bulk run failed', 'error': str(e)[:200]}), 500
-
-    return jsonify({'success': True, 'summary': summary})
-
-
 @app.route('/api/test-apify')
 @admin_required
 def test_apify():
@@ -5156,29 +4916,15 @@ def get_comparables():
         listings = []
         source = 'fallback'
 
-        # 1) SpareRoom via Bright Data Browser API (replaces Apify actor)
+        # 1) SpareRoom via Apify
         try:
-            sr_listings = scrape_spareroom_live(district, max_results=max_results)
+            sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
             if sr_listings:
                 listings = sr_listings
                 source = 'spareroom'
-                print(f"[HMO] SpareRoom BrightData returned {len(listings)} rooms for {district}")
+                print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
         except Exception as e:
-            print(f"[HMO] SpareRoom BrightData error for {district}: {e}")
-
-        # ─── LEGACY: Apify SpareRoom actor (disabled 2026-04-11) ───────────
-        # Kept for rollback. The memo23/spareroom-scraper actor began
-        # returning empty datasets consistently — replaced with Bright Data
-        # Browser API above. To re-enable, uncomment and comment out the
-        # scrape_spareroom_live block above.
-        # try:
-        #     sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
-        #     if sr_listings:
-        #         listings = sr_listings
-        #         source = 'spareroom'
-        #         print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
-        # except Exception as e:
-        #     print(f"[HMO] SpareRoom Apify error for {district}: {e}")
+            print(f"[HMO] SpareRoom Apify error for {district}: {e}")
 
         # 2) OpenRent direct scrape (secondary)
         if not listings:
@@ -5621,7 +5367,7 @@ HMO STRATEGY:
 - Room Count: {property_data.get('roomCount', 'N/A')}
 - Avg Room Rate: £{property_data.get('avgRoomRate', 0)}/month
 - Planning/Licensing: {_a4_line}"""
-    elif deal_type in ('R2SA', 'SA'):
+    elif deal_type == 'R2SA':
         r2sa = calculated_metrics.get('r2sa_metrics', {})
         if r2sa:
             strategy_context = f"""
@@ -5633,42 +5379,6 @@ RENT-TO-SA STRATEGY:
 - Setup/Furnishing Costs: £{r2sa.get('setup_costs', 0):,}
 - ROI on Setup Costs: {r2sa.get('r2sa_roi', 0):.1f}%%
 - Note: Investor rents from landlord and sublets as short-term SA (Airbnb/Booking.com). No purchase required."""
-
-        # Enrich with Airroi real Airbnb market data if available
-        airroi_market = market_data.get('airroi', {})
-        if airroi_market and airroi_market.get('avg_nightly_rate'):
-            avg_nightly = airroi_market.get('avg_nightly_rate', 0)
-            min_nightly = airroi_market.get('min_nightly_rate', 0)
-            max_nightly = airroi_market.get('max_nightly_rate', 0)
-            avg_occ = airroi_market.get('avg_occupancy')
-            avg_rating = airroi_market.get('avg_rating')
-            est_revenue = airroi_market.get('estimated_monthly_revenue')
-            listing_count = airroi_market.get('listing_count', 0)
-
-            occ_str = f"{avg_occ}%%" if avg_occ and avg_occ > 1 else (f"{avg_occ*100:.0f}%%" if avg_occ else "N/A")
-            rating_str = f"{avg_rating}/5" if avg_rating else "N/A"
-            rev_str = f"£{est_revenue:,.0f}" if est_revenue else "N/A"
-
-            strategy_context += f"""
-
-AIRBNB MARKET DATA (real data from Airroi — {listing_count} active listings analysed):
-- Average Nightly Rate: £{avg_nightly:,.0f}
-- Nightly Rate Range: £{min_nightly:,.0f} – £{max_nightly:,.0f}
-- Average Occupancy: {occ_str}
-- Average Guest Rating: {rating_str}
-- Estimated Monthly Revenue (rate × occupancy × 30): {rev_str}
-- Source: Airroi API (live Airbnb data)"""
-
-            # Add revenue validation flag if present
-            rev_val = airroi_market.get('revenue_validation')
-            if rev_val:
-                strategy_context += f"""
-
-⚠ REVENUE VALIDATION FLAG:
-- User-entered SA revenue: £{rev_val['user_entered']:,.0f}/month
-- Market-estimated revenue: £{rev_val['market_estimate']:,.0f}/month
-- Deviation: {rev_val['deviation_pct']}%% {rev_val['direction']} market
-- You MUST flag this discrepancy in your verdict and risks. If the user's figure is significantly above market, warn about over-optimistic projections."""
 
     # ------------------------------------------------------------------ #
     # Benchmarks for this deal type (to give Claude context)              #
@@ -6063,58 +5773,7 @@ def ai_analyze():
                     app.logger.warning(f'Could not fetch Land Registry data: {e}')
                     market_data = {'source': 'None', 'error': 'Market data unavailable'}
         
-        # Step 2b: Airroi Airbnb market data (SA/R2SA only — runs in parallel concept)
-        airroi_data = None
-        deal_type = data.get('dealType', 'BTL').upper()
-        if deal_type in ('SA', 'R2SA') and postcode and AIRROI_AVAILABLE and airroi_client and os.getenv('AIRROI_API_KEY'):
-            try:
-                app.logger.info(f"[Airroi] Fetching SA market intelligence for {postcode}")
-                airroi_data = airroi_client.get_sa_market_intelligence(postcode, bedrooms=bedrooms)
-
-                if airroi_data and airroi_data.get('success'):
-                    # Inject Airroi stats into market_data so the AI prompt can use them
-                    listing_stats = airroi_data.get('listing_stats', {})
-                    market_data['airroi'] = {
-                        'avg_nightly_rate': listing_stats.get('avg_nightly_rate'),
-                        'min_nightly_rate': listing_stats.get('min_nightly_rate'),
-                        'max_nightly_rate': listing_stats.get('max_nightly_rate'),
-                        'avg_occupancy': listing_stats.get('avg_occupancy'),
-                        'avg_rating': listing_stats.get('avg_rating'),
-                        'estimated_monthly_revenue': listing_stats.get('estimated_monthly_revenue'),
-                        'listing_count': listing_stats.get('count', 0),
-                    }
-
-                    # ── Input validation: flag if user SA revenue deviates from market ──
-                    user_sa_revenue = float(data.get('saMonthlySARevenue', 0))
-                    market_est = listing_stats.get('estimated_monthly_revenue')
-                    if user_sa_revenue > 0 and market_est and market_est > 0:
-                        deviation = abs(user_sa_revenue - market_est) / market_est
-                        if deviation > 0.30:
-                            direction = 'above' if user_sa_revenue > market_est else 'below'
-                            market_data['airroi']['revenue_validation'] = {
-                                'user_entered': user_sa_revenue,
-                                'market_estimate': market_est,
-                                'deviation_pct': round(deviation * 100, 1),
-                                'direction': direction,
-                                'flag': f"User SA revenue (£{user_sa_revenue:,.0f}) is {round(deviation*100)}% {direction} market estimate (£{market_est:,.0f})",
-                            }
-                            app.logger.warning(
-                                f"[Airroi] Revenue validation flag: user £{user_sa_revenue:,.0f} "
-                                f"vs market £{market_est:,.0f} ({round(deviation*100)}% {direction})"
-                            )
-
-                    app.logger.info(
-                        f"[Airroi] Got {listing_stats.get('count', 0)} nearby listings, "
-                        f"avg nightly £{listing_stats.get('avg_nightly_rate', '?')}"
-                    )
-                else:
-                    app.logger.warning(f"[Airroi] No data returned for {postcode}: {airroi_data.get('errors', [])}")
-
-            except Exception as e:
-                app.logger.warning(f"[Airroi] SA intelligence failed (non-blocking): {e}")
-                airroi_data = None
-
-        # Step 3: Get AI insights (with market data — now includes Airroi for SA/R2SA)
+        # Step 3: Get AI insights (with market data)
         ai_insights = get_ai_property_analysis(data, calculated_metrics, market_data)
 
         # ------------------------------------------------------------------ #
@@ -6194,32 +5853,6 @@ def ai_analyze():
             'avg_sold_price': market_data.get('avg_sold_price'),
             'market_source': market_data.get('source', 'None')
         }
-
-        # Include Airroi SA market intelligence for SA/R2SA strategies
-        if airroi_data and airroi_data.get('success'):
-            results['airroi_market'] = market_data.get('airroi', {})
-            # Pass through nearby listings for the frontend SA comparables display
-            nearby = airroi_data.get('nearby_listings')
-            if nearby:
-                # Extract the actual listings array from Airroi's response
-                listings_arr = []
-                for key in ('data', 'listings', 'results'):
-                    candidate = nearby.get(key) if isinstance(nearby, dict) else None
-                    if isinstance(candidate, list):
-                        listings_arr = candidate
-                        break
-                if not listings_arr and isinstance(nearby, list):
-                    listings_arr = nearby
-                results['airroi_nearby_listings'] = listings_arr[:15]  # Cap at 15
-
-            # Market summary for SA metrics panel
-            if airroi_data.get('market_summary'):
-                results['airroi_market_summary'] = airroi_data['market_summary']
-            # Occupancy/ADR trends for charts
-            if airroi_data.get('occupancy_trend'):
-                results['airroi_occupancy_trend'] = airroi_data['occupancy_trend']
-            if airroi_data.get('adr_trend'):
-                results['airroi_adr_trend'] = airroi_data['adr_trend']
         
         return jsonify({
             'success': True,
@@ -7467,125 +7100,6 @@ def get_sa_comparables():
             'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2',
             'message': str(e)
         })
-
-
-# ─── Airroi API — Airbnb market intelligence for SA/R2SA ─────────────
-@app.route('/api/airroi/sa-intelligence', methods=['POST'])
-@limiter.limit("10 per minute")
-def get_airroi_sa_intelligence():
-    """Full SA market intelligence via Airroi API.
-    Returns market summary, occupancy/ADR trends, and nearby listings
-    for a given UK postcode.  Used by SA and R2SA strategies only.
-
-    Cost per uncached call: ~$0.40 (cached repeats are free).
-    """
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-
-        data = request.get_json()
-        postcode = data.get('postcode', '').strip().upper()
-        bedrooms = int(data.get('bedrooms', 2))
-
-        if not postcode:
-            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
-
-        if not AIRROI_AVAILABLE or airroi_client is None:
-            return jsonify({
-                'success': False,
-                'message': 'Airroi service is not available',
-                'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
-            })
-
-        if not os.getenv('AIRROI_API_KEY'):
-            return jsonify({
-                'success': True,
-                'data': None,
-                'message': 'AIRROI_API_KEY not configured — set it in environment variables',
-                'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
-            })
-
-        print(f"[Airroi] SA intelligence request for {postcode}, {bedrooms} beds")
-        result = airroi_client.get_sa_market_intelligence(postcode, bedrooms=bedrooms)
-
-        return jsonify({
-            'success': result.get('success', False),
-            'data': result,
-            'postcode': postcode,
-            'bedrooms': bedrooms,
-            'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2&min_bedrooms={bedrooms}',
-        })
-
-    except Exception as e:
-        print(f"[Airroi] SA intelligence error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'message': str(e),
-            'fallback_url': f'https://www.airbnb.co.uk/s/{postcode}/homes?adults=2',
-        })
-
-
-@app.route('/api/airroi/market-summary', methods=['POST'])
-@limiter.limit("20 per minute")
-def get_airroi_market_summary():
-    """Lightweight endpoint: just market summary for a postcode ($0.05)."""
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-
-        data = request.get_json()
-        postcode = data.get('postcode', '').strip().upper()
-        if not postcode:
-            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
-
-        if not AIRROI_AVAILABLE or airroi_client is None or not os.getenv('AIRROI_API_KEY'):
-            return jsonify({'success': False, 'message': 'Airroi API not configured'})
-
-        result = airroi_client.get_market_summary(postcode)
-        has_error = 'error' in result
-        return jsonify({
-            'success': not has_error,
-            'data': result if not has_error else None,
-            'error': result.get('error') if has_error else None,
-        })
-
-    except Exception as e:
-        print(f"[Airroi] Market summary error: {e}")
-        return jsonify({'success': False, 'message': str(e)})
-
-
-@app.route('/api/airroi/nearby-listings', methods=['POST'])
-@limiter.limit("10 per minute")
-def get_airroi_nearby_listings():
-    """Nearby Airbnb listings for a postcode ($0.25)."""
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-
-        data = request.get_json()
-        postcode = data.get('postcode', '').strip().upper()
-        bedrooms = int(data.get('bedrooms', 2))
-        radius_km = float(data.get('radius_km', 3.0))
-
-        if not postcode:
-            return jsonify({'success': False, 'message': 'Postcode is required'}), 400
-
-        if not AIRROI_AVAILABLE or airroi_client is None or not os.getenv('AIRROI_API_KEY'):
-            return jsonify({'success': False, 'message': 'Airroi API not configured'})
-
-        result = airroi_client.get_nearby_listings(postcode, radius_km=radius_km, bedrooms=bedrooms)
-        has_error = 'error' in result
-        return jsonify({
-            'success': not has_error,
-            'data': result if not has_error else None,
-            'error': result.get('error') if has_error else None,
-        })
-
-    except Exception as e:
-        print(f"[Airroi] Nearby listings error: {e}")
-        return jsonify({'success': False, 'message': str(e)})
 
 
 if __name__ == '__main__':

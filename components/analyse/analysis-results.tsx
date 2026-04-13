@@ -14,7 +14,6 @@ import { Separator } from "@/components/ui/separator"
 import { DealScore } from "./deal-score"
 import { PropertyComparables } from "./property-comparables"
 import { HmoComparables } from "./hmo-comparables"
-import { SaComparables } from "./sa-comparables"
 import {
   BarChart,
   Bar,
@@ -1169,9 +1168,6 @@ export function AnalysisResults({
 
   const hasSoldComparables = (backendData?.sold_comparables?.length ?? 0) > 0
   const hasRentComparables = (backendData?.rent_comparables?.length ?? 0) > 0
-  const isHmoStrategy = data.investmentType === "hmo"
-  const isSaStrategy = data.investmentType === "sa" || data.investmentType === "r2sa"
-  const hasAirroiData = !!(backendData?.airroi_market?.avg_nightly_rate || (backendData?.airroi_nearby_listings?.length ?? 0) > 0)
   const hasRefurb = !!backendData?.refurb_estimates && Object.keys(backendData.refurb_estimates).length > 0
   const hasStrategies =
     !!backendData?.strategy_recommendations &&
@@ -1258,13 +1254,13 @@ export function AnalysisResults({
       <Tabs defaultValue="cashflow" className="w-full">
         <TabsList
           className={`w-full grid ${
-            hasSoldComparables || hasRentComparables || isHmoStrategy || (isSaStrategy && hasAirroiData) ? "grid-cols-4" : "grid-cols-3"
+            hasSoldComparables || hasRentComparables ? "grid-cols-4" : "grid-cols-3"
           }`}
         >
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="costs">Costs</TabsTrigger>
           <TabsTrigger value="projection">5-Year</TabsTrigger>
-          {(hasSoldComparables || hasRentComparables || isHmoStrategy || (isSaStrategy && hasAirroiData)) && (
+          {(hasSoldComparables || hasRentComparables) && (
             <TabsTrigger value="comparables">Comparables</TabsTrigger>
           )}
         </TabsList>
@@ -1443,21 +1439,13 @@ export function AnalysisResults({
           </Card>
         </TabsContent>
 
-        {(hasSoldComparables || hasRentComparables || isHmoStrategy || (isSaStrategy && hasAirroiData)) && (
+        {(hasSoldComparables || hasRentComparables) && (
           <TabsContent value="comparables" className="mt-4">
-            {isSaStrategy && hasAirroiData ? (
-              <SaComparables
-                postcode={data.postcode}
-                backendData={backendData}
-              />
-            ) : (
-              <PropertyComparables
-                postcode={data.postcode}
-                bedrooms={data.bedrooms}
-                currentPrice={data.purchasePrice}
-                investmentType={data.investmentType}
-              />
-            )}
+            <PropertyComparables
+              postcode={data.postcode}
+              bedrooms={data.bedrooms}
+              currentPrice={data.purchasePrice}
+            />
           </TabsContent>
         )}
       </Tabs>
@@ -1708,11 +1696,6 @@ export function AnalysisResults({
       {/* ── HMO Rental Comparables & Area Analysis ─────────────────── */}
       {data.investmentType === "hmo" && data.postcode && (
         <HmoComparables postcode={data.postcode} />
-      )}
-
-      {/* ── SA/R2SA Airbnb Market Comparables ──────────────────────── */}
-      {isSaStrategy && hasAirroiData && data.postcode && (
-        <SaComparables postcode={data.postcode} backendData={backendData} />
       )}
 
       {/* ── Refurbishment Estimates ─────────────────────────────────── */}

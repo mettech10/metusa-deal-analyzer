@@ -9,13 +9,6 @@ beautifulsoup4==4.12.3
 openpyxl==3.1.2
 redis==5.0.1
 anthropic>=0.40.0
-# Bright Data SpareRoom scraper — uses Playwright's connect_over_cdp to talk
-# to a remote Chromium. No `playwright install chromium` step needed since we
-# never launch a local browser — we only attach to Bright Data's CDP endpoint.
-playwright==1.47.0
-# Supabase Python client for the bulk scraper's persistence layer
-# (spareroom_listings + scrape_logs tables).
-supabase==2.7.4
 
 # Note: Set these environment variables for API access:
 # ANTHROPIC_API_KEY - For AI deal analysis (https://console.anthropic.com)
