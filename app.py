@@ -32,6 +32,14 @@ from national_rail import national_rail, get_national_rail_context  # UK-wide
 # Import Web Scrapers
 from scrapling_extractor import extract_property_from_url  # For most sites
 
+# Import SpareRoom scraper (Bright Data Scraping Browser)
+try:
+    from spareroom_scraper import SpareRoomScraper
+    SPAREROOM_AVAILABLE = True
+except ImportError:
+    SPAREROOM_AVAILABLE = False
+    print("[WARN] spareroom_scraper not available — SpareRoom live scraping disabled")
+
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
     Shared by scrape_with_jina() and scrape_with_firecrawl().
@@ -7100,6 +7108,66 @@ def get_sa_comparables():
             'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2',
             'message': str(e)
         })
+
+
+# ─── SpareRoom Live Scraper Endpoints ──────────────────────────────────────────
+
+@app.route('/api/scraper/health', methods=['GET'])
+def scraper_health():
+    """Check whether the SpareRoom scraper module is available."""
+    return jsonify({
+        'scraper_available': SPAREROOM_AVAILABLE,
+        'brightdata_configured': all([
+            os.environ.get('BRIGHTDATA_USERNAME'),
+            os.environ.get('BRIGHTDATA_PASSWORD'),
+        ]) if SPAREROOM_AVAILABLE else False,
+    })
+
+
+@app.route('/api/scraper/live', methods=['POST'])
+def scraper_live():
+    """
+    Live-scrape SpareRoom room listings for a given postcode.
+    Body: { "postcode": "M1 1AA", "max_results": 12 }
+    Returns: { "success": true, "listings": [...], "count": N, "source": "spareroom-live" }
+    """
+    if not SPAREROOM_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'message': 'SpareRoom scraper module not available on this server.',
+        }), 501
+
+    try:
+        body = request.get_json(force=True) or {}
+        postcode = (body.get('postcode') or '').strip().upper()
+        max_results = int(body.get('max_results', 12))
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+        print(f"[SCRAPER-LIVE] Scraping SpareRoom for postcode={postcode}, max={max_results}")
+
+        scraper = SpareRoomScraper()
+        listings = scraper.scrape_live(postcode, max_results=max_results)
+
+        print(f"[SCRAPER-LIVE] Got {len(listings)} listings for {postcode}")
+
+        return jsonify({
+            'success': True,
+            'listings': listings,
+            'count': len(listings),
+            'source': 'spareroom-live',
+            'postcode': postcode,
+        })
+
+    except Exception as e:
+        print(f"[SCRAPER-LIVE] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Scraper error: {str(e)}',
+        }), 500
 
 
 if __name__ == '__main__':
