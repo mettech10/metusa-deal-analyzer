@@ -4916,21 +4916,18 @@ def get_comparables():
         parts = postcode.upper().split()
         district = parts[0] if parts else postcode.upper()
 
-        # ── Strategy: try multiple sources, return first success ──
-        # 1. SpareRoom Apify actor (runs on Apify infra, avoids IP blocks)
-        # 2. OpenRent direct scraping (works from non-blocked IPs)
-        # 3. Fallback: return SpareRoom manual search link
+        # ── HMO Cascade: SpareRoom live → PropertyData /rents-hmo → fallback ──
+        # No Apify/OpenRent/Rightmove for HMO — those are BTL-only sources.
 
         listings = []
         source = 'fallback'
 
-        # 0) SpareRoom live scraper (Bright Data Scraping Browser)
+        # 1) SpareRoom live scraper (Bright Data Scraping Browser) — primary
         if SPAREROOM_AVAILABLE:
             try:
                 scraper = SpareRoomScraper()
                 live_listings = scraper.scrape_live(postcode, max_results=max_results)
                 if live_listings:
-                    # Normalise keys to match the format the frontend expects
                     for ll in live_listings:
                         ll.setdefault('source', 'spareroom-live')
                     listings = live_listings
@@ -4939,112 +4936,49 @@ def get_comparables():
             except Exception as e:
                 print(f"[HMO] SpareRoom live scraper error for {district}: {e}")
 
-        # 1) SpareRoom via Apify (only if live scraper didn't return results)
-        if not listings:
+        # 2) PropertyData /rents-hmo — fallback when SpareRoom returns < 3 results
+        if len(listings) < 3 and property_data.is_configured():
             try:
-                sr_listings = scrape_spareroom_with_apify(district, max_results=max_results)
-                if sr_listings:
-                    listings = sr_listings
-                    source = 'spareroom'
-                    print(f"[HMO] SpareRoom Apify returned {len(listings)} rooms for {district}")
-            except Exception as e:
-                print(f"[HMO] SpareRoom Apify error for {district}: {e}")
-
-        # 2) OpenRent direct scrape (secondary)
-        if not listings:
-            try:
-                or_listings = scrape_openrent_rooms(district, max_results=max_results)
-                if or_listings:
-                    listings = or_listings
-                    source = 'openrent'
-                    print(f"[HMO] OpenRent returned {len(listings)} rooms for {district}")
-            except Exception as e:
-                print(f"[HMO] OpenRent error for {district}: {e}")
-
-        # 3) Rightmove Rental actor — search for small rentals as room-price proxy
-        if not listings and APIFY_API_TOKEN:
-            try:
-                print(f"[HMO] Trying Rightmove Rental actor for {district}")
-                rm_items = _apify_run_actor(
-                    APIFY_RIGHTMOVE_RENTAL_ACTOR_ID,
-                    {
-                        'searchLocation': district,
-                        'channel': 'RENT',
-                        'maxResults': max_results,
-                        'radius': '1.0',
-                        'minBedrooms': 1,
-                        'maxBedrooms': 1,
-                    },
-                    timeout_secs=60,
-                )
-                if rm_items:
-                    # Log the raw keys from first item for debugging
-                    print(f"[HMO/RM] Raw keys: {sorted(rm_items[0].keys())}")
-                    print(f"[HMO/RM] Sample item: {json.dumps(rm_items[0], default=str)[:600]}")
-
-                    for item in rm_items:
-                        rent_raw = (
-                            item.get('price') or item.get('monthlyRent')
-                            or item.get('displayPrice', '')
-                        )
-                        rent_pcm = None
-                        if rent_raw:
-                            try:
-                                val = int(re.sub(r'[^\d]', '', str(rent_raw).split('.')[0].split('pcm')[0]))
-                                # Rightmove rental prices are monthly
-                                if val > 0 and val < 10000:
-                                    rent_pcm = val
-                            except Exception:
-                                pass
-
-                        address = (
-                            item.get('displayAddress') or item.get('address')
-                            or item.get('propertyAddress') or ''
-                        )
-                        title = (
-                            item.get('propertyTitle') or item.get('title')
-                            or address or 'Room to rent'
-                        )
-                        prop_type = str(item.get('propertySubType', item.get('propertyType', ''))).lower()
-
-                        listing_url = item.get('propertyUrl') or item.get('url') or ''
-                        if listing_url and not listing_url.startswith('http'):
-                            listing_url = f'https://www.rightmove.co.uk{listing_url}'
-
-                        image_url = ''
-                        images = item.get('images', item.get('propertyImages', []))
-                        if isinstance(images, list) and images:
-                            first_img = images[0]
-                            if isinstance(first_img, dict):
-                                image_url = first_img.get('srcUrl', first_img.get('url', ''))
-                            elif isinstance(first_img, str):
-                                image_url = first_img
-
-                        room_type = 'double'
-                        if 'studio' in prop_type:
-                            room_type = 'studio'
-                        elif 'flat' in prop_type:
-                            room_type = 'flat'
-                        elif 'room' in prop_type:
-                            room_type = 'room'
-
-                        listings.append({
-                            'title': str(title)[:120],
-                            'rentPcm': rent_pcm,
-                            'roomType': room_type,
+                pd_resp = property_data.get_hmo_rents(postcode)
+                if pd_resp and pd_resp.get('status') == 'success' and pd_resp.get('data'):
+                    pd_data = pd_resp['data']
+                    pd_listings = []
+                    room_types_map = {
+                        'double-ensuite': 'Double (Ensuite)',
+                        'double-shared-bath': 'Double (Shared Bath)',
+                        'single-ensuite': 'Single (Ensuite)',
+                        'single-shared-bath': 'Single (Shared Bath)',
+                    }
+                    for rt_key, rt_label in room_types_map.items():
+                        rt = pd_data.get(rt_key)
+                        if not rt or not rt.get('average'):
+                            continue
+                        avg_weekly = rt['average']
+                        avg_monthly = round(avg_weekly * 52 / 12)
+                        # Create a summary listing for each room type
+                        pd_listings.append({
+                            'title': f'{rt_label} — £{avg_monthly}/mo',
+                            'rentPcm': avg_monthly,
+                            'roomType': rt_label.lower(),
                             'billsIncluded': None,
-                            'area': str(address)[:60] if address else district.upper(),
+                            'area': district.upper(),
                             'distanceKm': None,
-                            'listingUrl': listing_url,
-                            'imageUrl': image_url,
-                            'source': 'rightmove',
+                            'listingUrl': '',
+                            'imageUrl': '',
+                            'source': 'propertydata',
+                            'dataPoints': rt.get('points_analysed', 0),
                         })
-
-                    if listings:
-                        source = 'rightmove'
-                        print(f"[HMO] Rightmove Rental returned {len(listings)} listings for {district}")
+                    if pd_listings:
+                        # If SpareRoom had some results, append PD data; otherwise replace
+                        if listings:
+                            listings.extend(pd_listings)
+                            print(f"[HMO] PropertyData supplemented {len(pd_listings)} room types for {district}")
+                        else:
+                            listings = pd_listings
+                            source = 'propertydata'
+                            print(f"[HMO] PropertyData returned {len(pd_listings)} room types for {district}")
             except Exception as e:
-                print(f"[HMO] Rightmove Rental error for {district}: {e}")
+                print(f"[HMO] PropertyData /rents-hmo error for {district}: {e}")
 
         if listings:
             # Build summary stats
@@ -5058,11 +4992,7 @@ def get_comparables():
                     'maxRent': max(rents),
                 }
 
-            search_url = (
-                f'https://www.openrent.com/properties-to-rent/{district.lower()}?term={district}&isRoomOnly=true'
-                if source == 'openrent'
-                else get_spareroom_search_url(postcode)
-            )
+            search_url = get_spareroom_search_url(postcode)
 
             return jsonify({
                 'success': True,
@@ -5075,10 +5005,9 @@ def get_comparables():
                 'searchUrl': search_url,
             })
 
-        # Fallback: return manual search links (SpareRoom + OpenRent)
+        # Fallback: return SpareRoom manual search link
         spareroom_url = get_spareroom_search_url(postcode)
-        openrent_url = f'https://www.openrent.co.uk/properties-to-rent/{district.lower()}?term={district}&isRoomOnly=true'
-        print(f"[HMO] All sources returned 0 rooms for {district}, falling back to manual links")
+        print(f"[HMO] All sources returned 0 rooms for {district}, falling back to manual link")
 
         return jsonify({
             'success': True,
@@ -5087,13 +5016,9 @@ def get_comparables():
             'listings': [],
             'count': 0,
             'searchUrl': spareroom_url,
-            'openrentUrl': openrent_url,
             'manualSearch': True,
             'source': 'fallback',
-            'message': (
-                f'No room listings found for {district}. '
-                f'Search SpareRoom or OpenRent manually for rooms near {district}.'
-            ),
+            'message': f'No room listings found for {district}. Search SpareRoom manually for rooms near {district}.',
         })
 
     except Exception as e:

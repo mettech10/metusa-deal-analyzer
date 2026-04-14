@@ -229,6 +229,16 @@ class PropertyDataAPI:
             'planning': self.get_planning_applications(postcode)
         }
     
+    def get_hmo_rents(self, postcode: str, radius: int = 15) -> Dict:
+        """
+        Get HMO room rent data from PropertyData /rents-hmo endpoint.
+        Returns structured room rents by type (double-ensuite, single, etc).
+        """
+        return self._make_request('rents-hmo', {
+            'postcode': postcode,
+            'bedrooms': 0,  # 0 = all room types
+        })
+
     def is_configured(self) -> bool:
         """Check if API key is configured"""
         return bool(self.api_key and self.api_key != 'your_api_key_here')
