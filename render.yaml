@@ -4,7 +4,7 @@ services:
     name: metusa-deal-analyzer
     runtime: python
     plan: free
-    buildCommand: apt-get install -y wkhtmltopdf && pip install -r requirements.txt
+    buildCommand: apt-get install -y wkhtmltopdf && pip install -r requirements.txt && playwright install --with-deps chromium
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     healthCheckPath: /api/health
     envVars:
@@ -35,4 +35,12 @@ services:
       - key: BENCHMARK_CRON_SECRET
         sync: false
       - key: NOTIFICATION_EMAIL
+        sync: false
+      - key: BRIGHTDATA_USERNAME
+        sync: false
+      - key: BRIGHTDATA_PASSWORD
+        sync: false
+      - key: BRIGHTDATA_HOST
+        sync: false
+      - key: AIRROI_API_KEY
         sync: false
