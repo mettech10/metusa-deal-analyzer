@@ -7162,6 +7162,51 @@ def scraper_live():
         }), 500
 
 
+@app.route('/api/scraper/debug', methods=['POST'])
+def scraper_debug():
+    """
+    Diagnostic endpoint — runs scrape_live_debug and returns FULL state.
+    Body: { "postcode": "OL2 5AB", "max_results": 12, "mode": "form"|"url" }
+    Returns: all internal diagnostic info — URL, page title, DOM diag,
+             raw card sample, parse stats, form diag, filtered listings.
+    """
+    if not SPAREROOM_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'message': 'SpareRoom scraper module not available on this server.',
+        }), 501
+
+    try:
+        body = request.get_json(force=True) or {}
+        postcode = (body.get('postcode') or '').strip().upper()
+        max_results = int(body.get('max_results', 12))
+        mode = body.get('mode') or 'form'
+
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode is required'}), 400
+
+        print(f"[SCRAPER-DEBUG] postcode={postcode} mode={mode}")
+
+        scraper = SpareRoomScraper()
+        debug = scraper.scrape_live_debug(postcode, max_results=max_results, mode=mode)
+
+        return jsonify({
+            'success': True,
+            'postcode': postcode,
+            'mode': mode,
+            **debug,
+        })
+
+    except Exception as e:
+        print(f"[SCRAPER-DEBUG] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Debug error: {str(e)}',
+        }), 500
+
+
 if __name__ == '__main__':
     # Security: Don't run with debug in production
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
