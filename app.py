@@ -7106,14 +7106,24 @@ def get_sa_comparables():
 
 @app.route('/api/scraper/health', methods=['GET'])
 def scraper_health():
-    """Check whether the SpareRoom scraper module is available."""
-    return jsonify({
+    """Check SpareRoom scraper module availability AND actual Bright Data connectivity."""
+    base = {
         'scraper_available': SPAREROOM_AVAILABLE,
         'brightdata_configured': all([
             os.environ.get('BRIGHTDATA_USERNAME'),
             os.environ.get('BRIGHTDATA_PASSWORD'),
         ]) if SPAREROOM_AVAILABLE else False,
-    })
+    }
+
+    # Only run actual connection test if ?probe=1 is set (it's slow/costs BD session)
+    if request.args.get('probe') == '1' and SPAREROOM_AVAILABLE:
+        try:
+            from brightdata_browser import scraper_health_check
+            base['connection'] = scraper_health_check()
+        except Exception as e:
+            base['connection'] = {'error': f'{type(e).__name__}: {str(e)[:200]}'}
+
+    return jsonify(base)
 
 
 @app.route('/api/scraper/live', methods=['POST'])
