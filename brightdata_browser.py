@@ -96,6 +96,8 @@ class BrightDataBrowser:
         self._pw: Optional["Playwright"] = None
         self._browser: Optional["Browser"] = None
         self._context: Optional["BrowserContext"] = None
+        self.last_error: Optional[str] = None
+        self.ws_host: str = ""
 
     # ── context manager ──────────────────────────────────────────────────
     def __enter__(self) -> "BrightDataBrowser":
@@ -118,13 +120,22 @@ class BrightDataBrowser:
 
         ws_url = _build_ws_url()
         if not ws_url:
+            self.last_error = "Missing BRIGHTDATA_USERNAME/PASSWORD"
             print("[BrightData] Missing BRIGHTDATA_USERNAME/PASSWORD — cannot connect")
             return None
+
+        # Record host for diagnostics (without credentials)
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(ws_url)
+            self.ws_host = f"{p.hostname}:{p.port}"
+        except Exception:
+            pass
 
         last_err: Optional[Exception] = None
         for attempt, delay in enumerate([1, 2, 4], start=1):
             try:
-                print(f"[BrightData] Connecting (attempt {attempt}/3)...")
+                print(f"[BrightData] Connecting (attempt {attempt}/3) to {self.ws_host}...")
                 self._pw = sync_playwright().start()
                 self._browser = self._pw.chromium.connect_over_cdp(
                     ws_url,
@@ -135,8 +146,9 @@ class BrightDataBrowser:
                 return self._browser
             except Exception as e:  # noqa: BLE001 — retry on any transient error
                 last_err = e
-                print(f"[BrightData] Connect failed (attempt {attempt}): "
-                      f"{type(e).__name__}: {str(e)[:200]}")
+                err_str = f"{type(e).__name__}: {str(e)[:300]}"
+                self.last_error = err_str
+                print(f"[BrightData] Connect failed (attempt {attempt}): {err_str}")
                 self._cleanup_partial()
                 if attempt < 3:
                     print(f"[BrightData] Retrying in {delay}s...")
@@ -277,7 +289,14 @@ def scraper_health_check() -> dict:
     try:
         browser = bd.get_browser()
         if browser is None:
-            result["message"] = "Connect failed — see logs for details"
+            result["message"] = bd.last_error or "Connect failed"
+            result["ws_host"] = bd.ws_host
+            # Parse and expose which zone is embedded in the username
+            username = _env("BRIGHTDATA_USERNAME", "")
+            import re as _re
+            m = _re.search(r"-zone-([A-Za-z0-9_-]+)", username)
+            result["zone_in_username"] = m.group(1) if m else ""
+            result["has_country_suffix"] = "-country-" in username
             return result
 
         # Touch the browser to confirm the session is alive
@@ -287,7 +306,7 @@ def scraper_health_check() -> dict:
         result["latency_ms"] = int((time.time() - start) * 1000)
         return result
     except Exception as e:  # noqa: BLE001
-        result["message"] = f"{type(e).__name__}: {str(e)[:200]}"
+        result["message"] = f"{type(e).__name__}: {str(e)[:300]}"
         return result
     finally:
         bd.close_browser()
