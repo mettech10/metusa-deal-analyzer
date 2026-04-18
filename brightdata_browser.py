@@ -65,7 +65,10 @@ def _build_ws_url() -> Optional[str]:
     password = _env("BRIGHTDATA_PASSWORD")
     host = _env("BRIGHTDATA_HOST", "brd.superproxy.io")
     port = _env("BRIGHTDATA_PORT", "9222")
-    country = _env("BRIGHTDATA_COUNTRY", "").strip().lower()
+    # Default to UK exit — SpareRoom shows a country-chooser modal that blocks
+    # the search form when accessed from a non-UK IP. Override with
+    # BRIGHTDATA_COUNTRY env var if needed (e.g. for non-UK sites).
+    country = _env("BRIGHTDATA_COUNTRY", "gb").strip().lower()
 
     if not username or not password:
         return None
