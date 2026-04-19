@@ -5285,7 +5285,63 @@ def get_ai_property_analysis(property_data, calculated_metrics, market_data=None
     # ------------------------------------------------------------------ #
     deal_type = property_data.get('dealType', 'BTL')
     strategy_context = ""
-    if deal_type == 'BRR':
+    # Frontend-sent BRRRR phase breakdown (takes priority over legacy brr_metrics)
+    fe_brrrr = property_data.get('_brrrrContext') or {}
+    if deal_type == 'BRR' and fe_brrrr:
+        # Rich 6-phase BRRRR context produced by the Next.js calculations engine.
+        # Gives Claude the full financial picture so verdict/strengths/risks can
+        # reference capital recycling %, refurb uplift ×, money-left, etc.
+        def _fmt(n):
+            try:
+                return f"£{int(float(n)):,}" if n is not None else "£0"
+            except (TypeError, ValueError):
+                return "£0"
+        strategy_context = f"""
+BRRRR DEAL — 6-PHASE BREAKDOWN:
+
+Phase 1 — Acquisition
+- Purchase price:             {_fmt(property_data.get('purchasePrice'))}
+- Total acquisition cost:     {_fmt(fe_brrrr.get('acquisitionCost'))}  (price + SDLT + legal + survey)
+
+Phase 2 — Refurbishment
+- Refurb budget:              {_fmt(fe_brrrr.get('refurbBudget'))}
+- Contingency buffer:         {_fmt(fe_brrrr.get('refurbContingency'))}
+- Holding costs during void:  {_fmt(fe_brrrr.get('refurbHoldingCost'))}
+- Refurb total:               {_fmt(fe_brrrr.get('refurbTotal'))}
+
+Phase 3 — Bridging Finance
+- Interest:                   {_fmt(fe_brrrr.get('bridgingInterest'))}
+- Arrangement + exit fees:    {_fmt(fe_brrrr.get('bridgingFees'))}
+- Bridging total:             {_fmt(fe_brrrr.get('bridgingTotal'))}
+
+Phase 4 — Refinance
+- After Repair Value (ARV):   {_fmt(fe_brrrr.get('arv'))}   (basis: {fe_brrrr.get('arvBasis') or 'n/a'})
+- Refinanced BTL mortgage:    {_fmt(fe_brrrr.get('refinancedMortgage'))}
+- Refinance rate:             {fe_brrrr.get('postRefinanceRate', 0):.2f}%
+- Arrangement + valuation:    {_fmt(fe_brrrr.get('refinanceFees'))}
+
+Phase 5 — Capital Flow
+- Total cash invested:        {_fmt(fe_brrrr.get('totalCashInvested'))}
+- Capital returned:           {_fmt(fe_brrrr.get('capitalReturned'))}
+- Money LEFT IN DEAL:         {_fmt(fe_brrrr.get('moneyLeftInDeal'))}   ← the investor's locked-in capital
+- CAPITAL RECYCLED:           {float(fe_brrrr.get('capitalRecycledPct') or 0):.1f}%  (target 80%+ for repeatable BRRRR)
+
+Phase 6 — Uplift Metrics
+- Equity gained (forced):     {_fmt(fe_brrrr.get('equityGained'))}
+- Refurb uplift ratio:        {float(fe_brrrr.get('refurbUpliftRatio') or 0):.2f}×  (target 1.5×+ for strong deals)
+
+WHEN ANALYSING THIS BRRRR DEAL:
+- Evaluate the deal ON THE BRRRR SCALE, not standard BTL. Cashflow and
+  yield on purchase are SECONDARY — the primary questions are:
+    1. How much capital was recycled at refinance? (>80% is excellent)
+    2. Is money-left-in-deal small enough to fund the next deal?
+    3. Does the refurb uplift justify the bridging cost & risk?
+    4. Is post-refinance cashflow still viable given the larger debt?
+- Reference the exact numbers above in strengths/risks — do not be generic.
+- If capital recycled < 50% OR money left > £30k, flag it as a risk.
+- If refurb uplift ratio < 1.5×, warn the investor the refurb may not
+  justify the effort — a lighter flip or standard BTL could beat it."""
+    elif deal_type == 'BRR':
         brr = calculated_metrics.get('brr_metrics', {})
         if brr:
             strategy_context = f"""
