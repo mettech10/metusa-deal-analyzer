@@ -7011,12 +7011,32 @@ def get_sa_comparables():
         # Extract district (e.g. "SK16" from "SK16 4QL")
         district = postcode.split()[0] if ' ' in postcode else postcode
 
+        # ── Airroi fetched upfront so it flows into EVERY return path ──────────
+        # Previously this lived after the Apify block, which meant the two
+        # early-return branches (no Apify token, Apify returned []) stripped
+        # Airroi data from the response. Frontend then rendered the "paid
+        # subscription" empty state with no Airroi card — exactly the UI bug
+        # the user reported. Hoisting the call fixes it for both paths.
+        airroi_market = None
+        airroi_listings = []
+        if AIRROI_AVAILABLE and airroi_service:
+            try:
+                airroi_market = airroi_service.get_market_summary(postcode)
+            except Exception as ae:
+                print(f"[SA Comparables] Airroi market error (non-blocking): {ae}")
+            try:
+                airroi_listings = airroi_service.get_nearby_listings(postcode) or []
+            except Exception as ae:
+                print(f"[SA Comparables] Airroi listings error (non-blocking): {ae}")
+
         if not APIFY_API_TOKEN:
             return jsonify({
                 'success': True,
                 'listings': [],
                 'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2&min_bedrooms={bedrooms}',
-                'message': 'Airbnb comparables require Apify API token — use the search link instead'
+                'message': 'Airbnb comparables require Apify API token — use the search link instead',
+                'airroiMarket': airroi_market,
+                'airroiListings': airroi_listings,
             })
 
         # Run the Airbnb scraper actor
@@ -7038,7 +7058,9 @@ def get_sa_comparables():
                 'success': True,
                 'listings': [],
                 'fallback_url': f'https://www.airbnb.co.uk/s/{district}/homes?adults=2&min_bedrooms={bedrooms}',
-                'message': 'No Airbnb listings found — the actor may require a paid subscription ($30/mo). Use the search link instead.'
+                'message': 'No Airbnb listings found — the actor may require a paid subscription ($30/mo). Use the search link instead.',
+                'airroiMarket': airroi_market,
+                'airroiListings': airroi_listings,
             })
 
         # Parse listings
@@ -7111,18 +7133,8 @@ def get_sa_comparables():
             demand = 'low'
             demand_label = 'Low demand — verify local SA viability'
 
-        # ── Airroi market data (fetched in parallel with Apify, never blocks) ──
-        airroi_market = None
-        airroi_listings = []
-        if AIRROI_AVAILABLE and airroi_service:
-            try:
-                airroi_market = airroi_service.get_market_summary(postcode)
-            except Exception as ae:
-                print(f"[SA Comparables] Airroi market error (non-blocking): {ae}")
-            try:
-                airroi_listings = airroi_service.get_nearby_listings(postcode) or []
-            except Exception as ae:
-                print(f"[SA Comparables] Airroi listings error (non-blocking): {ae}")
+        # Airroi was fetched upfront (see top of handler) so it's already
+        # populated in `airroi_market` / `airroi_listings` by this point.
 
         return jsonify({
             'success': True,
