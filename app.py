@@ -49,6 +49,15 @@ except ImportError:
     airroi_service = None
     print("[WARN] airroi_service not available — Airroi SA market data disabled")
 
+# Import shared ARV calculator (Flip + BRRRR)
+try:
+    from arv_calculator import calculate_arv as _calculate_arv
+    ARV_CALCULATOR_AVAILABLE = True
+except ImportError:
+    ARV_CALCULATOR_AVAILABLE = False
+    _calculate_arv = None
+    print("[WARN] arv_calculator not available — auto-ARV disabled")
+
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
     Shared by scrape_with_jina() and scrape_with_firecrawl().
@@ -7283,6 +7292,75 @@ def scraper_debug():
             'success': False,
             'message': f'Debug error: {str(e)}',
         }), 500
+
+
+# ─── ARV Auto-Calculator (shared by Flip + BRRRR) ──────────────────────────
+@app.route('/api/arv/calculate', methods=['POST'])
+@limiter.limit("20 per minute")
+def arv_calculate():
+    """
+    Auto-calculate After-Refurb Value for a UK property using sold
+    comparables + EPC floor areas.
+
+    Body: {
+      postcode: str (required),
+      propertyType: "house"|"flat"|... (optional),
+      propertyTypeDetail: "semi-detached"|... (optional),
+      bedrooms: int (required),
+      floorSizeM2: float (optional — if missing, EPC median is used)
+    }
+
+    Returns the arv_calculator payload, or a structured error object with
+    message suitable for display. NEVER 500s — failures collapse into
+    `{ error, message, comparablesUsed }` so the UI can fall back to
+    "Enter ARV manually" cleanly.
+    """
+    if not ARV_CALCULATOR_AVAILABLE or _calculate_arv is None:
+        return jsonify({
+            'error': 'arv_calculator module not loaded',
+            'message': 'Auto-ARV unavailable on this server — enter ARV manually',
+            'comparablesUsed': 0,
+        }), 200
+
+    try:
+        body = request.get_json(force=True) or {}
+        postcode = (body.get('postcode') or '').strip().upper()
+        bedrooms = body.get('bedrooms') or 0
+        property_type = body.get('propertyType') or body.get('property_type')
+        property_type_detail = body.get('propertyTypeDetail') or body.get('property_type_detail')
+        floor_size = body.get('floorSizeM2') or body.get('floor_size_m2')
+
+        if not postcode:
+            return jsonify({
+                'error': 'postcode is required',
+                'message': 'Enter a postcode or set ARV manually',
+                'comparablesUsed': 0,
+            }), 400
+
+        result = _calculate_arv(
+            postcode=postcode,
+            property_type=property_type,
+            bedrooms=bedrooms,
+            floor_size_m2=floor_size,
+            property_type_detail=property_type_detail,
+        )
+        if result is None:
+            return jsonify({
+                'error': 'ARV calculator returned no result',
+                'message': 'Insufficient comparable data — please enter ARV manually',
+                'comparablesUsed': 0,
+            }), 200
+        return jsonify(result), 200
+
+    except Exception as e:
+        print(f'[ARV] endpoint error: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'message': 'Auto-ARV failed — please enter ARV manually',
+            'comparablesUsed': 0,
+        }), 200
 
 
 if __name__ == '__main__':
