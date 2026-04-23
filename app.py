@@ -5538,7 +5538,83 @@ AIRROI SHORT-LET MARKET DATA:
     _a4p_note = _a4p.get('note', '')
     _a4p_cncl = _a4p.get('council', 'local council')
 
-    if _is_a4p:
+    # ── Metalyzi Article 4 engine (new) ──────────────────────────────────
+    # When the Next.js /api/analyse route supplies `_article4Engine`, it
+    # reflects the authoritative Supabase `article4_areas` snapshot
+    # (council, direction type, effective date, impact, planning URL,
+    # data source). We prefer it over the legacy Flask-computed block so
+    # the AI prompt and the frontend Article4Card stay consistent.
+    _a4e = property_data.get('_article4Engine') or {}
+    _a4e_status = (_a4e.get('status') or '').lower() if _a4e else ''
+    _a4e_areas  = _a4e.get('areas') or [] if _a4e else []
+    _a4e_summary = _a4e.get('summary') or '' if _a4e else ''
+    _a4e_primary = _a4e_areas[0] if _a4e_areas else None
+    _a4e_engine_active   = _a4e_status == 'active'
+    _a4e_engine_proposed = _a4e_status in ('proposed', 'consultation')
+    _a4e_engine_none     = _a4e_status == 'none'
+    _a4e_engine_unknown  = _a4e_status == 'unknown' or _a4e_status == ''
+    # Prefer engine's council name when a match exists.
+    if _a4e_primary:
+        _a4p_cncl = _a4e_primary.get('councilName') or _a4p_cncl
+
+    if _a4e_engine_active and _a4e_primary:
+        _dir  = _a4e_primary.get('directionType') or 'C3→C4 HMO restriction'
+        _eff  = _a4e_primary.get('effectiveDate') or 'unspecified'
+        _imp  = _a4e_primary.get('impactDescription') or ''
+        _url  = _a4e_primary.get('councilPlanningUrl') or ''
+        planning_status = (
+            f"YES — Article 4 Direction IS in force (source: Metalyzi Article 4 database). "
+            f"Council: {_a4p_cncl}. Direction: {_dir}. Effective: {_eff}. "
+            f"{_imp} "
+            f"HMO conversion (C3→C4) requires Full Planning Permission — not just a licence."
+        )
+        if _url:
+            planning_status += f" Council planning page: {_url}."
+        planning_hmo_instruction = (
+            "Because Article 4 IS in force (verified in the Metalyzi database): if the strategy is HMO, "
+            "explain clearly that planning permission is required (PP fee ~£234 + architect/solicitor ~£1,500-3,000 total, "
+            "outcome uncertain). Strongly suggest C3→C3b social/supported housing lease as the primary "
+            "Article 4-compliant alternative (no planning needed, guaranteed LA rent £500-900/room/month, "
+            "3-7 year lease). Include this guidance in next_steps."
+        )
+    elif _a4e_engine_proposed and _a4e_primary:
+        _cend = _a4e_primary.get('consultationEndDate') or 'unspecified'
+        _imp  = _a4e_primary.get('impactDescription') or ''
+        _url  = _a4e_primary.get('councilPlanningUrl') or ''
+        planning_status = (
+            f"PROPOSED — {_a4p_cncl} is currently consulting on an Article 4 direction (source: Metalyzi). "
+            f"Consultation ends: {_cend}. "
+            f"{_imp} "
+            f"If adopted, HMO conversion (C3→C4) in this area will require Full Planning Permission."
+        )
+        if _url:
+            planning_status += f" Council planning page: {_url}."
+        planning_hmo_instruction = (
+            "Article 4 is PROPOSED — if the investor proceeds with HMO, they should plan for the risk that "
+            "the direction is adopted mid-conversion. Recommend: (1) monitor the consultation outcome, "
+            "(2) apply for planning permission pre-emptively, or (3) pivot to C3→C3b social housing lease "
+            "as an Article 4-safe alternative. Flag this uncertainty prominently in risks."
+        )
+    elif _a4e_engine_none:
+        planning_status = (
+            f"NO — No Article 4 restrictions found for this postcode in the Metalyzi Article 4 database. "
+            f"Permitted Development applies for C3→C4 HMO conversion (up to 6 people). "
+            f"Always verify with the local planning authority before committing."
+        )
+        if deal_type == 'HMO':
+            planning_hmo_instruction = (
+                "Because there is NO Article 4, explain the HMO licensing process in next_steps: "
+                "Mandatory HMO Licence required for 5+ occupants — apply to local council, fee ~£500-1,500 "
+                "(varies by council), valid 5 years. Property must meet HMO standards: fire doors (FD30s), "
+                "interconnected smoke alarms, min room size 6.51 m² per person, adequate kitchen/bathroom "
+                "facilities. Also advise checking for Additional or Selective Licensing in this area."
+            )
+        else:
+            planning_hmo_instruction = (
+                "No Article 4 — HMO is available as an alternative strategy if the investor changes approach."
+            )
+    # ── Fallback to legacy Flask block when engine gave us nothing ───────
+    elif _is_a4p:
         planning_status = f"YES — Article 4 Direction IS in force ({_a4p_note}). HMO conversion (C3→C4) requires Full Planning Permission — not just a licence."
         planning_hmo_instruction = (
             "Because Article 4 IS in force: if the strategy is HMO, explain clearly that "
@@ -5547,8 +5623,8 @@ AIRROI SHORT-LET MARKET DATA:
             "(no planning needed, guaranteed LA rent £500-900/room/month, 3-7 year lease). "
             "Include this guidance in next_steps."
         )
-    elif not _a4p_kn:
-        planning_status = f"UNCONFIRMED — this postcode is not in our Article 4 database. Investor MUST verify with {_a4p_cncl} before converting to HMO."
+    elif not _a4p_kn or _a4e_engine_unknown:
+        planning_status = f"UNCONFIRMED — this postcode is not in the Metalyzi Article 4 database. Investor MUST verify with {_a4p_cncl} before converting to HMO."
         planning_hmo_instruction = (
             "Article 4 status is unconfirmed. Advise the investor to check with the local planning authority "
             "before any HMO conversion. Include this as the first next_step."
