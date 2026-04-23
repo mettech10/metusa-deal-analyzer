@@ -76,6 +76,38 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           ...propertyData,
           userEmail,
+          // FLIP-specific rich metrics from the Next.js engine. Flask AI
+          // prompt reads these to replace its 5-line £0 placeholder with
+          // the full UK 2024/25 Flip context (SDLT, bridging, CGT/CT,
+          // 70% rule, deal score, post-tax ROI).
+          flipComputed:
+            propertyData?.investmentType === "flip" && calculationResults
+              ? {
+                  preTaxProfit:         calculationResults.flipPreTaxProfit,
+                  postTaxProfit:        calculationResults.flipPostTaxProfit,
+                  postTaxROI:           calculationResults.flipPostTaxROI,
+                  taxType:              calculationResults.flipTaxType,
+                  taxableGain:          calculationResults.flipTaxableGain,
+                  taxLiability:         calculationResults.flipTaxLiability,
+                  taxRateUsed:          calculationResults.flipTaxRateUsed,
+                  dealScore:            calculationResults.flipDealScore,
+                  dealScoreLabel:       calculationResults.flipDealScoreLabel,
+                  passesSimple70:       calculationResults.flipPassesSimple70,
+                  passesStrict70:       calculationResults.flipPassesStrict70,
+                  simpleMAO:            calculationResults.flipSimpleMAO,
+                  strictMAO:            calculationResults.flipStrictMAO,
+                  percentOfARV:         calculationResults.flipPercentOfARV,
+                  totalCapitalInvested: calculationResults.flipTotalCapitalInvested,
+                  holdingCostsTotal:    calculationResults.flipHoldingCostsTotal,
+                  exitCostsTotal:       calculationResults.flipExitCostsTotal,
+                  financeTotal:         calculationResults.flipFinanceTotal,
+                  refurbTotal:          calculationResults.flipRefurbTotal,
+                  refurbContingency:    calculationResults.flipRefurbContingency,
+                  holdingMonths:        calculationResults.flipHoldingMonths,
+                  acquisitionCost:      calculationResults.flipAcquisitionCost,
+                  arv:                  propertyData?.arv,
+                }
+              : undefined,
         }),
       })
 

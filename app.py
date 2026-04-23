@@ -2614,19 +2614,44 @@ def analyze_deal(data):
     # Flip specific metrics
     flip_metrics = {}
     if deal_type == 'FLIP' and arv > 0:
-        total_costs = purchase_price + refurb_costs + stamp_duty + legal_fees + valuation_fee + arrangement_fee + (monthly_mortgage * 6)  # 6 months holding
-        agent_fees = arv * 0.015
-        selling_costs = 1000 + agent_fees
-        total_costs += selling_costs
+        # Holding period — use frontend value if provided, else 6 months
+        flip_holding_months = int(float(data.get('flipHoldingMonths') or 6))
+        # Agent fee % — form-configurable, default 1.5%
+        flip_agent_pct = float(data.get('flipAgentFeePercent', 1.5) or 1.5)
+        # Sale legal + marketing — pulled from the form (defaults keep legacy behaviour)
+        flip_sale_legal = float(data.get('flipSaleLegalFees', 1500) or 1500)
+        flip_marketing = float(data.get('flipMarketingCosts', 0) or 0)
+
+        agent_fees = arv * (flip_agent_pct / 100)
+        selling_costs = agent_fees + flip_sale_legal + flip_marketing
+        holding_finance = monthly_mortgage * flip_holding_months
+        total_costs = (
+            purchase_price + refurb_costs + stamp_duty + legal_fees
+            + valuation_fee + arrangement_fee + holding_finance + selling_costs
+        )
         profit = arv - total_costs
         flip_roi = (profit / total_costs) * 100 if total_costs > 0 else 0
-        
+
         flip_metrics = {
+            # Legacy keys (retained for back-compat)
             'total_costs': round(total_costs, 0),
             'profit': round(profit, 0),
             'flip_roi': round(flip_roi, 2),
-            'selling_costs': round(selling_costs, 0)
+            'selling_costs': round(selling_costs, 0),
+            # Keys the AI prompt reads — previously missing, always resolved to 0
+            'refurb_cost': round(refurb_costs, 0),
+            'arv': round(arv, 0),
+            'flip_profit': round(profit, 0),
+            'holding_months': flip_holding_months,
+            'holding_finance': round(holding_finance, 0),
         }
+
+        # If the Next.js engine sent its richer CalculationResults via
+        # flipComputed, merge it on top — these numbers are the source of
+        # truth (SDLT bands, CGT/CT, bridging, contingency modelled fully).
+        fe_flip = data.get('flipComputed') or {}
+        if isinstance(fe_flip, dict) and fe_flip:
+            flip_metrics.update({k: v for k, v in fe_flip.items() if v is not None})
     
     # Determine verdict
     if deal_type == 'BTL':
@@ -2660,10 +2685,16 @@ def analyze_deal(data):
             verdict = "AVOID"
             risk_level = "HIGH"
     elif deal_type == 'FLIP':
-        if flip_metrics.get('flip_roi', 0) >= 20 and flip_metrics.get('profit', 0) >= 20000:
+        # Prefer the frontend's post-tax ROI / profit / strict-70 pass if the
+        # Next.js engine supplied them (via flipComputed). Fall back to the
+        # legacy pre-tax flip_roi gate for older clients.
+        _post_roi = flip_metrics.get('postTaxROI', flip_metrics.get('flip_roi', 0))
+        _post_profit = flip_metrics.get('postTaxProfit', flip_metrics.get('profit', 0))
+        _strict70 = bool(flip_metrics.get('passesStrict70', False))
+        if _post_roi >= 15 and _post_profit >= 15000 and _strict70:
             verdict = "PROCEED"
-            risk_level = "MEDIUM"
-        elif flip_metrics.get('flip_roi', 0) >= 15:
+            risk_level = "LOW"
+        elif _post_roi >= 10 and _post_profit >= 8000:
             verdict = "REVIEW"
             risk_level = "MEDIUM"
         else:
@@ -5363,12 +5394,57 @@ BRR STRATEGY METRICS:
     elif deal_type == 'FLIP':
         flip = calculated_metrics.get('flip_metrics', {})
         if flip:
+            # Pull richer fields threaded from the Next.js engine (flipComputed),
+            # with graceful fallbacks to the legacy Flask-computed keys so Claude
+            # never sees £0 when the frontend has not yet been wired up.
+            _pt   = flip.get('preTaxProfit',        flip.get('profit', 0))
+            _post = flip.get('postTaxProfit',       _pt)
+            _roi  = flip.get('postTaxROI',          flip.get('flip_roi', 0))
+            _tt   = flip.get('taxType',             'cgt')
+            _tl   = flip.get('taxLiability',        0)
+            _tr   = flip.get('taxRateUsed',         0)
+            _score      = flip.get('dealScore',       0)
+            _scoreLabel = flip.get('dealScoreLabel',  'n/a')
+            _s70  = bool(flip.get('passesSimple70',  False))
+            _x70  = bool(flip.get('passesStrict70',  False))
+            _smao = flip.get('simpleMAO',           0)
+            _xmao = flip.get('strictMAO',           0)
+            _pct  = flip.get('percentOfARV',        0)
+            _cap  = flip.get('totalCapitalInvested', flip.get('total_costs', 0))
+            _hold = flip.get('holdingCostsTotal',   flip.get('holding_finance', 0))
+            _exit = flip.get('exitCostsTotal',      flip.get('selling_costs', 0))
+            _fin  = flip.get('financeTotal',        0)
+            _ref  = flip.get('refurbTotal',         flip.get('refurb_cost', 0))
+            _mo   = flip.get('holdingMonths',       flip.get('holding_months', 6))
+            _arv  = flip.get('arv', 0)
+            _tax_label = (
+                f"Corporation Tax @ {float(_tr or 0):.0f}% = £{int(float(_tl or 0)):,}"
+                if _tt == 'ct'
+                else f"Capital Gains Tax @ {float(_tr or 0):.0f}% = £{int(float(_tl or 0)):,}"
+            )
+            _s70_str = "PASS" if _s70 else "FAIL"
+            _x70_str = "PASS" if _x70 else "FAIL"
             strategy_context = f"""
-FLIP STRATEGY METRICS:
-- Refurb Cost: £{flip.get('refurb_cost', 0):,}
-- After Repair Value (ARV): £{flip.get('arv', 0):,}
-- Projected Profit: £{flip.get('flip_profit', 0):,}
-- Flip ROI: {flip.get('flip_roi', 0):.1f}%"""
+FLIP STRATEGY METRICS (UK 2024/25):
+- After Repair Value (ARV): £{int(float(_arv or 0)):,}
+- Purchase price as % of ARV: {float(_pct or 0):.1f}% (target ≤ 70%)
+- Refurb Budget (incl. contingency): £{int(float(_ref or 0)):,}
+- Holding period: {int(float(_mo or 0))} months — carry cost £{int(float(_hold or 0)):,}
+- Finance cost over project: £{int(float(_fin or 0)):,}
+- Exit costs (agent + legal + marketing): £{int(float(_exit or 0)):,}
+
+PROFITABILITY:
+- Pre-tax profit: £{int(float(_pt or 0)):,}
+- Tax treatment: {_tax_label}
+- Post-tax profit: £{int(float(_post or 0)):,}
+- Post-tax ROI on capital invested (£{int(float(_cap or 0)):,}): {float(_roi or 0):.1f}%
+
+70% RULE CHECK:
+- Simple MAO (ARV×0.7 − refurb): £{int(float(_smao or 0)):,} — {_s70_str}
+- Strict MAO (ARV×0.7 − ALL non-purchase costs): £{int(float(_xmao or 0)):,} — {_x70_str}
+
+DEAL SCORE: {int(float(_score or 0))}/100 ({_scoreLabel})
+— scored on profit margin, post-tax ROI, 70% rule, refurb uplift, and timeline risk."""
     elif deal_type == 'HMO':
         _a4    = calculated_metrics.get('article_4', {})
         _is_a4 = _a4.get('is_article_4', False)
