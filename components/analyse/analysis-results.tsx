@@ -1,6 +1,12 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
+import dynamic from "next/dynamic"
+import { createClient as createSupabaseClient } from "@/lib/supabase/client"
+import {
+  checkArticle4,
+  type Article4CheckResult,
+} from "@/lib/article4-service"
 import {
   Card,
   CardContent,
@@ -249,20 +255,84 @@ function LocationCard({ location }: { location?: BackendResults["location"] }) {
 }
 
 // ── Article 4 Card ─────────────────────────────────────────────────────────
-function Article4Card({ article4 }: { article4?: BackendResults["article_4"] }) {
-  if (!article4) return null
+//
+// Queries the Metalyzi Supabase `article4_areas` table via the browser
+// anon client. Falls back to the Flask backend's legacy `article_4`
+// advice text when the lookup can't resolve the postcode.
+//
+// Embeds a compact Leaflet mini-map (200px) showing the council centres
+// for matched areas — loaded via next/dynamic so Leaflet doesn't touch
+// `window` during SSR.
+const Article4MiniMap = dynamic(
+  () => import("@/components/article4/Article4Map"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[200px] w-full items-center justify-center rounded-lg bg-muted text-xs text-muted-foreground">
+        Loading map…
+      </div>
+    ),
+  }
+)
 
-  const isArticle4 = article4.is_article_4
-  const isUnknown = article4.known === false
-  const status = isArticle4 ? "restricted" : isUnknown ? "unknown" : "clear"
+function Article4Card({
+  postcode,
+  legacy,
+}: {
+  postcode?: string
+  legacy?: BackendResults["article_4"]
+}) {
+  const [result, setResult] = useState<Article4CheckResult | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!postcode) {
+      setLoading(false)
+      return
+    }
+    ;(async () => {
+      try {
+        const supabase = createSupabaseClient()
+        const r = await checkArticle4(supabase, postcode)
+        if (!cancelled) setResult(r)
+      } catch {
+        // Fail-soft — keep result null, fall through to legacy/unknown.
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [postcode])
+
+  // Derive a 3-state display: active / proposed / clear / unknown.
+  // A missing result (no postcode or lookup failed) → unknown.
+  const status: "active" | "proposed" | "clear" | "unknown" = !result
+    ? "unknown"
+    : result.status === "active"
+    ? "active"
+    : result.status === "proposed"
+    ? "proposed"
+    : result.status === "none"
+    ? "clear"
+    : "unknown"
 
   const cfg = {
-    restricted: {
+    active: {
       bg: "bg-destructive/10 border-destructive/30",
       badgeCls: "bg-destructive/20 text-destructive border-destructive/40",
       icon: <ShieldAlert className="size-4 text-destructive" />,
       label: "Article 4 in Force",
       titleCls: "text-destructive",
+    },
+    proposed: {
+      bg: "bg-warning/10 border-warning/30",
+      badgeCls: "bg-warning/20 text-warning border-warning/40",
+      icon: <ShieldAlert className="size-4 text-warning" />,
+      label: "Article 4 Proposed",
+      titleCls: "text-warning",
     },
     unknown: {
       bg: "bg-warning/10 border-warning/30",
@@ -280,34 +350,172 @@ function Article4Card({ article4 }: { article4?: BackendResults["article_4"] }) 
     },
   }[status]
 
+  const showMap =
+    status === "active" || status === "proposed"
+      ? result?.areas.some(
+          (a) =>
+            a.approximateCenterLat != null && a.approximateCenterLng != null
+        )
+      : false
+
+  const subject =
+    showMap && result
+      ? (() => {
+          const first = result.areas.find(
+            (a) =>
+              a.approximateCenterLat != null && a.approximateCenterLng != null
+          )
+          return first
+            ? {
+                lat: first.approximateCenterLat as number,
+                lng: first.approximateCenterLng as number,
+                label: `${result.district ?? ""} area`,
+              }
+            : null
+        })()
+      : null
+
   return (
     <Card className={`border ${cfg.bg}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           {cfg.icon}
-          <CardTitle className={`text-sm ${cfg.titleCls}`}>Article 4 & Planning</CardTitle>
-          <span className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-medium ${cfg.badgeCls}`}>
+          <CardTitle className={`text-sm ${cfg.titleCls}`}>
+            Article 4 & Planning
+          </CardTitle>
+          <span
+            className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-medium ${cfg.badgeCls}`}
+          >
             {cfg.label}
           </span>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
-        {article4.note && <p className="text-muted-foreground">{article4.note}</p>}
-        {article4.advice && <p className="text-foreground">{article4.advice}</p>}
-        {article4.hmo_guidance && (
+        {loading && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            Checking Article 4 database…
+          </div>
+        )}
+
+        {!loading && result && (
+          <p className="text-foreground">{result.summary}</p>
+        )}
+
+        {!loading && !result && legacy?.note && (
+          <p className="text-muted-foreground">{legacy.note}</p>
+        )}
+
+        {/* Matched council areas */}
+        {!loading && result && result.areas.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {result.areas.map((a) => (
+              <div
+                key={a.id}
+                className="rounded-lg border bg-card p-3 text-xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-foreground">
+                    {a.councilName}
+                  </p>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase ${
+                      a.status === "active"
+                        ? "bg-destructive/20 text-destructive border-destructive/40"
+                        : "bg-warning/20 text-warning border-warning/40"
+                    }`}
+                  >
+                    {a.status}
+                  </span>
+                </div>
+                {a.directionType && (
+                  <p className="mt-1 text-muted-foreground">
+                    {a.directionType}
+                  </p>
+                )}
+                {a.impactDescription && (
+                  <p className="mt-1 text-muted-foreground">
+                    {a.impactDescription}
+                  </p>
+                )}
+                {a.effectiveDate && a.status === "active" && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Effective: {a.effectiveDate}
+                  </p>
+                )}
+                {a.consultationEndDate && a.status !== "active" && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Consultation ends: {a.consultationEndDate}
+                  </p>
+                )}
+                {a.councilPlanningUrl && (
+                  <a
+                    href={a.councilPlanningUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                  >
+                    View council planning page ↗
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Embedded mini-map for active/proposed */}
+        {!loading && showMap && subject && (
+          <div className="rounded-lg overflow-hidden border">
+            <Article4MiniMap
+              subject={subject}
+              height={200}
+              compact
+            />
+          </div>
+        )}
+
+        {/* HMO guidance — show only when active (HMO conversion restricted) */}
+        {status === "active" && (
           <div className="rounded-lg bg-card p-3">
-            <p className="mb-1 text-xs font-semibold text-foreground">HMO Guidance</p>
-            <p className="text-muted-foreground">{article4.hmo_guidance}</p>
-          </div>
-        )}
-        {article4.social_housing_suggestion && (
-          <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-            <p className="mb-1 text-xs font-semibold text-primary">
-              Alternative: Social / Supported Housing (C3→C3b)
+            <p className="mb-1 text-xs font-semibold text-foreground">
+              HMO Guidance
             </p>
-            <p className="text-muted-foreground">{article4.social_housing_suggestion}</p>
+            <p className="text-muted-foreground">
+              C3→C4 HMO conversion in this area requires full planning
+              permission — not permitted development. Budget for an 8–13
+              week planning application and additional professional fees.
+              Consider an alternative strategy (BTL, supported housing) or
+              a different postcode.
+            </p>
           </div>
         )}
+
+        {/* Legacy Flask advice — only shown if we couldn't run the lookup */}
+        {!loading && !result && legacy?.advice && (
+          <p className="text-foreground">{legacy.advice}</p>
+        )}
+        {!loading && !result && legacy?.hmo_guidance && (
+          <div className="rounded-lg bg-card p-3">
+            <p className="mb-1 text-xs font-semibold text-foreground">
+              HMO Guidance
+            </p>
+            <p className="text-muted-foreground">{legacy.hmo_guidance}</p>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-1 text-[11px] text-muted-foreground">
+          <span>
+            Always verify with the local planning authority before
+            proceeding.
+          </span>
+          <a
+            href="/article4-map"
+            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+          >
+            <MapPin className="size-3" />
+            Full UK map
+          </a>
+        </div>
       </CardContent>
     </Card>
   )
@@ -1678,7 +1886,14 @@ export function AnalysisResults({
       )}
 
       {/* ── Article 4 & Planning ────────────────────────────────────── */}
-      {hasArticle4 && <Article4Card article4={backendData?.article_4} />}
+      {/* Always rendered — the card checks the Metalyzi Article 4 database
+          itself using data.postcode, so it works even if the Flask backend
+          didn't return article_4 (legacy field passed as fallback advice). */}
+      <Article4Card
+        postcode={data.postcode}
+        legacy={backendData?.article_4}
+      />
+      {hasArticle4 ? null : null}
 
       {/* ── Strategy Suitability ────────────────────────────────────── */}
       {hasStrategies && (
