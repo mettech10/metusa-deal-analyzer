@@ -275,6 +275,48 @@ function calculateProjection(
  * Run full analysis calculations
  */
 export function calculateAll(data: PropertyFormData): CalculationResults {
+  // ── Property Development (new-build / conversion / refurb) ──────────────
+  // Delegates the full cost-stack + finance + RLV + IRR calc to the
+  // dedicated engine and stuffs the result onto CalculationResults.development.
+  // We still populate the base CalculationResults fields the shared UI reads
+  // (SDLT, TDC, equity, yields=0, no monthly cashflow) so downstream code
+  // never has to null-check.
+  if (data.investmentType === "development") {
+    // Lazy import to avoid a circular (developmentCalculations imports
+    // calculateSDLT from this file).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { calculateDevelopment } =
+      require("./developmentCalculations") as typeof import("./developmentCalculations")
+    const dev = calculateDevelopment(data)
+    const { total: sdltAmount, breakdown: sdltBreakdown } = calculateSDLT(
+      data.purchasePrice,
+      data.buyerType,
+      data.sdltRateType ?? "residential",
+    )
+    return {
+      sdltAmount,
+      sdltBreakdown,
+      totalPurchaseCost: dev.totalDevelopmentCost,
+      totalCapitalRequired: dev.equityRequired,
+      depositAmount: dev.equityRequired,
+      mortgageAmount: dev.financeFacilityLoan,
+      monthlyMortgagePayment: 0,
+      annualMortgageCost: 0,
+      bridgingLoanDetails: undefined,
+      grossYield: 0,
+      netYield: 0,
+      monthlyIncome: 0,
+      monthlyExpenses: 0,
+      monthlyCashFlow: 0,
+      annualCashFlow: 0,
+      cashOnCashReturn: dev.roe,
+      annualRunningCosts: 0,
+      monthlyRunningCosts: 0,
+      development: dev,
+      fiveYearProjection: [],
+    }
+  }
+
   // ── R2SA: rent the property from a landlord, sublet as serviced accommodation ──
   if (data.investmentType === "r2sa") {
     const saRevenue   = data.saMonthlySARevenue || 0

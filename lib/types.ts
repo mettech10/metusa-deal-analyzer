@@ -214,6 +214,11 @@ export interface CalculationResults {
   annualRunningCosts: number
   monthlyRunningCosts: number
 
+  // Development-specific — full appraisal (cost stack + finance + profit + RLV)
+  // Populated only for investmentType === "development". See
+  // lib/developmentCalculations.ts for the DevelopmentResult shape.
+  development?: import("./developmentCalculations").DevelopmentResult
+
   // Projections
   fiveYearProjection: YearProjection[]
 }
