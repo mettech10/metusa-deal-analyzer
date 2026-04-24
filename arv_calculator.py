@@ -617,6 +617,267 @@ def calculate_arv(
         }
 
 
+# ── GDV (Gross Development Value) — Property Development strategy ─────────
+#
+# Reuses the same comp-sourcing + EPC enrichment pipeline as ARV, but
+# tightens the £/m² filter to the TOP 20% of comps (premium/new-build
+# proxy) for new-build construction types, and to top 40% (same as
+# ARV) for conversion / refurbishment schemes since conversions exit
+# near refurbished-stock pricing, not new-build premium.
+#
+# Returns per-unit conservative/mid/optimistic values scaled to each
+# unit's GIA, plus scheme-level totals. Fail-soft: on any error or
+# sparse data, returns a structured error dict so the UI can show
+# "Enter sale prices manually".
+
+# Top 20% quantile for new-build — premium stock proxy
+NEW_BUILD_TOP_QUANTILE = 0.20
+
+
+def calculate_gdv(
+    postcode: str,
+    units: List[dict],
+    construction_type: Optional[str] = 'new-build-traditional',
+) -> Optional[dict]:
+    """
+    Auto-calculate scheme-level Gross Development Value.
+
+    Args:
+      postcode:          UK postcode (required)
+      units:             [{unitType, numberOfUnits, avgSizeM2}, ...]
+      construction_type: 'new-build-*' → top 20% £/m²
+                         'conversion' / 'extension' / 'refurbishment' → top 40%
+
+    Returns per-unit conservative/mid/optimistic sale prices plus scheme
+    totals, or a structured error dict. NEVER throws.
+    """
+    try:
+        postcode = (postcode or '').strip().upper()
+        district = _district(postcode)
+        if not postcode:
+            return {
+                'error': 'postcode is required',
+                'message': 'Enter a postcode or set sale prices manually',
+                'comparablesUsed': 0,
+            }
+
+        if not units or not isinstance(units, list):
+            return {
+                'error': 'units array is required',
+                'message': 'Add at least one unit type to calculate GDV',
+                'comparablesUsed': 0,
+            }
+
+        # Normalise + validate units
+        valid_units: List[dict] = []
+        for u in units:
+            if not isinstance(u, dict):
+                continue
+            try:
+                n = int(u.get('numberOfUnits') or 0)
+                m2 = float(u.get('avgSizeM2') or 0)
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or m2 <= 0:
+                continue
+            valid_units.append({
+                'unitType': str(u.get('unitType') or 'other'),
+                'numberOfUnits': n,
+                'avgSizeM2': m2,
+            })
+
+        if not valid_units:
+            return {
+                'error': 'no valid units in unit mix',
+                'message': 'Each unit needs numberOfUnits > 0 and avgSizeM2 > 0',
+                'comparablesUsed': 0,
+            }
+
+        # Decide quantile based on construction type
+        ct = (construction_type or '').lower()
+        is_new_build = ct.startswith('new-build')
+        quantile = NEW_BUILD_TOP_QUANTILE if is_new_build else TOP_QUANTILE
+        quantile_label = (
+            'top 20% (new-build premium proxy)'
+            if is_new_build
+            else 'top 40% (refurbished/conversion proxy)'
+        )
+
+        # ── Step 1 — fetch comps (no type filter; we want a broad market picture)
+        raw, widening_label = _fetch_raw_comps(postcode, None, None)
+        if not raw:
+            return {
+                'error': 'No sold comparables found',
+                'message': 'Insufficient comparable data — enter sale prices manually',
+                'comparablesUsed': 0,
+            }
+
+        # ── Step 2 — recency filter (12 mo → 24 mo fallback)
+        def _collect(lookback_mo: int) -> List[dict]:
+            cutoff_dt = datetime.utcnow() - timedelta(days=lookback_mo * 31)
+            out: List[dict] = []
+            for c in raw:
+                dt = _parse_date(c['date'])
+                if not dt or dt < cutoff_dt:
+                    continue
+                cc = dict(c)
+                cc['_date_obj'] = dt
+                cc['_months_old'] = _months_ago(dt)
+                out.append(cc)
+            return out
+
+        passed = _collect(LOOKBACK_MONTHS)
+        relaxation = f'last {LOOKBACK_MONTHS} months'
+        if len(passed) < MIN_COMPS:
+            passed = _collect(24)
+            relaxation = 'last 24 months (sparse area)'
+        if len(passed) < MIN_COMPS:
+            return {
+                'error': f'Only {len(passed)} comps after widening',
+                'message': 'Insufficient comparable data — enter sale prices manually',
+                'comparablesUsed': len(passed),
+                'wideningLabel': widening_label,
+            }
+
+        # ── Step 3 — EPC enrichment (postcode-level)
+        epc_entries = _epc_lookup_postcode(postcode)
+        for c in passed:
+            c['floor_area_m2'] = _match_floor_area(c['address'], epc_entries)
+
+        epc_areas = [c['floor_area_m2'] for c in passed if c.get('floor_area_m2')]
+        epc_median = statistics.median(epc_areas) if epc_areas else None
+        # Use median unit size in the mix as fallback — that's the best proxy
+        # for the kind of stock the scheme is delivering.
+        mix_median_m2 = statistics.median([u['avgSizeM2'] for u in valid_units])
+        fallback_m2 = epc_median or mix_median_m2
+        epc_used = bool(epc_median)
+
+        priced: List[dict] = []
+        for c in passed:
+            m2 = c.get('floor_area_m2') or fallback_m2
+            if not m2 or m2 <= 10:
+                continue
+            c['_m2_used'] = m2
+            c['price_per_m2'] = c['price'] / m2
+            priced.append(c)
+
+        if len(priced) < MIN_COMPS:
+            return {
+                'error': f'Only {len(priced)} usable comps after enrichment',
+                'message': 'Insufficient comparable data — enter sale prices manually',
+                'comparablesUsed': len(priced),
+            }
+
+        # ── Step 4 — keep top quantile by £/m² (premium proxy for new-build)
+        priced.sort(key=lambda x: x['price_per_m2'], reverse=True)
+        cutoff_n = max(MIN_COMPS, math.ceil(len(priced) * quantile))
+        top_comps = priced[:cutoff_n]
+        ppsm_values = sorted([c['price_per_m2'] for c in top_comps])
+
+        avg_ppsm = statistics.mean(ppsm_values)
+        lower_q = ppsm_values[max(0, len(ppsm_values) // 4)]
+        upper_q = ppsm_values[min(len(ppsm_values) - 1, (3 * len(ppsm_values)) // 4)]
+        if upper_q == lower_q:
+            lower_q = avg_ppsm * 0.92
+            upper_q = avg_ppsm * 1.08
+
+        # New-build uplift: UK new-build typically trades at ~10-15% premium
+        # over second-hand stock in the same area. When construction_type is
+        # new-build AND we're already filtering to top 20%, the comps capture
+        # most of that premium — but add a modest 5% finishing uplift to
+        # reflect show-home standard finish, warranty, energy efficiency.
+        new_build_uplift = 1.05 if is_new_build else 1.0
+
+        lower_q *= new_build_uplift
+        avg_ppsm *= new_build_uplift
+        upper_q *= new_build_uplift
+
+        # ── Step 5 — project onto each unit in the mix
+        per_unit_rows = []
+        total_conservative = 0
+        total_mid = 0
+        total_optimistic = 0
+        for u in valid_units:
+            n = u['numberOfUnits']
+            m2 = u['avgSizeM2']
+            cons_per = int(round(m2 * lower_q / 1000) * 1000)     # round to £1k
+            mid_per = int(round(m2 * avg_ppsm / 1000) * 1000)
+            opt_per = int(round(m2 * upper_q / 1000) * 1000)
+            per_unit_rows.append({
+                'unitType': u['unitType'],
+                'numberOfUnits': n,
+                'avgSizeM2': m2,
+                'conservativePerUnit': cons_per,
+                'midPerUnit': mid_per,
+                'optimisticPerUnit': opt_per,
+                'conservativeTotal': cons_per * n,
+                'midTotal': mid_per * n,
+                'optimisticTotal': opt_per * n,
+            })
+            total_conservative += cons_per * n
+            total_mid += mid_per * n
+            total_optimistic += opt_per * n
+
+        # Format comparables sample for UI (top 8 for brevity)
+        comps_sample = []
+        for c in top_comps[:8]:
+            comps_sample.append({
+                'address': c['address'] or f'Sold in {district}',
+                'saleDate': c['date'],
+                'salePrice': c['price'],
+                'floorAreaM2': round(c['_m2_used'], 1),
+                'pricePerM2': int(round(c['price_per_m2'])),
+                'source': c['source'],
+                'floorAreaEstimated': c.get('floor_area_m2') is None,
+            })
+
+        if epc_used:
+            methodology = (
+                f'Based on {len(top_comps)} comparable sales averaging '
+                f'£{int(round(avg_ppsm)):,}/m² in {district} ({quantile_label}, '
+                f'{relaxation})'
+                + (f' · +5% new-build uplift' if is_new_build else '')
+            )
+            data_source = 'HM Land Registry + PropertyData + EPC Register'
+        else:
+            methodology = (
+                f'Based on {len(top_comps)} top-priced sales in {district} '
+                f'({relaxation}), £/m² scaled to unit-mix median size '
+                f'{int(round(fallback_m2))}m² — EPC floor areas unavailable'
+                + (f' · +5% new-build uplift' if is_new_build else '')
+            )
+            data_source = 'HM Land Registry + PropertyData'
+
+        return {
+            'conservativeGDV': total_conservative,
+            'midGDV': total_mid,
+            'optimisticGDV': total_optimistic,
+            'avgPricePerM2': int(round(avg_ppsm)),
+            'lowerPricePerM2': int(round(lower_q)),
+            'upperPricePerM2': int(round(upper_q)),
+            'perUnit': per_unit_rows,
+            'comparables': comps_sample,
+            'comparablesUsed': len(top_comps),
+            'methodology': methodology,
+            'dataSource': data_source,
+            'quantileUsed': quantile_label,
+            'epcDataUsed': epc_used,
+            'wideningLabel': widening_label,
+            'relaxation': relaxation,
+            'constructionType': construction_type or 'unknown',
+            'newBuildUplift': new_build_uplift,
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'error': f'GDV calculator error: {e}',
+            'message': 'Could not calculate GDV — enter sale prices manually',
+            'comparablesUsed': 0,
+        }
+
+
 if __name__ == '__main__':
     # Smoke test
     import json
@@ -624,3 +885,11 @@ if __name__ == '__main__':
         print(f'\n=== ARV for {pc} (semi-detached, 3 bed, 85m²) ===')
         r = calculate_arv(pc, 'house', 3, floor_size_m2=85, property_type_detail='semi-detached')
         print(json.dumps(r, indent=2, default=str)[:1500])
+
+    print(f'\n=== GDV for M14 6LT (4×2-bed-flat 70m² new-build) ===')
+    g = calculate_gdv(
+        'M14 6LT',
+        [{'unitType': '2-bed-flat', 'numberOfUnits': 4, 'avgSizeM2': 70}],
+        'new-build-traditional',
+    )
+    print(json.dumps(g, indent=2, default=str)[:2000])

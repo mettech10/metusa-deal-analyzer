@@ -49,7 +49,7 @@ except ImportError:
     airroi_service = None
     print("[WARN] airroi_service not available — Airroi SA market data disabled")
 
-# Import shared ARV calculator (Flip + BRRRR)
+# Import shared ARV calculator (Flip + BRRRR) and GDV calculator (Development)
 try:
     from arv_calculator import calculate_arv as _calculate_arv
     ARV_CALCULATOR_AVAILABLE = True
@@ -57,6 +57,14 @@ except ImportError:
     ARV_CALCULATOR_AVAILABLE = False
     _calculate_arv = None
     print("[WARN] arv_calculator not available — auto-ARV disabled")
+
+try:
+    from arv_calculator import calculate_gdv as _calculate_gdv
+    GDV_CALCULATOR_AVAILABLE = True
+except ImportError:
+    GDV_CALCULATOR_AVAILABLE = False
+    _calculate_gdv = None
+    print("[WARN] calculate_gdv not available — auto-GDV disabled")
 
 def _parse_property_markdown(text: str, source: str = 'scraper') -> dict:
     """Parse property details from markdown/plain text returned by a scraper.
@@ -7511,6 +7519,80 @@ def arv_calculate():
         return jsonify({
             'error': str(e),
             'message': 'Auto-ARV failed — please enter ARV manually',
+            'comparablesUsed': 0,
+        }), 200
+
+
+# ─── GDV Auto-Calculator (Property Development strategy) ───────────────────
+@app.route('/api/gdv/calculate', methods=['POST'])
+@limiter.limit("20 per minute")
+def gdv_calculate():
+    """
+    Auto-calculate scheme Gross Development Value for a UK Property
+    Development analysis.
+
+    Body: {
+      postcode: str (required),
+      units: [{unitType, numberOfUnits, avgSizeM2}, ...] (required),
+      constructionType: str (optional — default 'new-build-traditional')
+    }
+
+    Returns per-unit conservative/mid/optimistic sale prices plus scheme
+    totals, or a structured error object. NEVER 500s — failures collapse
+    into `{ error, message, comparablesUsed }` so the UI falls back to
+    "Enter sale prices manually".
+    """
+    if not GDV_CALCULATOR_AVAILABLE or _calculate_gdv is None:
+        return jsonify({
+            'error': 'gdv_calculator module not loaded',
+            'message': 'Auto-GDV unavailable on this server — enter sale prices manually',
+            'comparablesUsed': 0,
+        }), 200
+
+    try:
+        body = request.get_json(force=True) or {}
+        postcode = (body.get('postcode') or '').strip().upper()
+        units = body.get('units') or []
+        construction_type = (
+            body.get('constructionType')
+            or body.get('construction_type')
+            or 'new-build-traditional'
+        )
+
+        if not postcode:
+            return jsonify({
+                'error': 'postcode is required',
+                'message': 'Enter a postcode or set sale prices manually',
+                'comparablesUsed': 0,
+            }), 400
+
+        if not isinstance(units, list) or not units:
+            return jsonify({
+                'error': 'units array is required',
+                'message': 'Add at least one unit type before calculating GDV',
+                'comparablesUsed': 0,
+            }), 400
+
+        result = _calculate_gdv(
+            postcode=postcode,
+            units=units,
+            construction_type=construction_type,
+        )
+        if result is None:
+            return jsonify({
+                'error': 'GDV calculator returned no result',
+                'message': 'Insufficient comparable data — please enter sale prices manually',
+                'comparablesUsed': 0,
+            }), 200
+        return jsonify(result), 200
+
+    except Exception as e:
+        print(f'[GDV] endpoint error: {e}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': str(e),
+            'message': 'Auto-GDV failed — please enter sale prices manually',
             'comparablesUsed': 0,
         }), 200
 

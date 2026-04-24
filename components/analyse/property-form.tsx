@@ -17,6 +17,7 @@ import {
 import { Loader2, Link2, Info, Trash2, Plus } from "lucide-react"
 import type { PropertyFormData, PropertyTypeDetail, TenureType } from "@/lib/types"
 import { estimateRefurbCost } from "@/lib/calculations"
+import { AutoGdvButton } from "./auto-gdv"
 
 const schema = z.object({
   address: z.string().min(1, "Address is required"),
@@ -666,6 +667,38 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                   <span className="font-semibold text-primary">£{devTotalGDV.toLocaleString()}</span>
                 </div>
               </div>
+            )}
+            {/*
+              Auto-GDV estimator — queries Land Registry + EPC comps for
+              new-build premium pricing via /api/gdv/calculate. One-click
+              writes chosen scenario back onto the unit mix salePricePerUnit.
+              Only surfaced when we have at least one unit row to price.
+            */}
+            {unitMixFields.length > 0 && (
+              <AutoGdvButton
+                postcode={postcodeValue || ""}
+                units={devUnitMixWatch.map((u) => ({
+                  unitType: String(u?.unitType || "other"),
+                  numberOfUnits: Number(u?.numberOfUnits) || 0,
+                  avgSizeM2: Number(u?.avgSizeM2) || 0,
+                }))}
+                constructionType={devConstructionTypeWatch}
+                onApplyScenario={(scenario, perUnit) => {
+                  perUnit.forEach((row, idx) => {
+                    const price =
+                      scenario === "conservative"
+                        ? row.conservativePerUnit
+                        : scenario === "optimistic"
+                          ? row.optimisticPerUnit
+                          : row.midPerUnit
+                    setValue(
+                      `devUnitMix.${idx}.salePricePerUnit` as const,
+                      price,
+                      { shouldDirty: true, shouldValidate: true },
+                    )
+                  })
+                }}
+              />
             )}
             {devTriggersAffordable && (
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
