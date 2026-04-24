@@ -13,6 +13,50 @@ export type InvestmentType = "btl" | "brr" | "hmo" | "flip" | "r2sa" | "developm
 export type PropertyCondition = "excellent" | "good" | "fair" | "needs-work"
 export type PurchaseType = "mortgage" | "bridging-loan" | "cash"
 
+// ── Property Development (new-build / conversion) ─────────────────────
+export type DevSiteType =
+  | "greenfield"
+  | "brownfield"
+  | "existing-building"
+  | "demolition-and-build"
+  | "land-only"
+export type DevPlanningStatus =
+  | "no-planning"
+  | "pre-application"
+  | "outline"
+  | "full-planning"
+  | "permitted-development"
+  | "lapsed"
+export type DevConstructionType =
+  | "new-build-traditional"
+  | "new-build-timber-frame"
+  | "new-build-modular"
+  | "conversion"
+  | "extension"
+  | "refurbishment"
+export type DevUnitType =
+  | "studio"
+  | "1-bed-flat"
+  | "2-bed-flat"
+  | "3-bed-flat"
+  | "1-bed-house"
+  | "2-bed-house"
+  | "3-bed-house"
+  | "4-bed-house"
+  | "5-bed-house"
+  | "commercial"
+  | "other"
+export type SDLTRateType = "residential" | "non-residential" | "mixed-use"
+
+/** A single unit within a scheme's unit mix. Used to drive GDV + size totals. */
+export interface DevUnit {
+  unitType: DevUnitType
+  numberOfUnits: number
+  avgSizeM2: number
+  salePricePerUnit: number
+  rentalValuePerUnit?: number
+}
+
 export interface PropertyFormData {
   // Property Details
   address: string
@@ -56,6 +100,57 @@ export interface PropertyFormData {
   // Rent-to-SA (R2SA)
   saMonthlySARevenue?: number // expected gross monthly SA revenue
   saSetupCosts?: number       // one-off setup / furnishing costs
+
+  // ── Property Development ──────────────────────────────────────────
+  // Site Details
+  devSiteType?: DevSiteType
+  devSiteAreaM2?: number
+  devPlanningStatus?: DevPlanningStatus
+  devPlanningRef?: string
+
+  // Unit Mix
+  devUnitMix?: DevUnit[]
+
+  // Acquisition
+  sdltRateType?: SDLTRateType
+
+  // Construction
+  devConstructionType?: DevConstructionType
+  devBuildCostPerM2?: number
+  devAbnormals?: number
+  devContingencyPercent?: number
+
+  // Professional fees
+  devArchitectPercent?: number
+  devStructuralEngineerPercent?: number
+  devQsPercent?: number
+  devProjectManagerPercent?: number
+  devPlanningConsultantFixed?: number
+  devBuildingControlFixed?: number
+  devWarrantyPercent?: number
+
+  // Planning Obligations
+  devCILRatePerM2?: number
+  devS106PerUnit?: number
+  devAffordableHousingPercent?: number
+  devBuildingRegsFixed?: number
+
+  // Development Finance
+  devFinanceLTC?: number
+  devFinanceDay1Percent?: number
+  devFinanceRate?: number
+  devFinanceArrangementFeePercent?: number
+  devFinanceMonitoringFeeMonthly?: number
+  devFinanceTermMonths?: number
+  devFinanceExitFeePercent?: number
+  devFinanceRolledUp?: boolean
+
+  // Exit
+  devExitStrategy?: "sell-all" | "hold-and-refinance" | "hybrid"
+  devSalesAgentPercent?: number
+  devSalesLegalPerUnit?: number
+  devMarketingCostsFixed?: number
+  devMarketingPerUnit?: number
 
   // Projections — user-supplied assumptions
   capitalGrowthRate?: number  // annual property appreciation %, default 4

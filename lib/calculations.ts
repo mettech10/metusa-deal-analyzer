@@ -1,13 +1,54 @@
 import type { PropertyFormData, CalculationResults, YearProjection } from "./types"
 
 /**
+ * Non-residential / mixed-use SDLT bands (England/NI).
+ * Applies to pure commercial property, bare land with no dwelling,
+ * and mixed-use schemes. No 5% surcharge, no FTB relief.
+ *   0% up to 150,000
+ *   2% on 150,001 – 250,000
+ *   5% above 250,000
+ */
+function calculateNonResidentialSDLT(price: number): {
+  total: number
+  breakdown: { band: string; tax: number }[]
+} {
+  const bands = [
+    { threshold: 150000, rate: 0, label: "Up to 150,000 (non-res)" },
+    { threshold: 250000, rate: 0.02, label: "150,001 - 250,000 (non-res)" },
+    { threshold: Infinity, rate: 0.05, label: "Over 250,000 (non-res)" },
+  ]
+  let remaining = price
+  let total = 0
+  const breakdown: { band: string; tax: number }[] = []
+  let prevThreshold = 0
+  for (const band of bands) {
+    const taxable = Math.min(remaining, band.threshold - prevThreshold)
+    if (taxable <= 0) break
+    const tax = taxable * band.rate
+    if (tax > 0) breakdown.push({ band: band.label, tax: Math.round(tax) })
+    total += tax
+    remaining -= taxable
+    prevThreshold = band.threshold
+  }
+  return { total: Math.round(total), breakdown }
+}
+
+/**
  * Calculate UK Stamp Duty Land Tax (SDLT) for England/NI
  * Rates effective from April 2025
+ *
+ * `rateType` selects between residential bands (default) and
+ * non-residential / mixed-use bands (0/2/5%) — used by Development
+ * acquisitions of bare land or mixed-use sites.
  */
 export function calculateSDLT(
   price: number,
-  buyerType: "first-time" | "additional"
+  buyerType: "first-time" | "additional",
+  rateType: "residential" | "non-residential" | "mixed-use" = "residential"
 ): { total: number; breakdown: { band: string; tax: number }[] } {
+  if (rateType === "non-residential" || rateType === "mixed-use") {
+    return calculateNonResidentialSDLT(price)
+  }
   // First-time buyer relief: 0% up to £425k, 5% on £425k–£625k, standard above £625k
   // (relief removed entirely if price > £625,000)
   if (buyerType === "first-time" && price <= 625000) {
@@ -272,7 +313,8 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
 
   const { total: sdltAmount, breakdown: sdltBreakdown } = calculateSDLT(
     data.purchasePrice,
-    data.buyerType
+    data.buyerType,
+    data.sdltRateType
   )
 
   // Deposit & Mortgage
