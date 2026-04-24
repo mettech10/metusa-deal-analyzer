@@ -233,7 +233,9 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                     <SelectItem value="brr">Buy, Refurb &amp; Refinance (BRR)</SelectItem>
                     <SelectItem value="flip">Flip / Renovation — Buy &amp; sell</SelectItem>
                     <SelectItem value="r2sa">Rent-to-SA (R2SA) — Sublet as SA</SelectItem>
-                    <SelectItem value="development">Development</SelectItem>
+                    <SelectItem value="development">
+                      Property Development — New Build / Conversion
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               )}
