@@ -135,3 +135,85 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Print / "Save as PDF" report mode.
+   When the user hits "Download Development Feasibility Report" we
+   toggle .print-development on <body> and the rules below isolate
+   .print-development-root, force light colours, and avoid breaking
+   cards mid-page.
+   ────────────────────────────────────────────────────────────────── */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm 14mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+
+  body.print-development * {
+    visibility: hidden;
+  }
+  body.print-development .print-development-root,
+  body.print-development .print-development-root * {
+    visibility: visible;
+  }
+  body.print-development .print-development-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+  body.print-development .print-development-root .no-print,
+  body.print-development .print-development-root .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  body.print-development .print-development-root,
+  body.print-development .print-development-root * {
+    color: #0f172a !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  body.print-development .print-development-root [class*="card"],
+  body.print-development .print-development-root .rounded-md,
+  body.print-development .print-development-root .rounded-lg,
+  body.print-development .print-development-root .rounded-xl {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body.print-development .print-development-root .text-muted-foreground,
+  body.print-development .print-development-root [class*="text-muted"] {
+    color: #475569 !important;
+  }
+  body.print-development .print-development-root h1,
+  body.print-development .print-development-root h2,
+  body.print-development .print-development-root h3 {
+    page-break-after: avoid;
+  }
+  body.print-development .print-development-root table {
+    page-break-inside: auto;
+  }
+  body.print-development .print-development-root tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  body.print-development .print-development-root .stack-segment {
+    background-color: var(--stack-color, #cbd5e1) !important;
+    color: #ffffff !important;
+  }
+  body.print-development .print-development-root .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+}
+
+/* Hide print-only elements outside print mode. */
+.print-only {
+  display: none;
+}

@@ -29,6 +29,7 @@ import {
   CardDescription,
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import type { PropertyFormData, CalculationResults } from "@/lib/types"
 import type { DevelopmentResult } from "@/lib/developmentCalculations"
@@ -39,6 +40,7 @@ import {
   Building2,
   Calendar,
   CheckCircle2,
+  Download,
   Info,
   Layers,
   PoundSterling,
@@ -152,8 +154,125 @@ export function DevelopmentResults({
   const verdict = verdictFromScore(dev.dealScore)
   const buildMonths = dev.financeTermMonths || 0
 
+  // ── Print → browser save-as-PDF ─────────────────────────────────
+  // Toggles body.print-development so globals.css can isolate the
+  // print-development-root subtree and force light colours. Cleanup
+  // listener removes the class as soon as the print dialog closes,
+  // leaving normal page styling untouched.
+  const handlePrintReport = () => {
+    if (typeof document === "undefined") return
+    document.body.classList.add("print-development")
+    const cleanup = () => {
+      document.body.classList.remove("print-development")
+      window.removeEventListener("afterprint", cleanup)
+    }
+    window.addEventListener("afterprint", cleanup)
+    setTimeout(() => window.print(), 50)
+  }
+
+  const reportDate = new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 print-development-root">
+      {/* ── Download report button (hidden in print) ───────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 no-print">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            Development Feasibility Report
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Print or save the below as PDF — the full appraisal pack for
+            lender / broker / partner submission.
+          </p>
+        </div>
+        <Button
+          onClick={handlePrintReport}
+          variant="outline"
+          size="sm"
+          className="gap-2"
+        >
+          <Download className="size-4" />
+          Download Report
+        </Button>
+      </div>
+
+      {/* ── Print-only cover page ──────────────────────────────────── */}
+      <div className="print-only">
+        <div className="rounded-xl border-2 border-slate-300 p-8">
+          <div className="flex flex-col gap-6">
+            <div className="flex items-start justify-between border-b border-slate-200 pb-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Development Feasibility Report
+                </p>
+                <h1 className="text-2xl font-bold text-slate-900">
+                  {data.address || "Site Appraisal"}
+                </h1>
+                <p className="text-sm text-slate-600">
+                  {data.postcode}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                  Report Date
+                </p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {reportDate}
+                </p>
+                <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  Verdict
+                </p>
+                <p className="text-sm font-bold text-slate-900">
+                  {verdict.label} · {dev.dealScore}/100
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <CoverStat label="GDV" value={formatCurrency(dev.totalGDV)} />
+              <CoverStat
+                label="Total Dev Cost"
+                value={formatCurrency(dev.totalDevelopmentCost)}
+              />
+              <CoverStat
+                label="Net Profit"
+                value={formatCurrency(dev.grossProfit)}
+              />
+              <CoverStat
+                label="Profit on Cost"
+                value={`${dev.profitOnCost.toFixed(1)}%`}
+              />
+              <CoverStat
+                label="LTGDV"
+                value={`${dev.ltgdv.toFixed(1)}%`}
+              />
+              <CoverStat
+                label="IRR"
+                value={`${dev.irr.toFixed(1)}%`}
+              />
+              <CoverStat
+                label="Equity Required"
+                value={formatCurrency(dev.equityRequired)}
+              />
+              <CoverStat
+                label="Units / GIA"
+                value={`${dev.totalUnits} · ${dev.totalGIA.toLocaleString()} m²`}
+              />
+            </div>
+            <p className="text-[10px] text-slate-500">
+              This appraisal is an indicative feasibility assessment based
+              on user-supplied inputs and {dev.totalUnits > 0 ? "scheme " : ""}
+              comparables sourced from HM Land Registry sold-price data.
+              Not a regulated valuation. Verify all figures with your QS,
+              lender and planning consultant before commitment.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ── 1 · Viability Dashboard ─────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
@@ -677,6 +796,67 @@ export function DevelopmentResults({
           </span>
         </CardContent>
       </Card>
+
+      {/* ── Print-only flag log + footer ───────────────────────────── */}
+      <div className="print-only">
+        <div className="rounded-xl border-2 border-slate-300 p-6">
+          <h2 className="mb-3 text-base font-bold text-slate-900">
+            Appraisal Notes & Flags
+          </h2>
+          {dev.flags.length === 0 ? (
+            <p className="text-xs text-slate-600">
+              No viability flags — scheme passes all base checks.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1.5 text-xs">
+              {dev.flags.map((f, i) => (
+                <li key={i} className="text-slate-800">
+                  <strong className="uppercase">[{f.severity}]</strong>{" "}
+                  {f.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-6 grid grid-cols-2 gap-4 border-t border-slate-200 pt-4 text-[10px] text-slate-500">
+            <div>
+              <p className="font-semibold uppercase tracking-wide">
+                Methodology
+              </p>
+              <p className="mt-1 leading-snug">
+                Cost stack: BCIS 2024/25 build benchmarks. Finance:
+                50% avg-utilisation interest approximation on
+                construction tranche. RLV back-solved at{" "}
+                {dev.rlvProfitTargetPercent}% profit-on-cost (RICS).
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold uppercase tracking-wide">
+                Disclaimer
+              </p>
+              <p className="mt-1 leading-snug">
+                Indicative only. Not a regulated valuation. Confirm all
+                inputs with QS, planning consultant, and finance broker
+                before commitment.
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-center text-[10px] text-slate-400">
+            Generated by Metalyzi · {reportDate}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Cover-page stat tile (print-only). */
+function CoverStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 text-base font-bold text-slate-900">{value}</p>
     </div>
   )
 }
