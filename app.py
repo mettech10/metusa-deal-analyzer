@@ -2416,7 +2416,7 @@ def analyze_deal(data):
     
     # Security: Extract and sanitize inputs
     deal_type = sanitize_input(data.get('dealType', 'BTL'), 20)
-    if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP', 'R2SA']:
+    if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP', 'R2SA', 'DEV']:
         raise ValueError("Invalid deal type")
     
     # Security: Validate numeric inputs
@@ -5486,6 +5486,103 @@ RENT-TO-SA STRATEGY:
 - Setup/Furnishing Costs: £{r2sa.get('setup_costs', 0):,}
 - ROI on Setup Costs: {r2sa.get('r2sa_roi', 0):.1f}%%
 - Note: Investor rents from landlord and sublets as short-term SA (Airbnb/Booking.com). No purchase required."""
+    elif deal_type == 'DEV':
+        # Property Development — full feasibility appraisal threaded from
+        # the Next.js engine via _devContext. Yields/cashflow are zero for
+        # build-to-sell schemes; the AI must analyse on profit-on-cost,
+        # LTGDV, IRR, and residual land value instead.
+        dev = property_data.get('_devContext') or {}
+        def _fmt(n):
+            try:
+                return f"£{int(float(n)):,}" if n is not None else "£0"
+            except (TypeError, ValueError):
+                return "£0"
+        def _pct(n, dp=1):
+            try:
+                return f"{float(n or 0):.{dp}f}%"
+            except (TypeError, ValueError):
+                return "0.0%"
+        flag_lines = "\n".join(
+            f"  - [{(f.get('severity') or 'info').upper()}] {f.get('message') or ''}"
+            for f in (dev.get('flags') or [])
+        ) or "  - (none)"
+        cost_stack_lines = "\n".join(
+            f"  - {line.get('label')}: {_fmt(line.get('amount'))} ({float(line.get('percentOfTDC') or 0):.1f}% of TDC)"
+            for line in (dev.get('costStack') or [])
+        ) or "  - (cost stack unavailable)"
+        unit_lines = "\n".join(
+            f"  - {u.get('numberOfUnits')}× {u.get('unitType')} @ {u.get('avgSizeM2')}m² · "
+            f"{_fmt(u.get('salePricePerUnit'))}/unit · GDV {_fmt(u.get('gdv'))}"
+            for u in (dev.get('unitLines') or [])
+        ) or "  - (no unit mix supplied)"
+        strategy_context = f"""
+PROPERTY DEVELOPMENT — FULL FEASIBILITY APPRAISAL:
+
+Scheme summary:
+- Construction type:           {dev.get('constructionType') or property_data.get('devConstructionType') or 'n/a'}
+- Total units:                 {dev.get('totalUnits') or 0}
+- Total GIA:                   {dev.get('totalGIA') or 0} m²
+- Avg £/m² GDV:                {_fmt(dev.get('avgGDVPerM2'))}
+- Affordable trigger (≥10):    {'YES' if dev.get('affordableHousingTriggered') else 'NO'}
+
+Unit mix:
+{unit_lines}
+
+GDV & profit:
+- Gross Development Value:     {_fmt(dev.get('totalGDV'))}
+- Total Development Cost:      {_fmt(dev.get('totalDevelopmentCost'))}
+- Net profit:                  {_fmt(dev.get('grossProfit'))}
+- Profit on COST:              {_pct(dev.get('profitOnCost'))}    (RICS target ≥ 20%; lender floor 15%)
+- Profit on GDV:               {_pct(dev.get('profitOnGDV'))}    (target ≥ 15%)
+
+Cost stack (by category):
+{cost_stack_lines}
+
+Finance:
+- Facility size:               {_fmt(dev.get('financeFacilityLoan'))}   (LTC {_pct(dev.get('ltc'))})
+- Day-1 advance vs land:       {_fmt(dev.get('financeDay1Drawdown'))}
+- Total interest:              {_fmt(dev.get('financeInterest'))}    (50% avg-utilisation basis)
+- Arrangement + exit + monit.: {_fmt((dev.get('financeArrangementFee') or 0) + (dev.get('financeExitFee') or 0) + (dev.get('financeMonitoringTotal') or 0))}
+- Peak funding:                {_fmt(dev.get('peakFunding'))}
+- Rolled-up:                   {'YES' if dev.get('financeRolledUp') else 'NO (serviced monthly)'}
+- Rate / Term:                 {float(dev.get('financeRateUsed') or 0):.2f}% over {dev.get('financeTermMonths') or 0} months
+
+Leverage & equity:
+- LTGDV:                       {_pct(dev.get('ltgdv'))}    (lender appetite caps ~70%; >75% rare)
+- Equity required:             {_fmt(dev.get('equityRequired'))}
+- ROE:                         {_pct(dev.get('roe'))}
+- Annualised ROI:              {_pct(dev.get('annualisedROI'))}
+- IRR (annualised):            {_pct(dev.get('irr'))}    (institutional target ≥ 20%)
+
+Residual land value (RICS blue-book back-solve at {dev.get('rlvProfitTargetPercent') or 20}% profit-on-cost):
+- Investor's price:            {_fmt(dev.get('acquisitionPrice'))}
+- RLV (max viable):            {_fmt(dev.get('residualLandValue'))}
+- Margin / (Premium):          {_fmt(dev.get('landPremiumOverAsk'))}    {'(margin of safety)' if (dev.get('landPremiumOverAsk') or 0) >= 0 else '(OVER-PAYING vs RLV)'}
+
+Engine deal score: {dev.get('dealScore') or 0}/100 ({dev.get('dealScoreLabel') or 'n/a'})
+
+Viability flags:
+{flag_lines}
+
+WHEN ANALYSING THIS DEVELOPMENT:
+- This is a BUILD-TO-SELL appraisal, not a rental hold. Ignore yield,
+  cash-on-cash, monthly cashflow — they are zero by design. Anchor your
+  verdict on profit-on-cost, LTGDV, IRR, and the RLV margin of safety.
+- Reference the EXACT figures above. Do not be generic.
+- Profit on cost <15% = WALK AWAY (lenders won't fund). 15-20% =
+  REVIEW (renegotiate land or find efficiencies). 20%+ = PROCEED.
+- LTGDV >70% = funding package will be tight; >75% = unlikely to clear
+  development credit. Comment specifically.
+- If the RLV is below the investor's purchase price, flag the over-payment
+  £ figure prominently in risks and recommend renegotiation or value
+  engineering as the first next step.
+- If affordable housing is triggered (≥10 units) and the scheme has not
+  modelled a discount, warn that NPPF + Local Plan will impose 20–40% of
+  units at 50%-of-market — re-run the appraisal with provision before
+  committing capital.
+- For planning route: comment on construction type vs typical planning
+  pathway (new-build → Full PP usually; conversion → may have PD rights
+  under Class MA / Class Q; refurb → minor works only)."""
 
     # ── Airroi SA market data (appended to strategy context if available) ──
     if deal_type in ('R2SA', 'SA') and AIRROI_AVAILABLE and airroi_service:
@@ -5521,6 +5618,10 @@ AIRROI SHORT-LET MARKET DATA:
         'BRR':  {'gross_yield': 6.0,  'cashflow': 200, 'coc': 8.0},
         'FLIP': {'gross_yield': 0,    'cashflow': 0,   'coc': 15.0},
         'R2SA': {'gross_yield': 0,    'cashflow': 500, 'coc': 50.0},
+        # Development is appraised on profit-on-cost / IRR rather than
+        # rental yields. The numbers below are passthrough — actual
+        # benchmarks live in the development strategy_context block.
+        'DEV':  {'gross_yield': 0,    'cashflow': 0,   'coc': 25.0},
     }.get(deal_type, {'gross_yield': 6.0, 'cashflow': 200, 'coc': 8.0})
 
     # ------------------------------------------------------------------ #
@@ -5656,7 +5757,7 @@ AIRROI SHORT-LET MARKET DATA:
     # Build the prompt                                                     #
     # ------------------------------------------------------------------ #
     prompt = f"""You are an expert UK property investment analyst specialising in buy-to-let, \
-HMO, BRR, flip and rent-to-SA strategies. Analyse the deal below and return a JSON object.
+HMO, BRR, flip, rent-to-SA, and property development strategies. Analyse the deal below and return a JSON object.
 
 == PROPERTY ==
 Address:        {property_data.get('address', 'N/A')}

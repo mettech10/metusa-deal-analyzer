@@ -166,6 +166,15 @@ export async function POST(req: Request) {
                   arv:                  propertyData?.arv,
                 }
               : undefined,
+          // Property Development feasibility appraisal — threaded into the
+          // Flask AI prompt so DEV analyses get full GDV / TDC / cost-stack /
+          // RLV / leverage / IRR context, plus the engine's viability flags
+          // and deal score, instead of generic BTL commentary.
+          _devContext:
+            propertyData?.investmentType === "development" &&
+            calculationResults?.development
+              ? calculationResults.development
+              : undefined,
         }),
       })
 
