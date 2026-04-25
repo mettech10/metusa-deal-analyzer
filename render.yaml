@@ -5,7 +5,9 @@ services:
     runtime: python
     plan: free
     buildCommand: apt-get install -y wkhtmltopdf && pip install -r requirements.txt && playwright install --with-deps chromium
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    # Use gunicorn.conf.py so all tuning lives in one place (workers, threads,
+    # timeout, preload_app=False to keep port-bind fast on Render free tier).
+    startCommand: gunicorn -c gunicorn.conf.py app:app
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
