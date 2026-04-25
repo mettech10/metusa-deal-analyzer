@@ -258,7 +258,7 @@ export function DevelopmentResults({
                 value={formatCurrency(dev.equityRequired)}
               />
               <CoverStat
-                label="Units / GIA"
+                label="Units · GIA"
                 value={`${dev.totalUnits} · ${dev.totalGIA.toLocaleString()} m²`}
               />
             </div>

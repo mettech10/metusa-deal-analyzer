@@ -1491,7 +1491,6 @@ export function AnalysisResults({
   const hasStrategies =
     !!backendData?.strategy_recommendations &&
     Object.keys(backendData.strategy_recommendations).length > 0
-  const hasArticle4 = !!backendData?.article_4
   const hasLocation = !!(backendData?.location?.council || backendData?.location?.region)
   const hasValuation = !!backendData?.house_valuation
   const hasAIInsights = !!(
@@ -2016,7 +2015,6 @@ export function AnalysisResults({
         investmentType={data.investmentType}
         devConstructionType={data.devConstructionType}
       />
-      {hasArticle4 ? null : null}
 
       {/* ── Strategy Suitability ────────────────────────────────────── */}
       {hasStrategies && (
