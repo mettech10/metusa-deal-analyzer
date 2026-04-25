@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { DealScore } from "./deal-score"
+import { DevelopmentResults } from "./development-results"
 import { PropertyComparables } from "./property-comparables"
 import { HmoComparables } from "./hmo-comparables"
 import {
@@ -1404,7 +1405,16 @@ export function AnalysisResults({
         </div>
       )}
 
+      {/* ── Development-specific feasibility panel ─────────────────── */}
+      {data.investmentType === "development" && (
+        <DevelopmentResults data={data} results={results} />
+      )}
+
       {/* ── Key Metrics Grid ────────────────────────────────────────── */}
+      {/* Skip the yield/cashflow grid for development — those are all zero
+          for a build-to-sell scheme; DevelopmentResults panel above shows
+          the relevant metrics. */}
+      {data.investmentType !== "development" && (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
           label="Gross Yield"
@@ -1446,6 +1456,7 @@ export function AnalysisResults({
           icon={Home}
         />
       </div>
+      )}
 
       {/* ── Location & Council ──────────────────────────────────────── */}
       {hasLocation && <LocationCard location={backendData?.location} />}
