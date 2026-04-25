@@ -276,12 +276,69 @@ const Article4MiniMap = dynamic(
   }
 )
 
+// Planning-route guidance keyed off the development construction type.
+// New-build / extension almost always need Full Planning Permission;
+// conversions may have permitted-development rights via Class MA (commercial→
+// residential) or Class Q (agricultural→residential) but with strict criteria;
+// refurbishment alone is typically minor works only.
+const DEV_PLANNING_ROUTE: Record<
+  string,
+  { label: string; route: string; detail: string; tone: "info" | "warn" }
+> = {
+  "new-build-traditional": {
+    label: "New build (traditional)",
+    route: "Full Planning Permission required",
+    detail:
+      "Greenfield/brownfield new-build typically requires a full PP application (8–13 weeks at the LPA, longer if called in). Budget design+planning fees of 6–10% of build cost and expect S106 / CIL contributions on schemes of 10+ units.",
+    tone: "warn",
+  },
+  "new-build-timber-frame": {
+    label: "New build (timber frame)",
+    route: "Full Planning Permission required",
+    detail:
+      "Same PP route as traditional new-build — the structural method does not change planning consent requirements. NHBC / LABC warranty cover is essential for lender acceptance on resale.",
+    tone: "warn",
+  },
+  "new-build-modular": {
+    label: "New build (modular / MMC)",
+    route: "Full Planning Permission required",
+    detail:
+      "Modular construction follows the standard PP route. Some LPAs view MMC favourably for sustainability scoring, but condition discharge can still trigger delays — confirm cladding and fire-safety standards (Building Safety Act) at submission.",
+    tone: "warn",
+  },
+  conversion: {
+    label: "Change-of-use conversion",
+    route: "Possible Permitted Development (Class MA / Class Q) — verify",
+    detail:
+      "Commercial→residential conversions may use Class MA (E-class to C3) with a Prior Approval, subject to size cap (≤1,500 m² per building) and 2-year vacancy rule. Agricultural→residential uses Class Q (≤5 dwellings, ≤865 m²). Many LPAs have removed PD rights via Article 4 — always run a Prior Approval check before exchanging.",
+    tone: "info",
+  },
+  extension: {
+    label: "Extension / upward development",
+    route: "Householder PP or Class A/AA Permitted Development",
+    detail:
+      "Single-storey rear extensions may fall under Class A PD (subject to size limits and neighbour consultation). Upward extensions (Class AA) allow 1–2 storeys on existing dwellings with Prior Approval. Anything outside these envelopes needs full Householder PP.",
+    tone: "info",
+  },
+  refurbishment: {
+    label: "Internal refurbishment",
+    route: "Building Regs only (typically no planning needed)",
+    detail:
+      "Pure internal refurb without change of use, external alteration, or extension generally needs only Building Regulations approval. Listed buildings, conservation areas, and HMO conversions (C3→C4) override this — verify locally.",
+    tone: "info",
+  },
+}
+
 function Article4Card({
   postcode,
   legacy,
+  investmentType,
+  devConstructionType,
 }: {
   postcode?: string
   legacy?: BackendResults["article_4"]
+  investmentType?: string
+  devConstructionType?: string
 }) {
   const [result, setResult] = useState<Article4CheckResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -475,8 +532,10 @@ function Article4Card({
           </div>
         )}
 
-        {/* HMO guidance — show only when active (HMO conversion restricted) */}
-        {status === "active" && (
+        {/* HMO guidance — show only when active and strategy is HMO-relevant.
+            For development schemes we suppress this in favour of the
+            construction-type-specific Development Planning Route block below. */}
+        {status === "active" && investmentType !== "development" && (
           <div className="rounded-lg bg-card p-3">
             <p className="mb-1 text-xs font-semibold text-foreground">
               HMO Guidance
@@ -490,6 +549,57 @@ function Article4Card({
             </p>
           </div>
         )}
+
+        {/* Development Planning Route — only shown for development schemes.
+            Maps the user's selected devConstructionType to the most likely
+            consent pathway (Full PP, Class MA / Class Q PD, householder PD,
+            or Building Regs-only) so the investor sees the right call before
+            committing capital. Article 4 status above takes precedence: an
+            active direction can strip back PD rights even on conversions. */}
+        {!loading && investmentType === "development" && (() => {
+          const route =
+            (devConstructionType && DEV_PLANNING_ROUTE[devConstructionType]) ||
+            null
+          if (!route) {
+            return (
+              <div className="rounded-lg bg-card p-3">
+                <p className="mb-1 text-xs font-semibold text-foreground">
+                  Development Planning Route
+                </p>
+                <p className="text-muted-foreground">
+                  Select a construction type on the input form to see the
+                  expected planning consent pathway for this scheme.
+                </p>
+              </div>
+            )
+          }
+          const toneCls =
+            route.tone === "warn"
+              ? "border-warning/30 bg-warning/5"
+              : "border-primary/30 bg-primary/5"
+          return (
+            <div className={`rounded-lg border p-3 ${toneCls}`}>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-foreground">
+                  Development Planning Route
+                </p>
+                <span className="rounded-full border border-border/60 bg-card px-2 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                  {route.label}
+                </span>
+              </div>
+              <p className="text-foreground">{route.route}</p>
+              <p className="mt-1 text-muted-foreground">{route.detail}</p>
+              {status === "active" && (
+                <p className="mt-2 rounded border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
+                  Article 4 is in force at this postcode — assume any permitted
+                  development rights above are restricted or removed. Confirm
+                  the exact direction with the LPA before relying on a Prior
+                  Approval route.
+                </p>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Legacy Flask advice — only shown if we couldn't run the lookup */}
         {!loading && !result && legacy?.advice && (
@@ -1903,6 +2013,8 @@ export function AnalysisResults({
       <Article4Card
         postcode={data.postcode}
         legacy={backendData?.article_4}
+        investmentType={data.investmentType}
+        devConstructionType={data.devConstructionType}
       />
       {hasArticle4 ? null : null}
 
