@@ -2413,9 +2413,76 @@ def get_refurb_estimate(postcode, property_type, bedrooms, internal_area=1000):
     
     return estimates
 
+def get_metric(frontend_metrics, key, default=0):
+    """
+    Read a metric from frontend-computed values (single source of truth).
+    Logs a warning if the key is missing so calculation drift is visible.
+    Returns the default when the frontend dict is empty (legacy callers).
+    """
+    if not frontend_metrics:
+        return default
+    value = frontend_metrics.get(key)
+    if value is None:
+        try:
+            app.logger.warning(
+                f'[SSOT] MISSING FRONTEND METRIC: {key} — falling back to {default}'
+            )
+        except Exception:
+            pass
+        return default
+    return value
+
+
+def validate_metric_alignment(frontend_metrics, flask_calculated):
+    """
+    DEV ONLY: Compare frontend and Flask values for headline metrics.
+    Logs any difference >1%. Only runs when FLASK_ENV=development.
+    Used to surface calculation drift between the two engines.
+    """
+    if os.environ.get('FLASK_ENV') != 'development':
+        return
+    if not frontend_metrics or not flask_calculated:
+        return
+
+    fields_to_check = [
+        ('grossYield',          'gross_yield'),
+        ('netYield',            'net_yield'),
+        ('monthlyCashFlow',     'monthly_cashflow'),
+        ('cashOnCashReturn',    'cash_on_cash'),
+        ('sdltAmount',          'stamp_duty'),
+        ('totalCapitalRequired','cash_invested'),
+        ('monthlyMortgagePayment','monthly_mortgage'),
+    ]
+    for fe_key, fl_key in fields_to_check:
+        fe_val = frontend_metrics.get(fe_key)
+        fl_val = flask_calculated.get(fl_key)
+        try:
+            if fe_val is None or fl_val is None:
+                continue
+            fe_f, fl_f = float(fe_val), float(fl_val)
+            denom = max(abs(fe_f), abs(fl_f), 1e-9)
+            diff_pct = abs(fe_f - fl_f) / denom * 100
+            if diff_pct > 1.0:
+                app.logger.warning(
+                    f'[SSOT] METRIC DRIFT: {fe_key} '
+                    f'frontend={fe_f} flask={fl_f} diff={diff_pct:.2f}%'
+                )
+        except (TypeError, ValueError):
+            continue
+
+
 def analyze_deal(data):
     """Perform comprehensive deal analysis with input validation"""
-    
+
+    # ── Single Source of Truth ────────────────────────────────────────────
+    # The dealcheck-uk Next.js engine is the authoritative calculation
+    # engine. When it sends `_frontendMetrics`, Flask uses those values for
+    # all headline numerics (yield, cashflow, SDLT, capital required, etc.).
+    # Flask still computes its own values as a fallback for older clients
+    # and for the sensitivity endpoint (which calls analyze_deal without
+    # _frontendMetrics on each scenario).
+    fe_metrics = data.get('_frontendMetrics') or {}
+
     # Security: Extract and sanitize inputs
     deal_type = sanitize_input(data.get('dealType', 'BTL'), 20)
     if deal_type not in ['BTL', 'BRR', 'HMO', 'FLIP', 'R2SA', 'DEV']:
@@ -2712,6 +2779,42 @@ def analyze_deal(data):
         cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee + refurb_budget
         cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
         net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
+
+    # ── SSOT: prefer frontend-calculated values when supplied ─────────────
+    # All downstream consumers (verdict gating, deal score, risk flags,
+    # benchmark comparison, AI prompt, results dict) read these variables.
+    # Apply overrides here, in one place, so the entire pipeline aligns
+    # with the Next.js calculation engine. Flask's locally-computed values
+    # are kept as fallback for legacy callers and the sensitivity endpoint.
+    if fe_metrics:
+        _flask_snapshot = {
+            'gross_yield': gross_yield,
+            'net_yield': net_yield,
+            'monthly_cashflow': monthly_cashflow,
+            'cash_on_cash': cash_on_cash,
+            'stamp_duty': stamp_duty,
+            'cash_invested': cash_invested,
+            'monthly_mortgage': monthly_mortgage,
+        }
+        gross_yield      = float(get_metric(fe_metrics, 'grossYield',         gross_yield))
+        net_yield        = float(get_metric(fe_metrics, 'netYield',           net_yield))
+        monthly_cashflow = float(get_metric(fe_metrics, 'monthlyCashFlow',    monthly_cashflow))
+        cash_on_cash     = float(get_metric(fe_metrics, 'cashOnCashReturn',   cash_on_cash))
+        # Headline £ figures — only override when frontend supplies them
+        if fe_metrics.get('sdltAmount') is not None:
+            stamp_duty = float(fe_metrics['sdltAmount'])
+        if fe_metrics.get('totalCapitalRequired') is not None:
+            cash_invested = float(fe_metrics['totalCapitalRequired'])
+        if fe_metrics.get('monthlyMortgagePayment') is not None:
+            monthly_mortgage = float(fe_metrics['monthlyMortgagePayment'])
+            annual_mortgage = monthly_mortgage * 12
+        if fe_metrics.get('mortgageAmount') is not None:
+            loan_amount = float(fe_metrics['mortgageAmount'])
+        if fe_metrics.get('depositAmount') is not None:
+            deposit_amount = float(fe_metrics['depositAmount'])
+        if fe_metrics.get('annualCashFlow') is not None:
+            net_annual_income = float(fe_metrics['annualCashFlow'])
+        validate_metric_alignment(fe_metrics, _flask_snapshot)
 
     # BRR specific metrics.
     # Python computes a simple 75% LTV refinance assumption as a fallback;
@@ -3039,16 +3142,12 @@ def analyze_deal(data):
     }
 
     # ── Regional benchmark comparison ─────────────────────────────────────────
-    # If the frontend sent its own calculated metrics (_frontendMetrics), use
-    # those for the benchmark comparison so the "Your deal" figures in the
-    # benchmark panel exactly match the headline metric cards.
-    fe = data.get('_frontendMetrics') or {}
-    bench_yield = float(fe['grossYield']) if fe.get('grossYield') is not None else gross_yield
-    bench_cashflow = float(fe['monthlyCashFlow']) if fe.get('monthlyCashFlow') is not None else monthly_cashflow
-    print(f"[Benchmark] Using yield={bench_yield:.2f}% cashflow=£{bench_cashflow:.0f}/mo "
-          f"(source={'frontend' if fe else 'backend'})")
+    # gross_yield + monthly_cashflow now reflect the SSOT (frontend values
+    # when supplied, Flask fallback otherwise) — no further override needed.
+    print(f"[Benchmark] yield={gross_yield:.2f}% cashflow=£{monthly_cashflow:.0f}/mo "
+          f"(source={'frontend' if fe_metrics else 'backend'})")
     regional_benchmark = compare_to_regional_benchmark(
-        postcode, deal_type, bench_yield, bench_cashflow
+        postcode, deal_type, gross_yield, monthly_cashflow
     )
 
     # ── Risk flag dashboard ───────────────────────────────────────────────────
@@ -3131,10 +3230,10 @@ def analyze_deal(data):
         'annual_rent': f"{annual_rent:,.0f}",
         'total_annual_expenses': f"{total_annual_expenses:,.0f}",
         'net_annual_income': f"{net_annual_income:,.0f}",
-        'monthly_cashflow': round(bench_cashflow, 0),
-        'gross_yield': f"{bench_yield:.2f}",
-        'net_yield': f"{float(fe.get('netYield', net_yield)):.2f}",
-        'cash_on_cash': f"{float(fe.get('cashOnCashReturn', cash_on_cash)):.2f}",
+        'monthly_cashflow': round(monthly_cashflow, 0),
+        'gross_yield': f"{gross_yield:.2f}",
+        'net_yield': f"{net_yield:.2f}",
+        'cash_on_cash': f"{cash_on_cash:.2f}",
         'verdict': verdict,
         'risk_level': risk_level,
         'strengths': strengths,
