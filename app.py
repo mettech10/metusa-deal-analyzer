@@ -2538,35 +2538,109 @@ def analyze_deal(data):
     if deal_type == 'HMO' and room_count > 0 and avg_room_rate > 0:
         monthly_rent = room_count * avg_room_rate
 
-    # R2SA specific — investor rents property and sublets as serviced accommodation
+    # Serviced Accommodation — two modes per saOwnershipType:
+    #  - "rent-to-sa" (default): investor RENTS the property and sublets as SA.
+    #    No mortgage; revenue = SA bookings; cost = rent paid to landlord +
+    #    granular SA op costs.
+    #  - "own": investor OWNS the property and runs it as SA. Standard
+    #    purchase costs apply (deposit + SDLT + mortgage); revenue = SA
+    #    bookings; cost = mortgage + granular SA op costs (no rent paid).
+    # Granular costs (mirrors dealcheck-uk lib/calculations.ts):
+    #   saPlatformFeePercent, saCleaningCostPerStay, saAvgStaysPerMonth,
+    #   saUtilitiesMonthly, saInsuranceAnnual, saManagementFeePercent,
+    #   saMaintenancePercent
     r2sa_metrics = {}
     if deal_type == 'R2SA':
-        sa_revenue = float(data.get('saMonthlySARevenue', 0))
-        sa_setup_costs = float(data.get('saSetupCosts', 5000))
-        monthly_rent_paid = monthly_rent  # rent paid to the landlord
-        # Operating costs: cleaning, utilities, platform fees (~30% of revenue)
-        monthly_op_costs = sa_revenue * 0.30
-        monthly_profit = sa_revenue - monthly_rent_paid - monthly_op_costs
-        annual_profit = monthly_profit * 12
-        r2sa_roi = (annual_profit / sa_setup_costs) * 100 if sa_setup_costs > 0 else 0
-        r2sa_metrics = {
-            'monthly_rent_paid': round(monthly_rent_paid, 0),
-            'sa_monthly_revenue': round(sa_revenue, 0),
-            'monthly_op_costs': round(monthly_op_costs, 0),
-            'monthly_profit': round(monthly_profit, 0),
-            'annual_profit': round(annual_profit, 0),
-            'setup_costs': round(sa_setup_costs, 0),
-            'r2sa_roi': round(r2sa_roi, 1),
-        }
-        # For standard metric calculations, use profit as net income
-        net_annual_income = annual_profit
-        monthly_cashflow = monthly_profit
-        annual_rent = sa_revenue * 12
-        total_annual_expenses = (monthly_rent_paid + monthly_op_costs) * 12
-        gross_yield = 0  # N/A for R2SA (no purchase)
-        cash_invested = sa_setup_costs
-        cash_on_cash = r2sa_roi
-        net_yield = 0
+        sa_ownership = (data.get('saOwnershipType') or 'rent-to-sa').lower()
+        sa_revenue = float(data.get('saMonthlySARevenue', 0) or 0)
+        # Derive revenue from nightly × occupancy × ~30 nights if not given
+        if sa_revenue <= 0:
+            nightly = float(data.get('saNightlyRate', 0) or 0)
+            occ_pct = float(data.get('saOccupancyRate', 65) or 65) / 100
+            sa_revenue = nightly * 30 * occ_pct
+        sa_setup_costs = float(data.get('saSetupCosts', 5000) or 5000)
+
+        # Granular operating costs (preferred over the legacy 30%-of-revenue
+        # heuristic when any SA-specific field is supplied).
+        platform_pct = float(data.get('saPlatformFeePercent', 0) or 0) / 100
+        cleaning_per_stay = float(data.get('saCleaningCostPerStay', 0) or 0)
+        stays_per_month = float(data.get('saAvgStaysPerMonth', 0) or 0)
+        utilities_monthly = float(data.get('saUtilitiesMonthly', 0) or 0)
+        insurance_annual = float(data.get('saInsuranceAnnual', 0) or 0)
+        sa_mgmt_pct = float(data.get('saManagementFeePercent', 0) or 0) / 100
+        sa_maint_pct = float(data.get('saMaintenancePercent', 0) or 0) / 100
+
+        granular_provided = any([
+            platform_pct, cleaning_per_stay, stays_per_month,
+            utilities_monthly, insurance_annual, sa_mgmt_pct, sa_maint_pct,
+        ])
+        if granular_provided:
+            monthly_op_costs = (
+                sa_revenue * platform_pct
+                + cleaning_per_stay * stays_per_month
+                + utilities_monthly
+                + (insurance_annual / 12)
+                + sa_revenue * sa_mgmt_pct
+                + sa_revenue * sa_maint_pct
+            )
+        else:
+            # Legacy fallback: blanket 30% of revenue
+            monthly_op_costs = sa_revenue * 0.30
+
+        if sa_ownership == 'own':
+            # SA-OWNED: own the property, mortgage applies, no rent paid
+            monthly_expenses = monthly_mortgage + monthly_op_costs
+            monthly_profit = sa_revenue - monthly_expenses
+            annual_profit = monthly_profit * 12
+            annual_revenue = sa_revenue * 12
+            cash_invested = (
+                deposit_amount + stamp_duty + legal_fees
+                + valuation_fee + arrangement_fee + refurb_costs + sa_setup_costs
+            )
+            r2sa_roi = (annual_profit / cash_invested) * 100 if cash_invested > 0 else 0
+            r2sa_metrics = {
+                'ownership_type': 'own',
+                'sa_monthly_revenue': round(sa_revenue, 0),
+                'monthly_op_costs': round(monthly_op_costs, 0),
+                'monthly_mortgage': round(monthly_mortgage, 0),
+                'monthly_profit': round(monthly_profit, 0),
+                'annual_profit': round(annual_profit, 0),
+                'setup_costs': round(sa_setup_costs, 0),
+                'cash_invested': round(cash_invested, 0),
+                'r2sa_roi': round(r2sa_roi, 1),
+            }
+            net_annual_income = annual_profit
+            monthly_cashflow = monthly_profit
+            annual_rent = annual_revenue
+            total_annual_expenses = monthly_expenses * 12
+            # SA-Owned IS a purchase, so yields are meaningful
+            gross_yield = (annual_revenue / purchase_price) * 100 if purchase_price > 0 else 0
+            net_yield = (annual_profit / purchase_price) * 100 if purchase_price > 0 else 0
+            cash_on_cash = r2sa_roi
+        else:
+            # RENT-TO-SA: legacy path — rent paid to landlord, no purchase
+            monthly_rent_paid = monthly_rent
+            monthly_profit = sa_revenue - monthly_rent_paid - monthly_op_costs
+            annual_profit = monthly_profit * 12
+            r2sa_roi = (annual_profit / sa_setup_costs) * 100 if sa_setup_costs > 0 else 0
+            r2sa_metrics = {
+                'ownership_type': 'rent-to-sa',
+                'monthly_rent_paid': round(monthly_rent_paid, 0),
+                'sa_monthly_revenue': round(sa_revenue, 0),
+                'monthly_op_costs': round(monthly_op_costs, 0),
+                'monthly_profit': round(monthly_profit, 0),
+                'annual_profit': round(annual_profit, 0),
+                'setup_costs': round(sa_setup_costs, 0),
+                'r2sa_roi': round(r2sa_roi, 1),
+            }
+            net_annual_income = annual_profit
+            monthly_cashflow = monthly_profit
+            annual_rent = sa_revenue * 12
+            total_annual_expenses = (monthly_rent_paid + monthly_op_costs) * 12
+            gross_yield = 0  # N/A for rent-to-SA (no purchase)
+            cash_invested = sa_setup_costs
+            cash_on_cash = r2sa_roi
+            net_yield = 0
 
     # Income and expenses (skipped for R2SA which calculates directly above).
     # Form-side units (must match dealcheck-uk/components/analyse/property-form.tsx):
@@ -2801,15 +2875,32 @@ def analyze_deal(data):
     elif deal_type == 'R2SA':
         mp = r2sa_metrics.get('monthly_profit', 0)
         roi = r2sa_metrics.get('r2sa_roi', 0)
-        if mp >= 500 and roi >= 50:
-            verdict = "PROCEED"
-            risk_level = "MEDIUM"  # R2SA carries subletting/void risk
-        elif mp >= 200:
-            verdict = "REVIEW"
-            risk_level = "MEDIUM"
+        ownership = r2sa_metrics.get('ownership_type', 'rent-to-sa')
+        if ownership == 'own':
+            # SA-Owned: ROI is against full cash invested (deposit + costs +
+            # setup), so realistic targets are 8-15%, not 50%. Use cashflow
+            # and ROI gates calibrated to ownership.
+            if mp >= 800 and roi >= 12:
+                verdict = "PROCEED"
+                risk_level = "MEDIUM"  # SA carries seasonality + void risk
+            elif mp >= 400 and roi >= 8:
+                verdict = "REVIEW"
+                risk_level = "MEDIUM"
+            else:
+                verdict = "AVOID"
+                risk_level = "HIGH"
         else:
-            verdict = "AVOID"
-            risk_level = "HIGH"
+            # Rent-to-SA: ROI is against small setup costs (~£5k), so 50%+ is
+            # the normal expectation; below 30% suggests the spread isn't there.
+            if mp >= 500 and roi >= 50:
+                verdict = "PROCEED"
+                risk_level = "MEDIUM"  # subletting/void risk
+            elif mp >= 200:
+                verdict = "REVIEW"
+                risk_level = "MEDIUM"
+            else:
+                verdict = "AVOID"
+                risk_level = "HIGH"
     else:
         verdict = "REVIEW"
         risk_level = "MEDIUM"
