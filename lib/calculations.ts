@@ -449,17 +449,7 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
   // contractAnnualRent = the rent on the lease (what you'd quote in marketing).
   // annualRent          = that figure void-adjusted (effective income for cashflow).
   // Gross yield uses contractAnnualRent (industry-standard); cashflow uses annualRent.
-  //
-  // HMO note: the form auto-derives data.monthlyRent = roomCount × avgRoomRate,
-  // so the standard math here gives correct totals. For HMOs, voidWeeks
-  // represents AVERAGE void weeks per room (since whole-property voids are
-  // rare in shared houses), and hmoRoomVoidWeeks lets the user override
-  // voidWeeks specifically for HMOs without disturbing the BTL field.
-  const isHMO = data.investmentType === "hmo"
-  const effectiveVoidWeeks = isHMO && data.hmoRoomVoidWeeks !== undefined
-    ? data.hmoRoomVoidWeeks
-    : data.voidWeeks
-  const effectiveWeeks = 52 - effectiveVoidWeeks
+  const effectiveWeeks = 52 - data.voidWeeks
   const contractAnnualRent = data.monthlyRent * 12
   const annualRent = Math.round(contractAnnualRent * (effectiveWeeks / 52))
   const monthlyIncome = Math.round((annualRent / 12) * 100) / 100
@@ -476,25 +466,13 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
   const monthlyGroundRent = data.groundRent / 12
   const monthlyBills = data.bills
 
-  // HMO licence amortisation (one-off council fee spread over licence term).
-  // UK HMO licences cost ~£500-£1,500 and are valid 5 years. Spreading the
-  // cost across the licence term gives a fair monthly running-cost figure.
-  const hmoLicenceTermYears = data.hmoLicenceTermYears && data.hmoLicenceTermYears > 0
-    ? data.hmoLicenceTermYears
-    : 5
-  const hmoLicenceAnnualAmortisation = isHMO && data.hmoLicenceCost
-    ? data.hmoLicenceCost / hmoLicenceTermYears
-    : 0
-  const monthlyHmoLicence = hmoLicenceAnnualAmortisation / 12
-
   const monthlyRunningCosts =
     Math.round(
       (monthlyManagement +
         monthlyInsurance +
         monthlyMaintenance +
         monthlyGroundRent +
-        monthlyBills +
-        monthlyHmoLicence) *
+        monthlyBills) *
         100
     ) / 100
 
@@ -535,30 +513,6 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
     data.annualRentIncrease
   )
 
-  // HMO-specific result fields (only populated when investmentType === "hmo")
-  const hmoResults = isHMO
-    ? {
-        hmoTotalRooms: data.roomCount || 0,
-        hmoAvgRoomRate: data.avgRoomRate || 0,
-        hmoContractRentMonthly: (data.roomCount || 0) * (data.avgRoomRate || 0),
-        hmoEffectiveRentMonthly: Math.round(monthlyIncome * 100) / 100,
-        hmoOccupancyRate: Math.round((effectiveWeeks / 52) * 10000) / 100,
-        hmoLicenceCost: data.hmoLicenceCost || 0,
-        hmoLicenceTermYears,
-        hmoLicenceAnnualAmortisation: Math.round(hmoLicenceAnnualAmortisation * 100) / 100,
-        // Yield per room: annual room rent / (price share per room) × 100.
-        // Useful for benchmarking against HMO market norms (typically 8-15%).
-        hmoYieldPerRoom:
-          data.roomCount && data.roomCount > 0 && data.purchasePrice > 0
-            ? Math.round(
-                (((data.avgRoomRate || 0) * 12) /
-                  (data.purchasePrice / data.roomCount)) *
-                  10000
-              ) / 100
-            : 0,
-      }
-    : {}
-
   return {
     sdltAmount,
     sdltBreakdown,
@@ -578,7 +532,6 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
     cashOnCashReturn,
     annualRunningCosts,
     monthlyRunningCosts,
-    ...hmoResults,
     fiveYearProjection,
   }
 }
