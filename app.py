@@ -2568,34 +2568,71 @@ def analyze_deal(data):
         cash_on_cash = r2sa_roi
         net_yield = 0
 
-    # Income and expenses (skipped for R2SA which calculates directly above)
+    # Income and expenses (skipped for R2SA which calculates directly above).
+    # Form-side units (must match dealcheck-uk/components/analyse/property-form.tsx):
+    #   - insurance, maintenance, groundRent  → entered ANNUALLY
+    #   - bills                                → entered MONTHLY
+    #   - maintenancePercent (optional)        → % of annual rent (overrides flat
+    #                                            maintenance amount when > 0)
     if deal_type != 'R2SA':
         annual_rent = monthly_rent * 12
         mgmt_fee_pct = float(data.get('managementFeePercent', 10)) / 100
         management_costs = annual_rent * mgmt_fee_pct
         user_void_weeks = float(data.get('voidWeeks', 4))
-        maintenance_costs = float(data.get('maintenance', 0)) * 12
-        insurance = float(data.get('insurance', 40)) * 12
+        # Annual values — used as-is. Previously these were × 12, which
+        # 12× overstated the expenses line and tanked Flask's net cashflow
+        # vs the frontend's preview.
+        maintenance_flat_annual = float(data.get('maintenance', 0))
+        maintenance_pct = float(data.get('maintenancePercent', 0))
+        insurance = float(data.get('insurance', 0))
+        ground_rent = float(data.get('groundRent', 0))
+        # Bills: form labels this "Bills (Monthly)". Multiply by 12 → annual.
         bills = float(data.get('bills', 0)) * 12
-        ground_rent = float(data.get('groundRent', 0)) * 12
+
+        # Maintenance: prefer % of annual rent if set, else flat annual figure,
+        # else fall back to industry default 8% of annual rent.
+        if maintenance_pct > 0:
+            maintenance_costs = annual_rent * (maintenance_pct / 100)
+        elif maintenance_flat_annual > 0:
+            maintenance_costs = maintenance_flat_annual
+        else:
+            maintenance_costs = annual_rent * 0.08
+
+        # HMO licence: one-off council fee (£500-£1,500 typical), amortised
+        # over the licence term (default 5 years). Mirrors lib/calculations.ts
+        # in dealcheck-uk. Only applies when investmentType === 'hmo'.
+        hmo_licence_annual = 0.0
+        if deal_type == 'HMO':
+            hmo_licence_cost = float(data.get('hmoLicenceCost', 0) or 0)
+            hmo_licence_term = float(data.get('hmoLicenceTermYears', 5) or 5)
+            if hmo_licence_cost > 0 and hmo_licence_term > 0:
+                hmo_licence_annual = hmo_licence_cost / hmo_licence_term
 
         if deal_type == 'HMO' and room_count > 0 and avg_room_rate > 0:
-            # HMO: assume 1 room void at a time for voidWeeks per year
-            # void allowance = (pricePerRoom × voidWeeks) / 52 per month → annualised
-            void_costs = avg_room_rate * user_void_weeks * (12.0 / 52.0)
-            print(f"[HMO Void] 1 room × £{avg_room_rate}/mo × {user_void_weeks}wk/yr = £{void_costs:.0f}/yr "
+            # HMO: voids modelled per-room (1 room empty at a time for
+            # voidWeeks per year on average). Use hmoRoomVoidWeeks override
+            # if the user supplied an HMO-specific figure.
+            hmo_room_void_weeks = data.get('hmoRoomVoidWeeks')
+            effective_void_weeks = (
+                float(hmo_room_void_weeks) if hmo_room_void_weeks not in (None, '')
+                else user_void_weeks
+            )
+            void_costs = avg_room_rate * effective_void_weeks * (12.0 / 52.0)
+            print(f"[HMO Void] 1 room × £{avg_room_rate}/mo × {effective_void_weeks}wk/yr = £{void_costs:.0f}/yr "
                   f"(£{void_costs/12:.0f}/mo)")
         else:
-            # BTL/BRRRR: whole property void for voidWeeks per year
+            # BTL/BRRRR: whole property void for voidWeeks per year.
             void_costs = monthly_rent * user_void_weeks / 4.33
 
-        maintenance_reserve = maintenance_costs if maintenance_costs > 0 else annual_rent * 0.08
-        total_annual_expenses = (management_costs + void_costs + maintenance_reserve
-                                 + insurance + bills + ground_rent + annual_mortgage)
+        total_annual_expenses = (management_costs + void_costs + maintenance_costs
+                                 + insurance + bills + ground_rent + hmo_licence_annual
+                                 + annual_mortgage)
         net_annual_income = annual_rent - total_annual_expenses
         monthly_cashflow = net_annual_income / 12
 
-        # Key metrics
+        # Key metrics. Gross yield uses contract rent (annual_rent, no void
+        # adjustment) — UK industry convention. Net yield uses cashflow that's
+        # already net of voids via void_costs.
         gross_yield = (annual_rent / purchase_price) * 100 if purchase_price > 0 else 0
         refurb_budget = float(data.get('refurbishmentBudget', 0) or data.get('refurbCosts', 0) or 0)
         cash_invested = deposit_amount + stamp_duty + legal_fees + valuation_fee + arrangement_fee + refurb_budget
