@@ -2639,7 +2639,13 @@ def analyze_deal(data):
         cash_on_cash = (net_annual_income / cash_invested) * 100 if cash_invested > 0 else 0
         net_yield = (net_annual_income / purchase_price) * 100 if purchase_price > 0 else 0
 
-    # BRR specific metrics
+    # BRR specific metrics.
+    # Python computes a simple 75% LTV refinance assumption as a fallback;
+    # the dealcheck-uk TS engine produces the rich 6-phase breakdown
+    # (configurable refinance LTV, bridging, contingency, holding costs,
+    # capital recycled %, refurb uplift ratio) and POSTs it as _brrrrContext.
+    # We merge that on top so verdict + deal_score use the authoritative
+    # numbers instead of Python's coarser estimate.
     brr_metrics = {}
     if deal_type == 'BRR' and arv > 0:
         total_investment = purchase_price + refurb_costs + stamp_duty + legal_fees + valuation_fee + arrangement_fee
@@ -2657,6 +2663,43 @@ def analyze_deal(data):
             'money_left_in': round(money_left_in, 0),
             'brr_roi': round(brr_roi, 2) if brr_roi != float('inf') else 999.99,
         }
+
+        # Merge frontend BRRRR context if present. camelCase → snake_case.
+        # Frontend numbers are authoritative because TS models bridging,
+        # configurable refinance LTV/rate, contingency, and holding costs.
+        fe_brr = data.get('_brrrrContext') or {}
+        if isinstance(fe_brr, dict) and fe_brr:
+            def _num(v):
+                try:
+                    return float(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            mle = _num(fe_brr.get('moneyLeftInDeal'))
+            if mle is not None:
+                brr_metrics['money_left_in'] = round(mle, 0)
+                # Recompute brr_roi against frontend's money-left
+                # (post-refinance cashflow ROI on remaining capital).
+                brr_metrics['brr_roi'] = (
+                    round((net_annual_income / mle) * 100, 2) if mle > 0 else 999.99
+                )
+
+            for fe_key, py_key in (
+                ('equityGained', 'equity_created'),
+                ('refinancedMortgage', 'refinance_amount'),
+                ('totalCashInvested', 'total_investment'),
+            ):
+                v = _num(fe_brr.get(fe_key))
+                if v is not None:
+                    brr_metrics[py_key] = round(v, 0)
+
+            # New BRRRR-specific fields the verdict gate now factors in.
+            crp = _num(fe_brr.get('capitalRecycledPct'))
+            if crp is not None:
+                brr_metrics['capital_recycled_pct'] = round(crp, 2)
+            rur = _num(fe_brr.get('refurbUpliftRatio'))
+            if rur is not None:
+                brr_metrics['refurb_uplift_ratio'] = round(rur, 2)
     
     # Flip specific metrics
     flip_metrics = {}
@@ -2722,10 +2765,18 @@ def analyze_deal(data):
             verdict = "AVOID"
             risk_level = "HIGH"
     elif deal_type == 'BRR':
-        if brr_metrics.get('brr_roi', 0) >= 20 and brr_metrics.get('money_left_in', 999999) <= cash_invested * 0.5:
+        # BRRRR verdict factors:
+        #   - brr_roi: post-refinance cashflow ROI on money left in deal
+        #   - capital_recycled_pct: % of capital pulled out at refinance
+        #     (frontend-authoritative; >=80% is the BRRRR gold standard)
+        #   - money_left_in vs cash_invested: lower means more recyclable
+        _brr_roi = brr_metrics.get('brr_roi', 0)
+        _crp = brr_metrics.get('capital_recycled_pct', 0)
+        _mle = brr_metrics.get('money_left_in', 999999)
+        if (_brr_roi >= 20 and _mle <= cash_invested * 0.5) or _crp >= 80:
             verdict = "PROCEED"
             risk_level = "MEDIUM"
-        elif brr_metrics.get('brr_roi', 0) >= 15:
+        elif _brr_roi >= 15 or _crp >= 50:
             verdict = "REVIEW"
             risk_level = "MEDIUM"
         else:
