@@ -53,6 +53,9 @@ const schema = z.object({
   // HMO
   roomCount: z.coerce.number().min(0).max(20).optional(),
   avgRoomRate: z.coerce.number().min(0).optional(),
+  hmoLicenceCost: z.coerce.number().min(0).optional(),
+  hmoLicenceTermYears: z.coerce.number().min(1).max(10).optional(),
+  hmoRoomVoidWeeks: z.coerce.number().min(0).max(52).optional(),
   // R2SA
   saMonthlySARevenue: z.coerce.number().min(0).optional(),
   saSetupCosts: z.coerce.number().min(0).optional(),
@@ -178,6 +181,8 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
     arv: 0,
     roomCount: 0,
     avgRoomRate: 0,
+    hmoLicenceCost: 1000,
+    hmoLicenceTermYears: 5,
     saMonthlySARevenue: 0,
     saSetupCosts: 5000,
     // ── Property Development defaults ──────────────────────────
@@ -246,6 +251,8 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
   const refurbValue = watch("refurbishmentBudget")
   const tenureTypeValue = watch("tenureType")
   const propertyTypeDetailValue = watch("propertyTypeDetail")
+  const roomCountValue = watch("roomCount")
+  const avgRoomRateValue = watch("avgRoomRate")
 
   // Auto-map the granular property type to the broad type used by calculations.
   useEffect(() => {
@@ -270,6 +277,16 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
 
   const isR2SA     = investmentType === "r2sa"
   const isHMO      = investmentType === "hmo"
+
+  // HMO: auto-derive monthlyRent from roomCount × avgRoomRate so the calc
+  // engine always sees the correct total (the BTL "Monthly Rent" field is
+  // hidden in HMO mode).
+  const hmoTotalRent = (roomCountValue || 0) * (avgRoomRateValue || 0)
+  useEffect(() => {
+    if (isHMO && hmoTotalRent >= 0) {
+      setValue("monthlyRent", hmoTotalRent)
+    }
+  }, [isHMO, hmoTotalRent, setValue])
   const isBRR      = investmentType === "brr"
   const isFLIP     = investmentType === "flip"
   const isDevelopment = investmentType === "development"
@@ -1209,6 +1226,43 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                   placeholder="450"
                   {...register("avgRoomRate")}
                 />
+              </div>
+            </FormField>
+          </div>
+          {/* Live total rent preview — confirms what the calc engine will see */}
+          {hmoTotalRent > 0 && (
+            <div className="rounded-lg bg-primary/5 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Total monthly rent: </span>
+              <span className="font-semibold text-foreground">
+                £{hmoTotalRent.toLocaleString()}
+              </span>
+              <span className="text-xs text-muted-foreground ml-1">
+                ({roomCountValue} rooms × £{avgRoomRateValue} per room)
+              </span>
+            </div>
+          )}
+          {/* HMO licence — one-off council fee, amortised over licence term */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField label="HMO Licence Cost" hint="Council licence fee (typically £500-£1,500)">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{"£"}</span>
+                <Input
+                  type="number"
+                  className="pl-7"
+                  placeholder="1000"
+                  {...register("hmoLicenceCost")}
+                />
+              </div>
+            </FormField>
+            <FormField label="Licence Term" hint="Years — most councils issue 5-year licences">
+              <div className="relative">
+                <Input
+                  type="number"
+                  className="pr-12"
+                  placeholder="5"
+                  {...register("hmoLicenceTermYears")}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">yrs</span>
               </div>
             </FormField>
           </div>

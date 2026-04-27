@@ -102,8 +102,11 @@ export interface PropertyFormData {
   arv?: number // After Repair Value
 
   // HMO
-  roomCount?: number    // number of lettable rooms
-  avgRoomRate?: number  // average monthly rent per room
+  roomCount?: number          // number of lettable rooms
+  avgRoomRate?: number        // average monthly rent per room
+  hmoLicenceCost?: number     // one-off council HMO licence fee £ (typically £500-£1,500)
+  hmoLicenceTermYears?: number // licence duration in years (default 5) — used for amortisation
+  hmoRoomVoidWeeks?: number   // average void weeks PER ROOM/year (overrides voidWeeks for HMO)
 
   // Rent-to-SA (R2SA)
   saMonthlySARevenue?: number // expected gross monthly SA revenue
@@ -221,6 +224,17 @@ export interface CalculationResults {
   // Running Costs Breakdown
   annualRunningCosts: number
   monthlyRunningCosts: number
+
+  // HMO-specific results — populated for investmentType === "hmo"
+  hmoTotalRooms?: number             // echo of roomCount
+  hmoAvgRoomRate?: number             // echo of avgRoomRate
+  hmoContractRentMonthly?: number     // roomCount × avgRoomRate
+  hmoEffectiveRentMonthly?: number    // contract rent × (52 - voidWeeks)/52
+  hmoOccupancyRate?: number           // (52 - voidWeeks)/52 × 100
+  hmoLicenceCost?: number             // echo of input
+  hmoLicenceTermYears?: number        // echo of input (default 5)
+  hmoLicenceAnnualAmortisation?: number // licenceCost / termYears
+  hmoYieldPerRoom?: number            // (avgRoomRate × 12) / (price / roomCount) × 100
 
   // Development-specific — full appraisal (cost stack + finance + profit + RLV)
   // Populated only for investmentType === "development". See
