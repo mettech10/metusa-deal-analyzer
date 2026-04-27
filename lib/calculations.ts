@@ -1,4 +1,4 @@
-import type { PropertyFormData, CalculationResults, YearProjection } from "./types"
+import type { BuyerType, PropertyFormData, CalculationResults, YearProjection } from "./types"
 
 /**
  * Non-residential / mixed-use SDLT bands (England/NI).
@@ -40,10 +40,16 @@ function calculateNonResidentialSDLT(price: number): {
  * `rateType` selects between residential bands (default) and
  * non-residential / mixed-use bands (0/2/5%) — used by Development
  * acquisitions of bare land or mixed-use sites.
+ *
+ * `buyerType`:
+ *   - "first-time": FTB relief (0% to £425k, 5% £425k-£625k; lost above £625k)
+ *   - "standard":   standard residential bands, no surcharge — primary
+ *                   residence buyer who isn't a first-time buyer
+ *   - "additional": +5% surcharge on every band — second home / investment
  */
 export function calculateSDLT(
   price: number,
-  buyerType: "first-time" | "additional",
+  buyerType: BuyerType,
   rateType: "residential" | "non-residential" | "mixed-use" = "residential"
 ): { total: number; breakdown: { band: string; tax: number }[] } {
   if (rateType === "non-residential" || rateType === "mixed-use") {
@@ -72,7 +78,9 @@ export function calculateSDLT(
     return { total: Math.round(total), breakdown }
   }
 
-  // Standard / additional property rates
+  // Standard residential bands.
+  // FTB above £625k loses relief entirely → falls through here as "standard".
+  // "additional" applies a 5% surcharge on every band.
   const surcharge = buyerType === "additional" ? 0.05 : 0
 
   const bands = [
@@ -437,17 +445,26 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
     annualMortgageCost = monthlyMortgagePayment * 12
   }
 
-  // Rental income (adjusted for voids)
+  // Rental income.
+  // contractAnnualRent = the rent on the lease (what you'd quote in marketing).
+  // annualRent          = that figure void-adjusted (effective income for cashflow).
+  // Gross yield uses contractAnnualRent (industry-standard); cashflow uses annualRent.
   const effectiveWeeks = 52 - data.voidWeeks
-  const annualRent = Math.round(data.monthlyRent * 12 * (effectiveWeeks / 52))
+  const contractAnnualRent = data.monthlyRent * 12
+  const annualRent = Math.round(contractAnnualRent * (effectiveWeeks / 52))
   const monthlyIncome = Math.round((annualRent / 12) * 100) / 100
 
-  // Running costs
+  // Running costs.
+  // The form labels: "Insurance (Annual)", "Maintenance (Annual)", "Ground Rent
+  // (Annual)" — those three are entered annually and divided by 12 for the
+  // monthly view. "Bills (Monthly)" is entered monthly and used as-is. This
+  // distinction matters: previously bills were also divided by 12, which
+  // 12× understated the bills line.
   const monthlyManagement = data.monthlyRent * (data.managementFeePercent / 100)
   const monthlyInsurance = data.insurance / 12
   const monthlyMaintenance = data.maintenance / 12
   const monthlyGroundRent = data.groundRent / 12
-  const monthlyBills = data.bills / 12
+  const monthlyBills = data.bills
 
   const monthlyRunningCosts =
     Math.round(
@@ -469,8 +486,10 @@ export function calculateAll(data: PropertyFormData): CalculationResults {
   const monthlyCashFlow = Math.round((monthlyIncome - monthlyExpenses) * 100) / 100
   const annualCashFlow = Math.round(monthlyCashFlow * 12 * 100) / 100
 
-  // Yields
-  const grossYield = calculateGrossYield(annualRent, data.purchasePrice)
+  // Yields.
+  // Gross uses contract rent (the lease figure), per UK convention.
+  // Net uses void-adjusted rent so it reflects actual deliverable income.
+  const grossYield = calculateGrossYield(contractAnnualRent, data.purchasePrice)
   const netYield = calculateNetYield(
     annualRent,
     annualRunningCosts + annualMortgageCost,

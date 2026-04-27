@@ -47,6 +47,14 @@ export type DevUnitType =
   | "commercial"
   | "other"
 export type SDLTRateType = "residential" | "non-residential" | "mixed-use"
+/**
+ * UK SDLT buyer-type classifications.
+ *  - "first-time": first-time-buyer relief (0% to £425k, 5% £425k-£625k; relief lost above £625k)
+ *  - "standard":   standard residential bands, no surcharge (someone replacing
+ *                  their primary residence, not a first-time buyer)
+ *  - "additional": +5% surcharge on every band (second home, BTL, investment)
+ */
+export type BuyerType = "first-time" | "standard" | "additional"
 
 /** A single unit within a scheme's unit mix. Used to drive GDV + size totals. */
 export interface DevUnit {
@@ -72,7 +80,7 @@ export interface PropertyFormData {
   condition: PropertyCondition
 
   // Purchase Costs
-  buyerType: "first-time" | "additional"
+  buyerType: BuyerType
   refurbishmentBudget: number
   legalFees: number
   surveyCosts: number
