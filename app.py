@@ -2833,11 +2833,25 @@ def analyze_deal(data):
     else:
         weaknesses.append(f"Cash-on-cash return of {cash_on_cash:.2f}% is below 8% target")
     
-    # Calculate AI Deal Score (0-100)
-    deal_score = calculate_deal_score(
-        deal_type, gross_yield, net_yield, monthly_cashflow, 
-        cash_on_cash, risk_level, brr_metrics, flip_metrics
-    )
+    # Calculate AI Deal Score (0-100).
+    # For FLIP, the dealcheck-uk TS engine produces a 5-axis post-tax-aware
+    # deal score (factors in CGT/CT, 70% MAO, post-tax ROI) and POSTs it as
+    # flipComputed.dealScore. Prefer that — it's calibrated for FLIP-specific
+    # metrics that calculate_deal_score's BTL-leaning rubric can't capture.
+    fe_flip_score = flip_metrics.get('dealScore') if deal_type == 'FLIP' else None
+    if fe_flip_score is not None:
+        try:
+            deal_score = max(0, min(100, int(round(float(fe_flip_score)))))
+        except (TypeError, ValueError):
+            deal_score = calculate_deal_score(
+                deal_type, gross_yield, net_yield, monthly_cashflow,
+                cash_on_cash, risk_level, brr_metrics, flip_metrics
+            )
+    else:
+        deal_score = calculate_deal_score(
+            deal_type, gross_yield, net_yield, monthly_cashflow,
+            cash_on_cash, risk_level, brr_metrics, flip_metrics
+        )
     
     # Generate 5-year projection
     capital_growth_pct = float(data.get('capitalGrowthRate', 4.0) or 4.0)
