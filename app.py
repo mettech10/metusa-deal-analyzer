@@ -1559,59 +1559,61 @@ PDF_CONFIG = {
 def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
     """
     Calculate UK Stamp Duty Land Tax (SDLT) for England & NI.
-    Updated for 2025/2026 rates.
+    Rates effective from 1 April 2025 (mirrors lib/calculations.ts in dealcheck-uk).
 
     Three buyer categories:
-    1. First-time buyer: 0% up to £300k, 5% on £300k-£500k, standard rates above £500k
-    2. Standard buyer (primary residence, no surcharge): tiered 0/5/10/12%
+    1. First-time buyer: 0% to £425k, 5% on £425k-£625k; relief lost above £625k
+       (falls back to standard residential bands above £625k — NO surcharge)
+    2. Standard buyer (primary residence, no surcharge): 0/2/5/10/12%
     3. Additional property (investment/second home): standard + 5% surcharge
+
+    Apr-2025 changes from previous code:
+    - FTB threshold reverted from £300k/£500k to £425k/£625k (the temporary
+      pandemic-era cut expired 31 March 2025).
+    - Standard residential 0% threshold reverted from £250k to £125k, and
+      the £125k–£250k @ 2% band was reinstated.
+    - Additional-property surcharge was already 5% (correct for Apr 2025).
     """
     if first_time_buyer:
-        # First-time buyer relief (England/NI, 2025/2026)
-        # 0% up to £300,000
-        # 5% on £300,001 to £500,000
-        # Above £500,000: relief does not apply — use standard rates (NO surcharge)
-        if price <= 300000:
+        # First-time buyer relief (England/NI, Apr-2025+)
+        # 0% up to £425,000
+        # 5% on £425,001 to £625,000
+        # Above £625,000: relief does not apply — fall through to standard rates (NO surcharge)
+        if price <= 425000:
             return 0
-        elif price <= 500000:
-            return (price - 300000) * 0.05
-        else:
-            # FTB relief lost above £500k — standard rates, no surcharge
-            if price <= 250000:
-                return 0
-            elif price <= 925000:
-                return (price - 250000) * 0.05
-            elif price <= 1500000:
-                return 33750 + ((price - 925000) * 0.10)
-            else:
-                return 91250 + ((price - 1500000) * 0.12)
-    elif not second_property:
+        elif price <= 625000:
+            return (price - 425000) * 0.05
+        # else: FTB relief lost above £625k — fall through to standard residential
+    if first_time_buyer or not second_property:
         # Standard residential rates (primary residence, no surcharge)
-        if price <= 250000:
-            return 0
-        elif price <= 925000:
-            return (price - 250000) * 0.05
-        elif price <= 1500000:
-            return 33750 + ((price - 925000) * 0.10)
-        else:
-            return 91250 + ((price - 1500000) * 0.12)
-    else:
-        # Additional property / investment rates (standard + 5% surcharge)
-        # £0-£125k: 0% + 5% = 5%
-        # £125k-£250k: 2% + 5% = 7%
-        # £250k-£925k: 5% + 5% = 10%
-        # £925k-£1.5m: 10% + 5% = 15%
-        # Above £1.5m: 12% + 5% = 17%
+        # Also used for FTB above £625k (relief lost).
+        # 0% to £125k, 2% to £250k, 5% to £925k, 10% to £1.5m, 12% above.
         if price <= 125000:
-            return price * 0.05
+            return 0
         elif price <= 250000:
-            return (125000 * 0.05) + ((price - 125000) * 0.07)
+            return (price - 125000) * 0.02
         elif price <= 925000:
-            return (125000 * 0.05) + (125000 * 0.07) + ((price - 250000) * 0.10)
+            return 2500 + ((price - 250000) * 0.05)
         elif price <= 1500000:
-            return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + ((price - 925000) * 0.15)
+            return 36250 + ((price - 925000) * 0.10)
         else:
-            return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + (575000 * 0.15) + ((price - 1500000) * 0.17)
+            return 93750 + ((price - 1500000) * 0.12)
+    # Additional property / investment rates (standard + 5% surcharge)
+    # £0-£125k:    0% + 5% =  5%
+    # £125k-£250k: 2% + 5% =  7%
+    # £250k-£925k: 5% + 5% = 10%
+    # £925k-£1.5m: 10% + 5% = 15%
+    # Above £1.5m: 12% + 5% = 17%
+    if price <= 125000:
+        return price * 0.05
+    elif price <= 250000:
+        return (125000 * 0.05) + ((price - 125000) * 0.07)
+    elif price <= 925000:
+        return (125000 * 0.05) + (125000 * 0.07) + ((price - 250000) * 0.10)
+    elif price <= 1500000:
+        return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + ((price - 925000) * 0.15)
+    else:
+        return (125000 * 0.05) + (125000 * 0.07) + (675000 * 0.10) + (575000 * 0.15) + ((price - 1500000) * 0.17)
 
 def calculate_deal_score(deal_type, gross_yield, net_yield, monthly_cashflow, cash_on_cash, risk_level, brr_metrics=None, flip_metrics=None):
     """
