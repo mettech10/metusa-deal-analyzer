@@ -6478,6 +6478,199 @@ def ai_analyze():
             'message': f'An error occurred during AI analysis: {str(e)}'
         }), 500
 
+# ────────────────────────────────────────────────────────────────────────
+# AI Area Analysis — focused, data-rich, structured 5-section response.
+# Replaces the terse 2-3-sentence "area" field that came back from the
+# main analyze_deal AI prompt.
+# ────────────────────────────────────────────────────────────────────────
+def _area_cache_key(district: str, strategy: str) -> str:
+    return f'area_analysis::{district.upper()}::{strategy.upper()}'
+
+
+def _area_cache_get(district: str, strategy: str):
+    """Return cached AI area analysis if <24h old, else None."""
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return None
+    try:
+        key = _area_cache_key(district, strategy)
+        resp = requests.get(
+            f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
+            params={
+                'cache_key': f'eq.{key}',
+                'data_type': 'eq.area_analysis',
+                'select': 'response,created_at',
+                'limit': '1',
+            },
+            headers=_sb_headers(),
+            timeout=4,
+        )
+        if resp.status_code != 200:
+            return None
+        rows = resp.json()
+        if not rows:
+            return None
+        from datetime import datetime, timezone, timedelta
+        created = datetime.fromisoformat(rows[0]['created_at'].replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) - created > timedelta(hours=24):
+            return None
+        return rows[0]['response']
+    except Exception as e:
+        app.logger.warning(f'[area-cache] read failed: {e}')
+        return None
+
+
+def _area_cache_put(district: str, strategy: str, payload: dict) -> None:
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return
+    try:
+        key = _area_cache_key(district, strategy)
+        requests.post(
+            f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
+            json={
+                'cache_key': key,
+                'data_type': 'area_analysis',
+                'postcode_district': district.upper(),
+                'response': payload,
+            },
+            headers={**_sb_headers(), 'Prefer': 'resolution=merge-duplicates,return=minimal'},
+            timeout=4,
+        )
+    except Exception as e:
+        app.logger.warning(f'[area-cache] write failed: {e}')
+
+
+@app.route('/api/analysis/area', methods=['POST'])
+@limiter.limit("20 per minute")
+def area_analysis():
+    """
+    Generate a rich, structured area analysis using Claude.
+    Body: { postcode, strategy, dealData, benchmark, articleFour }
+    Returns 5 sections: marketOverview, investmentFundamentals,
+    dealInContext, keyRisks, investorVerdict.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'JSON body required'}), 400
+        body = request.get_json() or {}
+        postcode = (body.get('postcode') or '').strip().upper()
+        if not postcode:
+            return jsonify({'success': False, 'message': 'postcode required'}), 400
+
+        district = postcode.split()[0] if ' ' in postcode else postcode[:4].rstrip()
+        strategy = (body.get('strategy') or 'BTL').upper()
+        deal = body.get('dealData') or {}
+        bench = body.get('benchmark') or {}
+        a4 = body.get('articleFour') or {}
+        council = a4.get('council') or 'Local Council'
+
+        # Cache hit?
+        cached = _area_cache_get(district, strategy)
+        if cached:
+            app.logger.info(f'[area] cache hit {district}/{strategy}')
+            return jsonify({'success': True, 'cached': True, **cached})
+
+        # Build the Claude prompt
+        sys_prompt = (
+            "You are a UK property investment analyst providing area "
+            "intelligence for property investors. You have access to real "
+            "market data and benchmark figures. Be specific, data-driven, "
+            "and actionable. Never give generic advice — always reference "
+            "the actual postcode district and real figures provided. "
+            "Each section should be 2-3 sentences (not paragraphs)."
+        )
+
+        median_price = bench.get('median_sold_price') or bench.get('avg_price') or 'unknown'
+        median_rent = bench.get('median_monthly_rent') or 'unknown'
+        yield_med = bench.get('gross_yield_median') or bench.get('btl_median_yield') or 'unknown'
+        yield_low = bench.get('gross_yield_lower') or 'unknown'
+        yield_high = bench.get('gross_yield_upper') or 'unknown'
+        growth = bench.get('price_growth_5yr_pct') or bench.get('rental_growth_pa') or 'unknown'
+        tx_count = bench.get('transaction_count_12m') or 'unknown'
+        void_rate = bench.get('void_rate_pct') or 'unknown'
+
+        deal_price = deal.get('purchasePrice') or deal.get('purchase_price') or 0
+        deal_yield = deal.get('grossYield') or deal.get('gross_yield') or 0
+
+        a4_status = 'In force' if a4.get('is_article_4') else (
+            'Not in force' if a4.get('known') else 'Unverified'
+        )
+
+        user_prompt = f"""Provide a detailed area analysis for a property investor considering a {strategy} investment in {district} ({council}).
+
+AREA MARKET DATA:
+- Median sold price: £{median_price}
+- Median monthly rent: £{median_rent}
+- Gross yield benchmark: {yield_med}% (range: {yield_low}%-{yield_high}%)
+- 5-year/annual growth: {growth}%
+- 12-month transaction volume: {tx_count}
+- Void rate proxy: {void_rate}%
+
+THIS DEAL:
+- Purchase price: £{deal_price:,} if numeric
+- Strategy: {strategy}
+- Deal gross yield: {deal_yield}%
+
+ARTICLE 4 STATUS: {a4_status} ({council})
+
+Return ONLY a valid JSON object — no markdown, no code fences:
+{{
+  "marketOverview": "<2-3 sentences: what kind of area is {district}? rental demand drivers, typical tenant profile, market maturity>",
+  "investmentFundamentals": "<2-3 sentences: is this area strong for {strategy}? reference the yield benchmark, voids, and growth>",
+  "dealInContext": "<2-3 sentences: how does this specific deal compare to the area benchmark? is the price reasonable?>",
+  "keyRisks": "<2-3 sentences: planning restrictions, market saturation, regulatory risks, economic factors specific to {district}>",
+  "investorVerdict": "<one clear paragraph: does this area support the {strategy} thesis? reference specific data>"
+}}"""
+
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            return jsonify({
+                'success': False,
+                'message': 'AI service not configured',
+                'fallback': True,
+            }), 503
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
+            message = client.messages.create(
+                model=model_id,
+                max_tokens=1500,
+                system=sys_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            raw = message.content[0].text.strip()
+            if raw.startswith('```'):
+                raw = re.sub(r'^```[a-z]*\n?', '', raw)
+                raw = re.sub(r'\n?```$', '', raw)
+            sections = json.loads(raw)
+        except json.JSONDecodeError as e:
+            app.logger.error(f'[area] AI returned non-JSON: {e}')
+            return jsonify({'success': False, 'message': 'AI response malformed'}), 502
+        except Exception as e:
+            app.logger.error(f'[area] AI call failed: {e}')
+            return jsonify({'success': False, 'message': str(e)}), 502
+
+        from datetime import datetime, timezone
+        payload = {
+            'sections': sections,
+            'meta': {
+                'district': district,
+                'council': council,
+                'strategy': strategy,
+                'generatedAt': datetime.now(timezone.utc).isoformat(),
+                'sources': ['Land Registry', 'VOA', 'PropertyData', 'Metalyzi DB'],
+            },
+        }
+        _area_cache_put(district, strategy, payload)
+        return jsonify({'success': True, 'cached': False, **payload})
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f'[area] error: {e}\n{traceback.format_exc()}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @app.route('/api/sold-prices', methods=['POST'])
 @limiter.limit("10 per minute")
 def get_sold_prices():
