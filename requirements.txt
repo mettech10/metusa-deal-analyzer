@@ -29,3 +29,6 @@ playwright>=1.40.0
 # ✅ Playwright - For protected sites (Zoopla) - pip install playwright && playwright install chromium
 # ⏸️ Scrapling - Alternative - pip install scrapling
 
+
+# Testing
+pytest>=7.0

@@ -1,0 +1,243 @@
+{
+  "fixtures": [
+    {
+      "name": "BTL Standard",
+      "description": "3-bed terraced, investment buyer, IO mortgage",
+      "input": {
+        "strategy": "BTL",
+        "purchasePrice": 200000,
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "mortgageTerm": 25,
+        "monthlyRent": 950,
+        "voidWeeks": 2,
+        "managementFee": 10,
+        "maintenancePct": 10,
+        "insurance": 300,
+        "groundRent": 0,
+        "bills": 150,
+        "legalFees": 1500,
+        "survey": 500,
+        "refurb": 0,
+        "buyerType": "investment",
+        "propertyType": "terraced",
+        "bedrooms": 3
+      },
+      "expected": {
+        "deposit_amount": 50000,
+        "mortgage_amount": 150000,
+        "monthly_mortgage": 625.00,
+        "sdlt": 11500,
+        "annual_rent": 11400,
+        "gross_yield": 5.70
+      },
+      "tolerance": {
+        "amounts": 5.00,
+        "percentages": 0.10
+      }
+    },
+    {
+      "name": "BTL FTB SDLT",
+      "description": "First time buyer SDLT = £0 under £425k",
+      "input": {
+        "strategy": "BTL",
+        "purchasePrice": 200000,
+        "buyerType": "first_time_buyer",
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "monthlyRent": 950,
+        "voidWeeks": 2,
+        "managementFee": 10,
+        "maintenancePct": 10,
+        "insurance": 300,
+        "legalFees": 1500,
+        "survey": 500
+      },
+      "expected": {
+        "sdlt": 0
+      },
+      "tolerance": {
+        "amounts": 0,
+        "percentages": 0
+      }
+    },
+    {
+      "name": "BTL Investment SDLT 350k",
+      "description": "Investment buyer £350k — crosses £250k band",
+      "input": {
+        "strategy": "BTL",
+        "purchasePrice": 350000,
+        "buyerType": "investment",
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "monthlyRent": 1200,
+        "voidWeeks": 2,
+        "managementFee": 10,
+        "maintenancePct": 10,
+        "insurance": 300,
+        "legalFees": 1500,
+        "survey": 500
+      },
+      "expected": {
+        "sdlt": 25000
+      },
+      "tolerance": {
+        "amounts": 0,
+        "percentages": 0
+      }
+    },
+    {
+      "name": "BTL FTB 500k",
+      "description": "FTB £500k — partial relief: £75k × 5% = £3,750",
+      "input": {
+        "strategy": "BTL",
+        "purchasePrice": 500000,
+        "buyerType": "first_time_buyer",
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "monthlyRent": 1500,
+        "voidWeeks": 2,
+        "managementFee": 10,
+        "maintenancePct": 10,
+        "insurance": 300,
+        "legalFees": 1500,
+        "survey": 500
+      },
+      "expected": {
+        "sdlt": 3750
+      },
+      "tolerance": {
+        "amounts": 0,
+        "percentages": 0
+      }
+    },
+    {
+      "name": "HMO Standard",
+      "description": "5-room HMO, per-room void, licence",
+      "input": {
+        "strategy": "HMO",
+        "purchasePrice": 200000,
+        "buyerType": "investment",
+        "numberOfRooms": 5,
+        "rentPerRoom": 550,
+        "deposit": 25,
+        "mortgageRate": 5.5,
+        "repaymentType": "interest_only",
+        "managementFee": 15,
+        "maintenancePct": 10,
+        "bills": 350,
+        "insurance": 800,
+        "hmoLicence": 1000,
+        "voidWeeks": 2,
+        "legalFees": 1500,
+        "survey": 500
+      },
+      "expected": {
+        "gross_monthly_rent": 2750,
+        "annual_gross_rent": 33000,
+        "monthly_mortgage": 687.50,
+        "sdlt": 11500,
+        "gross_yield": 16.50
+      },
+      "tolerance": {
+        "amounts": 5.00,
+        "percentages": 0.10
+      }
+    },
+    {
+      "name": "BRRRR Standard",
+      "description": "£100k purchase, £150k ARV, 75% refi",
+      "input": {
+        "strategy": "BRRRR",
+        "purchasePrice": 100000,
+        "buyerType": "investment",
+        "refurb": 17000,
+        "contingency": 15,
+        "arv": 150000,
+        "refinanceLtv": 75,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "monthlyRent": 800,
+        "voidWeeks": 2,
+        "managementFee": 10,
+        "maintenancePct": 10,
+        "insurance": 300,
+        "legalFees": 1500,
+        "survey": 500,
+        "deposit": 25
+      },
+      "expected": {
+        "arv": 150000,
+        "refinance_amount": 112500,
+        "gross_yield": 9.60
+      },
+      "tolerance": {
+        "amounts": 100,
+        "percentages": 0.50
+      }
+    },
+    {
+      "name": "Flip Standard",
+      "description": "£185k purchase, £265k ARV",
+      "input": {
+        "strategy": "Flip",
+        "purchasePrice": 185000,
+        "buyerType": "investment",
+        "refurb": 26000,
+        "arv": 265000,
+        "agentFee": 1.5,
+        "legalSale": 1500,
+        "legalFees": 1500,
+        "survey": 500,
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "monthlyRent": 0
+      },
+      "expected": {
+        "arv": 265000,
+        "refurb_cost": 26000
+      },
+      "tolerance": {
+        "amounts": 100,
+        "percentages": 0.50
+      }
+    },
+    {
+      "name": "SA Owned",
+      "description": "£200k SA, 70% occupancy, £85 nightly, owned",
+      "input": {
+        "strategy": "SA",
+        "ownershipType": "owned",
+        "purchasePrice": 200000,
+        "buyerType": "investment",
+        "deposit": 25,
+        "mortgageRate": 5.0,
+        "repaymentType": "interest_only",
+        "nightlyRate": 85,
+        "occupancyRate": 70,
+        "averageStayLength": 3,
+        "platformFee": 15,
+        "cleaningPerStay": 60,
+        "utilities": 200,
+        "insurance": 800,
+        "managementFee": 20,
+        "maintenancePct": 5,
+        "legalFees": 1500,
+        "survey": 500
+      },
+      "expected": {
+        "monthly_revenue": 1785,
+        "monthly_mortgage": 625
+      },
+      "tolerance": {
+        "amounts": 5.00,
+        "percentages": 0.50
+      }
+    }
+  ]
+}
