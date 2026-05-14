@@ -7312,7 +7312,8 @@ def ai_analyze():
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
 def _area_cache_key(district: str, strategy: str) -> str:
-    return f'area_analysis::{district.upper()}::{strategy.upper()}'
+    # v2 = strategy-aware section templates (different titles + lens per strategy)
+    return f'area_analysis::v2::{district.upper()}::{strategy.upper()}'
 
 
 def _area_cache_get(district: str, strategy: str):
@@ -7367,14 +7368,116 @@ def _area_cache_put(district: str, strategy: str, payload: dict) -> None:
         app.logger.warning(f'[area-cache] write failed: {e}')
 
 
+def _area_section_template(strategy: str) -> list:
+    """Return strategy-specific section titles + analytical lens. The Flask
+    Claude prompt is built around this so each strategy gets the right
+    investor questions answered, not a one-size-fits-all BTL framing.
+
+    Returns a list of (title, focus) tuples. The final item is rendered
+    as the highlighted 'Investor Verdict' tile in the UI.
+    """
+    s = (strategy or 'BTL').upper()
+    if s == 'HMO':
+        return [
+            ('Sharer Demand & Tenant Pool',
+             'who rents HMO rooms in this district — universities, hospitals, employer hubs, transport links — and how strong the sharer pool is right now'),
+            ('HMO Regulation & Licensing',
+             "the council's HMO licensing tier (selective/additional/mandatory), Article 4 status for C3→C4 conversions, and what permissions this deal needs"),
+            ('This Deal in Context',
+             "how this deal's room count, room rate and refurb scope compare to typical HMO product in the area; whether the rate is achievable"),
+            ('Risks Specific to HMOs Here',
+             'oversupply / saturation, EPC C requirement timeline, fire safety / licensing costs, planning route risk if Article 4 applies'),
+            ('Investor Verdict',
+             "one clear paragraph: does this area support the HMO thesis? reference room count, demand and the specific licensing route"),
+        ]
+    if s == 'BRR':
+        return [
+            ('Refurb Uplift Potential',
+             'typical spread between "needs work" and "done up" sold prices in the district; whether the ARV target is realistic given recent comps'),
+            ('Refinance Climate',
+             'BTL refinance lender appetite for the area, typical post-refurb valuations vs ARV (down-valuation risk), surveyor conservatism'),
+            ('This Deal in Context',
+             "how the deal's refurb uplift multiple and capital-recycled % compare to typical successful BRRRRs in this kind of stock"),
+            ('Risks Specific to BRRRRs Here',
+             'refi valuation gap, refurb cost inflation, bridging holding period overrun, stuck-on-market sold comps'),
+            ('Investor Verdict',
+             'one clear paragraph: does this area support the BRRRR thesis? reference the uplift ratio, recycled %, and money-left-in-deal'),
+        ]
+    if s == 'FLIP':
+        return [
+            ('Flip Market Conditions',
+             'days-on-market, sale-to-asking ratio, buyer demand strength for this kind of stock right now in the district'),
+            ('Tax & SDLT Context',
+             "the deal's SDLT exposure (5% surcharge applied for investors), CGT regime for individual flippers (18% basic / 24% higher), corporation tax option"),
+            ('This Deal in Context',
+             "how the deal's post-tax margin and ARV-to-purchase spread compare to recent flips in the area; whether the holding period is realistic"),
+            ('Risks Specific to Flips Here',
+             'market timing / softening, refurb cost overrun, stuck-on-market exit, CGT rate changes, mortgage rates affecting buyer pool'),
+            ('Investor Verdict',
+             "one clear paragraph: does this area support the Flip thesis? reference DOM, sale-to-asking and the post-tax margin"),
+        ]
+    if s == 'R2SA':
+        return [
+            ('Short-Let Market',
+             'demand level, average nightly rate, REVPAR, occupancy, market saturation — quote the Airroi figures provided if any'),
+            ('STR Regulation',
+             'short-term let rules that bite in this council area (London 90-day cap, Scotland licensing scheme, Wales emerging rules, neighbour-nuisance provisions, planning use class)'),
+            ('This Deal in Context',
+             "how the deal's nightly rate and occupancy assumption compare to live market data; whether the rent-to-revenue ratio is sustainable (target 2.0×+)"),
+            ('Risks Specific to SA Here',
+             'seasonality, regulation tightening, platform algorithm risk, neighbour complaints, void seasons, lease clause risk (for rent-to-SA)'),
+            ('Investor Verdict',
+             "one clear paragraph: does this area support the SA thesis? reference the occupancy, nightly rate, and regulatory exposure"),
+        ]
+    if s == 'DEVELOPMENT':
+        return [
+            ('Development Pipeline',
+             'absorption rate for new-build in the district, comparable scheme sales, £/m² achieved by recent completions'),
+            ('Planning Climate',
+             "council's planning approval rate, S106 / CIL benchmarks for the area, affordable housing policy threshold, 5-year housing land supply position"),
+            ('This Deal in Context',
+             "how the scheme's £/m² GDV, profit-on-cost, and unit mix compare to comparable schemes; whether the RLV supports the land price"),
+            ('Risks Specific to Development Here',
+             'planning refusal / delay, build cost inflation, exit market softening, S106 negotiation, abnormal site costs'),
+            ('Investor Verdict',
+             'one clear paragraph: does this area support the Development thesis? reference the profit margin, RLV vs land price and planning route'),
+        ]
+    # Default — BTL
+    return [
+        ('Rental Market & Demand',
+         'who rents in this district, void norms, typical tenant profile (families/professionals/students), rental growth trend'),
+        ('BTL Fundamentals',
+         "the area's gross yield benchmark and how voids and growth shape long-term performance; lender appetite for the postcode"),
+        ('This Deal in Context',
+         "how the deal's purchase price, gross yield and cashflow compare to the area benchmark; is the price reasonable"),
+        ('Risks Specific to BTL Here',
+         'Section 24 (interest relief), EPC C requirement (2028 target), Renters Reform Bill, local regulation, rate-rise sensitivity'),
+        ('Investor Verdict',
+         "one clear paragraph: does this area support the BTL thesis? reference yield, cashflow and key risks"),
+    ]
+
+
+def _format_currency(v) -> str:
+    """Safe '£X,XXX' for None/strings/numbers."""
+    try:
+        n = float(v)
+        return f"£{int(n):,}"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
 @app.route('/api/analysis/area', methods=['POST'])
 @limiter.limit("20 per minute")
 def area_analysis():
     """
-    Generate a rich, structured area analysis using Claude.
-    Body: { postcode, strategy, dealData, benchmark, articleFour }
-    Returns 5 sections: marketOverview, investmentFundamentals,
-    dealInContext, keyRisks, investorVerdict.
+    Generate a STRATEGY-AWARE structured area analysis using Claude.
+
+    Body: { postcode, strategy, dealData, benchmark, articleFour, marketContext }
+    Returns: { sections: { items: [{title, body}], verdict: {title, body} }, meta }
+
+    Each investment type gets section titles + analytical lens calibrated
+    to its key investor questions (HMO → sharer demand + licensing,
+    BRRRR → refurb uplift + refinance climate, Flip → DOM + tax, etc).
     """
     try:
         if not request.is_json:
@@ -7389,6 +7492,7 @@ def area_analysis():
         deal = body.get('dealData') or {}
         bench = body.get('benchmark') or {}
         a4 = body.get('articleFour') or {}
+        market = body.get('marketContext') or {}
         council = a4.get('council') or 'Local Council'
 
         # Cache hit?
@@ -7397,16 +7501,16 @@ def area_analysis():
             app.logger.info(f'[area] cache hit {district}/{strategy}')
             return jsonify({'success': True, 'cached': True, **cached})
 
-        # Build the Claude prompt
         sys_prompt = (
-            "You are a UK property investment analyst providing area "
-            "intelligence for property investors. You have access to real "
-            "market data and benchmark figures. Be specific, data-driven, "
-            "and actionable. Never give generic advice — always reference "
-            "the actual postcode district and real figures provided. "
-            "Each section should be 2-3 sentences (not paragraphs)."
+            "You are a UK property investment analyst writing strategy-"
+            "specific area intelligence for investors. Be concrete, "
+            "data-driven and actionable — quote the actual numbers given "
+            "to you. Never give generic advice. Each section should be "
+            "2-3 sentences (not paragraphs). Tailor every section to the "
+            "specific strategy you've been asked about."
         )
 
+        # Common benchmark stats
         median_price = bench.get('median_sold_price') or bench.get('avg_price') or 'unknown'
         median_rent = bench.get('median_monthly_rent') or 'unknown'
         yield_med = bench.get('gross_yield_median') or bench.get('btl_median_yield') or 'unknown'
@@ -7416,14 +7520,89 @@ def area_analysis():
         tx_count = bench.get('transaction_count_12m') or 'unknown'
         void_rate = bench.get('void_rate_pct') or 'unknown'
 
-        deal_price = deal.get('purchasePrice') or deal.get('purchase_price') or 0
-        deal_yield = deal.get('grossYield') or deal.get('gross_yield') or 0
-
         a4_status = 'In force' if a4.get('is_article_4') else (
             'Not in force' if a4.get('known') else 'Unverified'
         )
 
-        user_prompt = f"""Provide a detailed area analysis for a property investor considering a {strategy} investment in {district} ({council}).
+        # Strategy-specific deal context block
+        deal_lines = [
+            f"- Strategy: {strategy}",
+            f"- Purchase price: {_format_currency(deal.get('purchasePrice'))}",
+            f"- Property type: {deal.get('propertyTypeDetail') or deal.get('propertyType') or 'unknown'}, {deal.get('bedrooms') or '?'} bed, {deal.get('sqft') or '?'} sqft",
+            f"- Condition: {deal.get('condition') or 'unknown'}",
+            f"- Gross yield: {deal.get('grossYield') or 0}%",
+            f"- Monthly cashflow: £{deal.get('monthlyCashFlow') or 0}",
+        ]
+        if strategy == 'HMO':
+            deal_lines.extend([
+                f"- Room count: {deal.get('roomCount') or '?'}",
+                f"- Avg room rate: £{deal.get('avgRoomRate') or '?'}/mo",
+                f"- HMO licence cost (input): {_format_currency(deal.get('hmoLicenceCost'))}",
+            ])
+        elif strategy == 'BRR':
+            deal_lines.extend([
+                f"- ARV: {_format_currency(deal.get('arv'))} (basis: {deal.get('arvBasis') or 'n/a'})",
+                f"- Refurb budget: {_format_currency(deal.get('refurbishmentBudget'))}",
+                f"- Capital recycled at refi: {deal.get('brrrrCapitalRecycledPct') or 0}%",
+                f"- Refurb uplift ratio: {deal.get('brrrrRefurbUpliftRatio') or 0}×",
+                f"- Money left in deal: {_format_currency(deal.get('moneyLeftInDeal'))}",
+                f"- Equity gained: {_format_currency(deal.get('equityGained'))}",
+                f"- Refinanced mortgage: {_format_currency(deal.get('refinancedMortgageAmount'))}",
+            ])
+        elif strategy == 'FLIP':
+            deal_lines.extend([
+                f"- ARV: {_format_currency(deal.get('arv'))}",
+                f"- Refurb budget: {_format_currency(deal.get('refurbishmentBudget'))}",
+                f"- Holding months: {deal.get('flipHoldingMonths') or '?'}",
+                f"- Ownership structure: {deal.get('flipOwnershipStructure') or 'individual'}",
+                f"- Post-tax profit: {_format_currency(deal.get('flipPostTaxProfit'))}",
+                f"- Post-tax ROI: {deal.get('flipPostTaxROI') or 0}%",
+                f"- Passes strict 70% rule: {deal.get('flipPassesStrict70')}",
+            ])
+        elif strategy == 'R2SA':
+            ownership = deal.get('saOwnershipType') or 'rent-to-sa'
+            deal_lines.extend([
+                f"- Ownership mode: {ownership}",
+                f"- Nightly rate: £{deal.get('saNightlyRate') or '?'}",
+                f"- Occupancy assumption: {deal.get('saOccupancyRate') or '?'}%",
+                f"- Monthly lease to landlord: £{deal.get('saMonthlyLease') or 0}",
+            ])
+        elif strategy == 'DEVELOPMENT':
+            deal_lines.extend([
+                f"- Site type: {deal.get('devSiteType') or 'unknown'}",
+                f"- Planning status: {deal.get('devPlanningStatus') or 'unknown'}",
+                f"- Unit mix: {deal.get('devTotalUnits') or '?'} units across {deal.get('devUnitMixSize') or 0} unit types",
+                f"- GDV: {_format_currency(deal.get('devGdv'))}",
+                f"- TDC: {_format_currency(deal.get('devTdc'))}",
+                f"- Profit on cost: {deal.get('devProfitOnCostPct') or 0}%",
+                f"- RLV (back-solved): {_format_currency(deal.get('devRlv'))}",
+            ])
+
+        deal_block = "\n".join(deal_lines)
+
+        # Market context (comps, valuations)
+        market_lines = []
+        sold = market.get('soldComparables') if isinstance(market.get('soldComparables'), list) else None
+        if sold:
+            market_lines.append(f"- Sold comparables: {len(sold)} listings, avg £{market.get('avgSoldPrice') or '?'}")
+        rent = market.get('rentComparables') if isinstance(market.get('rentComparables'), list) else None
+        if rent:
+            market_lines.append(f"- Rental comparables: {len(rent)} listings")
+        hv = market.get('houseValuation') or {}
+        if isinstance(hv, dict) and hv.get('estimate'):
+            market_lines.append(f"- House valuation estimate: £{hv.get('estimate')} (confidence: {hv.get('confidence', 'n/a')})")
+        market_block = "\n".join(market_lines) if market_lines else "- No live comparables threaded in"
+
+        # Build the section template + a JSON schema instruction
+        template = _area_section_template(strategy)
+        schema_items = []
+        for i, (title, focus) in enumerate(template):
+            schema_items.append(f'    {{"title": "{title}", "body": "<2-3 sentences focused on: {focus}>"}}')
+        items_json = ",\n".join(schema_items[:-1])  # all but verdict
+        verdict_title, verdict_focus = template[-1]
+        verdict_json = f'  "verdict": {{"title": "{verdict_title}", "body": "<{verdict_focus}>"}}'
+
+        user_prompt = f"""Provide a STRATEGY-SPECIFIC area analysis for a {strategy} investment in {district} ({council}).
 
 AREA MARKET DATA:
 - Median sold price: £{median_price}
@@ -7432,21 +7611,23 @@ AREA MARKET DATA:
 - 5-year/annual growth: {growth}%
 - 12-month transaction volume: {tx_count}
 - Void rate proxy: {void_rate}%
+- Article 4 status: {a4_status} ({council})
+
+LIVE COMPARABLES:
+{market_block}
 
 THIS DEAL:
-- Purchase price: £{deal_price:,} if numeric
-- Strategy: {strategy}
-- Deal gross yield: {deal_yield}%
+{deal_block}
 
-ARTICLE 4 STATUS: {a4_status} ({council})
+Return ONLY a valid JSON object — no markdown, no code fences. Use the
+EXACT section titles below (they are calibrated for {strategy}-specific
+investor questions):
 
-Return ONLY a valid JSON object — no markdown, no code fences:
 {{
-  "marketOverview": "<2-3 sentences: what kind of area is {district}? rental demand drivers, typical tenant profile, market maturity>",
-  "investmentFundamentals": "<2-3 sentences: is this area strong for {strategy}? reference the yield benchmark, voids, and growth>",
-  "dealInContext": "<2-3 sentences: how does this specific deal compare to the area benchmark? is the price reasonable?>",
-  "keyRisks": "<2-3 sentences: planning restrictions, market saturation, regulatory risks, economic factors specific to {district}>",
-  "investorVerdict": "<one clear paragraph: does this area support the {strategy} thesis? reference specific data>"
+  "items": [
+{items_json}
+  ],
+{verdict_json}
 }}"""
 
         api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
@@ -7463,7 +7644,7 @@ Return ONLY a valid JSON object — no markdown, no code fences:
             model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5-20250514')
             message = client.messages.create(
                 model=model_id,
-                max_tokens=1500,
+                max_tokens=2000,
                 system=sys_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
@@ -7472,8 +7653,11 @@ Return ONLY a valid JSON object — no markdown, no code fences:
                 raw = re.sub(r'^```[a-z]*\n?', '', raw)
                 raw = re.sub(r'\n?```$', '', raw)
             sections = json.loads(raw)
-        except json.JSONDecodeError as e:
-            app.logger.error(f'[area] AI returned non-JSON: {e}')
+            # Defensive: ensure the new shape is well-formed.
+            if not isinstance(sections, dict) or 'items' not in sections:
+                raise ValueError('Response missing items[]')
+        except (json.JSONDecodeError, ValueError) as e:
+            app.logger.error(f'[area] AI returned bad JSON: {e}')
             return jsonify({'success': False, 'message': 'AI response malformed'}), 502
         except Exception as e:
             app.logger.error(f'[area] AI call failed: {e}')
