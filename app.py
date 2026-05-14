@@ -2685,28 +2685,270 @@ def analyze_deal(data):
             net_yield = (annual_profit / purchase_price) * 100 if purchase_price > 0 else 0
             cash_on_cash = r2sa_roi
         else:
-            # RENT-TO-SA: legacy path — rent paid to landlord, no purchase
-            monthly_rent_paid = monthly_rent
-            monthly_profit = sa_revenue - monthly_rent_paid - monthly_op_costs
-            annual_profit = monthly_profit * 12
-            r2sa_roi = (annual_profit / sa_setup_costs) * 100 if sa_setup_costs > 0 else 0
+            # ── RENT-TO-SA REWRITE (S2 + S3) ────────────────────────────────
+            # Investor rents the property and sublets as serviced accom.
+            # Monthly P&L: SA revenue − lease rent − granular op costs.
+            # Capital required: deposits + advance + furniture + initial
+            # cleaning. The lease rent (monthlyRent) is THE key cost and
+            # must always be present in the cost stack.
+
+            # ── S2: ROBUST FIELD MAPPING ────────────────────────────────
+            monthly_rent_paid = float(
+                data.get('monthlyRent')
+                or data.get('rentAmount')
+                or data.get('leaseRent')
+                or 0
+            )
+            nightly_rate = float(
+                data.get('nightlyRate')
+                or data.get('saNightlyRate')
+                or data.get('nightlyPrice')
+                or 0
+            )
+            occupancy_rate = float(
+                data.get('occupancyRate')
+                or data.get('saOccupancyRate')
+                or data.get('occupancy')
+                or 70
+            ) / 100
+            avg_stay = float(
+                data.get('averageStayLength')
+                or data.get('avgStay')
+                or data.get('avgStayLength')
+                or 3
+            )
+            platform_fee_pct = float(
+                data.get('platformFee')
+                or data.get('saPlatformFeePercent')
+                or data.get('platformCommission')
+                or 15
+            ) / 100
+            cleaning_per_stay_s = float(
+                data.get('cleaningPerStay')
+                or data.get('saCleaningCostPerStay')
+                or data.get('cleaningCost')
+                or 0
+            )
+            utilities_m = float(
+                data.get('utilities')
+                or data.get('saUtilitiesMonthly')
+                or data.get('monthlyUtilities')
+                or 0
+            )
+            insurance_a = float(
+                data.get('insurance')
+                or data.get('saInsuranceAnnual')
+                or data.get('annualInsurance')
+                or 0
+            )
+            mgmt_pct_s = float(
+                data.get('managementFee')
+                or data.get('saManagementFeePercent')
+                or 20
+            ) / 100
+            maint_pct_s = float(
+                data.get('maintenancePct')
+                or data.get('saMaintenancePercent')
+                or data.get('maintenance')
+                or 5
+            ) / 100
+            furniture_setup = float(
+                data.get('furnitureSetup')
+                or data.get('saSetupCosts')
+                or data.get('setupCost')
+                or data.get('furnitureCost')
+                or 5000
+            )
+
+            # ── S3: REWRITTEN R2SA CALCULATION ENGINE ──────────────────
+            # Revenue
+            monthly_revenue = nightly_rate * occupancy_rate * 30
+            annual_revenue = monthly_revenue * 12
+            avg_stays_per_month = round((30 * occupancy_rate) / avg_stay) if avg_stay > 0 else 0
+
+            # Monthly cost stack
+            platform_commission = monthly_revenue * platform_fee_pct
+            monthly_cleaning = cleaning_per_stay_s * avg_stays_per_month
+            monthly_mgmt = monthly_revenue * mgmt_pct_s
+            monthly_maint = monthly_revenue * maint_pct_s
+            monthly_insurance = insurance_a / 12
+            monthly_utilities = utilities_m
+            monthly_lease_cost = monthly_rent_paid  # THE key cost — always included
+
+            total_monthly_costs = (
+                platform_commission
+                + monthly_cleaning
+                + monthly_mgmt
+                + monthly_maint
+                + monthly_insurance
+                + monthly_utilities
+                + monthly_lease_cost
+            )
+            monthly_net_profit = monthly_revenue - total_monthly_costs
+            annual_net_profit = monthly_net_profit * 12
+
+            # Capital required (one-off upfront)
+            rent_deposit = monthly_rent_paid * 2
+            rent_advance = monthly_rent_paid * 1
+            utilities_deposit = utilities_m * 2
+            insurance_upfront = insurance_a
+            initial_cleaning = cleaning_per_stay_s * 3
+            total_capital = (
+                rent_deposit + rent_advance + utilities_deposit
+                + insurance_upfront + initial_cleaning + furniture_setup
+            )
+
+            # Occupancy warning
+            occupancy_warning = None
+            if occupancy_rate > 0.85:
+                occupancy_warning = (
+                    f"Occupancy above 85% is ambitious. Market average in this area "
+                    f"is typically 55-70%. Consider a more conservative estimate."
+                )
+
+            # Break-even occupancy (S3 spec formula): occupancy at which
+            # revenue at full nightly rate equals current total costs.
+            # Approximation — costs scale with occupancy in reality, so the
+            # true break-even is higher. The simple form matches the spec.
+            if nightly_rate > 0:
+                breakeven_occupancy = (
+                    total_monthly_costs / (nightly_rate * 30) * 100
+                )
+            else:
+                breakeven_occupancy = 0
+
+            # Revenue : lease-rent ratio
+            rev_to_rent_ratio = (
+                monthly_revenue / monthly_rent_paid if monthly_rent_paid > 0 else 0
+            )
+
+            # ── R2SA DEAL SCORE (4 axes, 100 pts) ──────────────────────
+            # 1. Profitability (40)
+            if monthly_net_profit >= 500:
+                score_profit = 40
+            elif monthly_net_profit >= 300:
+                score_profit = 30
+            elif monthly_net_profit >= 100:
+                score_profit = 20
+            elif monthly_net_profit >= 0:
+                score_profit = 10
+            else:
+                score_profit = 0
+
+            # 2. Revenue vs Lease Cost (30)
+            if rev_to_rent_ratio >= 2.5:
+                score_ratio = 30
+            elif rev_to_rent_ratio >= 2.0:
+                score_ratio = 22
+            elif rev_to_rent_ratio >= 1.5:
+                score_ratio = 14
+            elif rev_to_rent_ratio >= 1.2:
+                score_ratio = 7
+            else:
+                score_ratio = 0
+
+            # 3. Occupancy Realism (15)
+            if occupancy_rate <= 0.70:
+                score_occupancy = 15
+            elif occupancy_rate <= 0.80:
+                score_occupancy = 10
+            elif occupancy_rate <= 0.85:
+                score_occupancy = 5
+            else:
+                score_occupancy = 0
+
+            # 4. Platform Cost Efficiency (15)
+            platform_pct_of_rev = (
+                platform_commission / monthly_revenue * 100
+                if monthly_revenue > 0 else 0
+            )
+            if platform_pct_of_rev <= 15:
+                score_platform = 15
+            elif platform_pct_of_rev <= 20:
+                score_platform = 10
+            elif platform_pct_of_rev <= 25:
+                score_platform = 5
+            else:
+                score_platform = 0
+
+            r2sa_score = (
+                score_profit + score_ratio + score_occupancy + score_platform
+            )
+            if r2sa_score >= 80:
+                r2sa_verdict = "Strong SA Opportunity"
+            elif r2sa_score >= 60:
+                r2sa_verdict = "Viable SA Deal"
+            elif r2sa_score >= 40:
+                r2sa_verdict = "Marginal SA"
+            else:
+                r2sa_verdict = "SA Not Viable — Review"
+
+            # Legacy ROI for verdict-gate compatibility (annual profit / setup)
+            r2sa_roi_legacy = (
+                (annual_net_profit / total_capital * 100)
+                if total_capital > 0 else 0
+            )
+
             r2sa_metrics = {
+                # Legacy keys (downstream consumers)
                 'ownership_type': 'rent-to-sa',
                 'monthly_rent_paid': round(monthly_rent_paid, 0),
-                'sa_monthly_revenue': round(sa_revenue, 0),
-                'monthly_op_costs': round(monthly_op_costs, 0),
-                'monthly_profit': round(monthly_profit, 0),
-                'annual_profit': round(annual_profit, 0),
-                'setup_costs': round(sa_setup_costs, 0),
-                'r2sa_roi': round(r2sa_roi, 1),
+                'sa_monthly_revenue': round(monthly_revenue, 0),
+                'monthly_op_costs': round(
+                    total_monthly_costs - monthly_lease_cost, 0
+                ),
+                'monthly_profit': round(monthly_net_profit, 0),
+                'annual_profit': round(annual_net_profit, 0),
+                'setup_costs': round(furniture_setup, 0),
+                'r2sa_roi': round(r2sa_roi_legacy, 1),
+
+                # ── S3 spec keys ────────────────────────────────────
+                'monthlyRevenue': round(monthly_revenue),
+                'annualRevenue': round(annual_revenue),
+                'avgStaysPerMonth': avg_stays_per_month,
+                'platformCommission': round(platform_commission),
+                'monthlyCleaningCost': round(monthly_cleaning),
+                'monthlyLeaseCost': round(monthly_lease_cost),
+                'monthlyManagement': round(monthly_mgmt),
+                'monthlyMaintenance': round(monthly_maint),
+                'monthlyInsurance': round(monthly_insurance),
+                'monthlyUtilities': round(monthly_utilities),
+                'totalMonthlyCosts': round(total_monthly_costs),
+                'monthlyNetProfit': round(monthly_net_profit, 2),
+                'annualNetProfit': round(annual_net_profit, 2),
+                'rentDeposit': round(rent_deposit),
+                'rentAdvance': round(rent_advance),
+                'utilitiesDeposit': round(utilities_deposit),
+                'insuranceUpfront': round(insurance_upfront),
+                'furnitureSetup': round(furniture_setup),
+                'initialCleaning': round(initial_cleaning),
+                'totalCapitalRequired': round(total_capital),
+                'breakevenOccupancy': round(breakeven_occupancy, 1),
+                'revToRentRatio': round(rev_to_rent_ratio, 2),
+                'occupancyWarning': occupancy_warning,
+                'r2saScore': r2sa_score,
+                'r2saVerdict': r2sa_verdict,
+                'scoreBreakdown': {
+                    'profitability': score_profit,
+                    'revenueToRent': score_ratio,
+                    'occupancyRealism': score_occupancy,
+                    'platformEfficiency': score_platform,
+                },
+                # Echo inputs for the UI
+                'nightlyRate': round(nightly_rate, 2),
+                'occupancyRatePct': round(occupancy_rate * 100, 2),
+                'avgStayNights': avg_stay,
+                'platformFeePct': round(platform_fee_pct * 100, 2),
+                'mgmtFeePct': round(mgmt_pct_s * 100, 2),
+                'maintenancePct': round(maint_pct_s * 100, 2),
             }
-            net_annual_income = annual_profit
-            monthly_cashflow = monthly_profit
-            annual_rent = sa_revenue * 12
-            total_annual_expenses = (monthly_rent_paid + monthly_op_costs) * 12
+            net_annual_income = annual_net_profit
+            monthly_cashflow = monthly_net_profit
+            annual_rent = annual_revenue
+            total_annual_expenses = total_monthly_costs * 12
             gross_yield = 0  # N/A for rent-to-SA (no purchase)
-            cash_invested = sa_setup_costs
-            cash_on_cash = r2sa_roi
+            cash_invested = total_capital
+            cash_on_cash = r2sa_roi_legacy
             net_yield = 0
 
     # Income and expenses (skipped for R2SA which calculates directly above).
