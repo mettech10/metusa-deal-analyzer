@@ -7312,8 +7312,57 @@ def ai_analyze():
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
 def _area_cache_key(district: str, strategy: str) -> str:
-    # v3 = + HMO licensing tier + STR licensing rules threaded into prompt
-    return f'area_analysis::v3::{district.upper()}::{strategy.upper()}'
+    # v4 = + PropertyData DOM / sale-to-asking signals (Phase 2C)
+    return f'area_analysis::v4::{district.upper()}::{strategy.upper()}'
+
+
+# ── PropertyData market signals (Phase 2C) ─────────────────────────────────
+def get_dom_signals(postcode: str) -> dict | None:
+    """Pull DOM + sale-to-asking ratio + 12m growth from PropertyData.
+    Returns None on any failure — caller can skip the section. Cached by
+    virtue of the parent area_analysis 24h cache (one PropertyData call
+    per district per day max)."""
+    if not postcode:
+        return None
+    try:
+        if not property_data.is_configured():
+            return None
+        trends = property_data.get_market_trends(postcode)
+        if not isinstance(trends, dict) or 'data' not in trends:
+            return None
+        d = trends['data'] or {}
+        out = {
+            'avg_days_on_market': d.get('avg_days_on_market'),
+            'growth_12m': d.get('growth_12m'),
+            'growth_5y': d.get('growth_5y'),
+            'sales_volume_12m': d.get('sales_volume_12m'),
+        }
+        # Try to compute sale-to-asking ratio from current asking vs sold avg
+        try:
+            sold = property_data.get_sold_prices(postcode)
+            prices = property_data.get_prices(postcode)
+            sold_data = sold.get('data') if isinstance(sold, dict) else None
+            avg_sold = None
+            if isinstance(sold_data, dict):
+                avg_sold = sold_data.get('average')
+            asking_list = prices.get('data') if isinstance(prices, dict) else None
+            avg_asking = None
+            if isinstance(asking_list, list) and asking_list:
+                p = [x.get('price', 0) for x in asking_list if isinstance(x, dict) and x.get('price')]
+                if p:
+                    avg_asking = sum(p) / len(p)
+            if avg_sold and avg_asking and avg_asking > 0:
+                out['sale_to_asking_ratio_pct'] = round((avg_sold / avg_asking) * 100, 1)
+                out['avg_asking_price'] = round(avg_asking, 0)
+                out['avg_sold_price'] = round(avg_sold, 0)
+        except Exception as inner:
+            app.logger.info(f'[dom] sale-to-asking calc skipped: {inner}')
+
+        # Drop None values so the prompt is clean
+        return {k: v for k, v in out.items() if v is not None and v != ''}
+    except Exception as e:
+        app.logger.info(f'[dom] PropertyData call failed: {e}')
+        return None
 
 
 # ── HMO Licensing tier per LPA ──────────────────────────────────────────────
@@ -7923,6 +7972,37 @@ def area_analysis():
 
         deal_block = "\n".join(deal_lines)
 
+        # ── PropertyData market signals (DOM, sale-to-asking, growth) ────
+        # Pulled for strategies that care about exit velocity / market heat:
+        # Flip (DOM directly maps to exit timing), BTL (DOM tells void risk),
+        # BRRRR (sale-to-asking ratio on done-up stock = refinance exit risk).
+        dom_block = ""
+        if strategy in ('FLIP', 'BTL', 'BRR'):
+            dom = get_dom_signals(postcode)
+            if dom:
+                lines = [f"\nMARKET TEMPO (PropertyData, {postcode}):"]
+                if 'avg_days_on_market' in dom:
+                    lines.append(f"- Average days on market: {dom['avg_days_on_market']}")
+                if 'sale_to_asking_ratio_pct' in dom:
+                    delta = dom['sale_to_asking_ratio_pct'] - 100
+                    sign = '+' if delta >= 0 else ''
+                    lines.append(
+                        f"- Sale-to-asking ratio: {dom['sale_to_asking_ratio_pct']}% "
+                        f"(properties sell at {sign}{delta:.1f}% vs asking — "
+                        f"{'sellers market' if delta >= -2 else 'buyers market' if delta < -5 else 'balanced'})"
+                    )
+                if 'avg_sold_price' in dom and 'avg_asking_price' in dom:
+                    lines.append(
+                        f"- Avg sold £{int(dom['avg_sold_price']):,} vs avg asking £{int(dom['avg_asking_price']):,}"
+                    )
+                if 'growth_12m' in dom:
+                    lines.append(f"- 12-month capital growth: {dom['growth_12m']}%")
+                if 'growth_5y' in dom:
+                    lines.append(f"- 5-year capital growth: {dom['growth_5y']}%")
+                if 'sales_volume_12m' in dom:
+                    lines.append(f"- 12-month transaction volume: {dom['sales_volume_12m']} sales")
+                dom_block = "\n".join(lines)
+
         # ── Strategy-specific regulatory context blocks ───────────────────
         # Threaded into the prompt so Claude can quote real licensing data
         # in the HMO Regulation / STR Regulation sections.
@@ -8009,6 +8089,7 @@ AREA MARKET DATA:
 - 12-month transaction volume: {tx_count}
 - Void rate proxy: {void_rate}%
 - Article 4 status: {a4_status} ({council})
+{dom_block}
 {reg_block}
 
 LIVE COMPARABLES:
