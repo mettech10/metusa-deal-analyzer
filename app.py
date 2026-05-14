@@ -2880,16 +2880,103 @@ def analyze_deal(data):
     
     # Flip specific metrics
     flip_metrics = {}
-    if deal_type == 'FLIP' and arv > 0:
-        # Holding period — use frontend value if provided, else 6 months
-        flip_holding_months = int(float(data.get('flipHoldingMonths') or 6))
-        # Agent fee % — form-configurable, default 1.5%
-        flip_agent_pct = float(data.get('flipAgentFeePercent', 1.5) or 1.5)
-        # Sale legal + marketing — pulled from the form (defaults keep legacy behaviour)
-        flip_sale_legal = float(data.get('flipSaleLegalFees', 1500) or 1500)
-        flip_marketing = float(data.get('flipMarketingCosts', 0) or 0)
+    if deal_type == 'FLIP':
+        # ── F2: ROBUST FIELD MAPPING (defensive fallback chains) ───────────
+        # Mirrors the dealcheck-uk frontend's flexible field names so the
+        # backend behaves correctly regardless of which key the form sends.
 
-        agent_fees = arv * (flip_agent_pct / 100)
+        # ARV
+        arv = float(
+            data.get('arv')
+            or data.get('arvValue')
+            or data.get('afterRepairValue')
+            or 0
+        )
+
+        # Refurb categories — sum the breakdown if supplied, fall back to flat
+        refurb_cat = data.get('refurbCategories') or {}
+        if not isinstance(refurb_cat, dict):
+            refurb_cat = {}
+        kitchen      = float(refurb_cat.get('kitchen', 0) or 0)
+        bathroom     = float(refurb_cat.get('bathroom', 0) or 0)
+        decoration   = float(refurb_cat.get('decoration', 0) or 0)
+        flooring     = float(refurb_cat.get('flooring', 0) or 0)
+        electrics    = float(refurb_cat.get('electrics', 0) or 0)
+        structural   = float(refurb_cat.get('structural', 0) or 0)
+        other_refurb = float(refurb_cat.get('other', 0) or 0)
+
+        base_refurb = (kitchen + bathroom + decoration + flooring
+                       + electrics + structural + other_refurb)
+
+        if base_refurb == 0:
+            base_refurb = float(
+                data.get('totalRefurb')
+                or data.get('refurbBudget')
+                or data.get('refurb')
+                or data.get('refurbCosts')
+                or 0
+            )
+
+        contingency_pct = float(data.get('contingency', 15) or 15) / 100
+        contingency_amt = base_refurb * contingency_pct
+        total_refurb = base_refurb + contingency_amt
+        # Keep legacy alias for downstream consumers / BRR shared path
+        refurb_costs = total_refurb
+
+        # Bridging
+        bridging_ltv = float(
+            data.get('bridgingLtv')
+            or data.get('bridgeLtv')
+            or 70
+        ) / 100
+        bridging_rate = float(
+            data.get('bridgingMonthlyRate')
+            or data.get('bridgingRate')
+            or 0.75
+        ) / 100
+        bridging_term = float(data.get('bridgingTerm') or data.get('flipHoldingMonths') or 6)
+        arrangement_pct = float(data.get('arrangementFee') or 2) / 100
+        exit_pct = float(data.get('exitFee') or 1) / 100
+
+        # Exit costs
+        agent_fee_pct = float(
+            data.get('agentFee')
+            or data.get('sellingAgentFee')
+            or data.get('flipAgentFeePercent')
+            or 1.5
+        ) / 100
+        legal_sale = float(
+            data.get('legalSale')
+            or data.get('legalFeesSale')
+            or data.get('flipSaleLegalFees')
+            or 1500
+        )
+        legal_purchase = float(
+            data.get('legalFees')
+            or data.get('legalPurchase')
+            or 1500
+        )
+        survey = float(data.get('survey', 500) or 500)
+        epc = float(data.get('epcCost', 100) or 100)
+        marketing = float(data.get('marketing') or data.get('flipMarketingCosts') or 0)
+        warranty = float(data.get('warranty', 0) or 0)
+
+        # CGT
+        cgt_enabled = bool(data.get('cgtEnabled') or False)
+        cgt_rate = float(data.get('cgtRate') or 24) / 100
+        cgt_allowance = float(
+            data.get('cgtAllowance')
+            or data.get('flipCGTAllowanceRemaining')
+            or 3000
+        )
+
+        # ── F2 legacy bridge: feed new vars into existing (F3-to-be-replaced) calc
+        flip_holding_months = int(bridging_term)
+        flip_agent_pct = agent_fee_pct * 100
+        flip_sale_legal = legal_sale
+        flip_marketing = marketing
+
+        agent_fees = arv * agent_fee_pct
         selling_costs = agent_fees + flip_sale_legal + flip_marketing
         holding_finance = monthly_mortgage * flip_holding_months
         total_costs = (
