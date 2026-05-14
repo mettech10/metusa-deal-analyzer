@@ -7312,8 +7312,351 @@ def ai_analyze():
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
 def _area_cache_key(district: str, strategy: str) -> str:
-    # v2 = strategy-aware section templates (different titles + lens per strategy)
-    return f'area_analysis::v2::{district.upper()}::{strategy.upper()}'
+    # v3 = + HMO licensing tier + STR licensing rules threaded into prompt
+    return f'area_analysis::v3::{district.upper()}::{strategy.upper()}'
+
+
+# ── HMO Licensing tier per LPA ──────────────────────────────────────────────
+# Mandatory licensing applies UK-wide (5+ unrelated occupants in 2+ households).
+# Additional and Selective schemes are council-declared. This is a curated
+# subset of UK councils that have notable additional/selective schemes;
+# unknown councils default to "mandatory only" guidance with a recommendation
+# to check the council's website. Updated against 2024-2025 published schemes.
+HMO_LICENSING_LOOKUP = {
+    'manchester': {
+        'tier': 'additional',
+        'scope': 'Additional licensing covers HMOs of 3-4 occupants in 2+ households across designated wards (Fallowfield, Rusholme, Withington, Levenshulme, Hulme, Longsight, Cheetham, parts of Old Trafford/Whalley Range).',
+        'selective_areas': 'Selective licensing covers ALL rented properties in parts of Crumpsall, Harpurhey, Moss Side.',
+        'fee_range': '£700-£1,300',
+        'term_years': 5,
+        'last_renewed': '2024',
+    },
+    'liverpool': {
+        'tier': 'selective',
+        'scope': 'Citywide Selective Licensing (renewed Apr 2022, runs to Apr 2027) covers ALL private rented properties, including HMOs not caught by mandatory.',
+        'fee_range': '£400-£800',
+        'term_years': 5,
+        'last_renewed': '2022',
+    },
+    'leeds': {
+        'tier': 'additional',
+        'scope': 'Additional licensing for HMOs in 4 designated areas: Beeston Hill / Cross Flatts; Burley / Hyde Park / Woodhouse / Headingley; Harehills; parts of LS2 and LS3.',
+        'fee_range': '£825-£1,100',
+        'term_years': 5,
+        'last_renewed': '2022',
+    },
+    'newcastle upon tyne': {
+        'tier': 'additional',
+        'scope': 'Additional licensing scheme covering Heaton, Sandyford, Jesmond, Spital Tongues, parts of Fenham — small HMOs (3+ unrelated occupants).',
+        'fee_range': '£775-£1,050',
+        'term_years': 5,
+    },
+    'sheffield': {
+        'tier': 'additional',
+        'scope': 'Additional licensing covers HMOs in city wards including Crookesmoor, Walkley, Broomhill, parts of Sharrow.',
+        'fee_range': '£550-£900',
+        'term_years': 5,
+    },
+    'nottingham': {
+        'tier': 'selective',
+        'scope': 'Citywide Selective Licensing (renewed Dec 2023) covers ALL private rented properties.',
+        'fee_range': '£640-£890',
+        'term_years': 5,
+        'last_renewed': '2023',
+    },
+    'birmingham': {
+        'tier': 'additional',
+        'scope': 'Additional licensing in 25 wards (Selly Oak, Edgbaston, Bordesley Green, Aston, Sparkbrook etc) — small HMOs of 3-4 occupants.',
+        'fee_range': '£1,025-£1,575',
+        'term_years': 5,
+    },
+    'brighton and hove': {
+        'tier': 'additional',
+        'scope': 'Citywide Additional Licensing — covers HMOs of 3+ occupants in 2+ households across the entire city.',
+        'fee_range': '£625-£1,150',
+        'term_years': 5,
+    },
+    'bristol': {
+        'tier': 'additional',
+        'scope': 'Additional licensing in Bedminster, Easton, St George — small HMOs (3+ unrelated occupants).',
+        'fee_range': '£750-£1,200',
+        'term_years': 5,
+    },
+    'oxford': {
+        'tier': 'additional',
+        'scope': 'Citywide Additional HMO licensing — all HMOs of 3+ occupants in 2+ households require licence.',
+        'fee_range': '£900-£1,400',
+        'term_years': 5,
+    },
+    'cambridge': {
+        'tier': 'additional',
+        'scope': 'Citywide Additional HMO licensing — all HMOs of 3+ occupants regardless of size.',
+        'fee_range': '£850-£1,200',
+        'term_years': 5,
+    },
+    'cardiff': {
+        'tier': 'additional',
+        'scope': 'Additional licensing in Cathays, Plasnewydd, Roath, Heath — student HMO belt around Cardiff University.',
+        'fee_range': '£700-£1,000',
+        'term_years': 5,
+        'rent_smart_wales': 'Wales requires landlord registration under Rent Smart Wales (separate to HMO licensing).',
+    },
+    'reading': {
+        'tier': 'additional',
+        'scope': 'Citywide Additional HMO licensing for HMOs of 3-4 occupants.',
+        'fee_range': '£850-£1,100',
+        'term_years': 5,
+    },
+    'coventry': {
+        'tier': 'additional',
+        'scope': 'Additional licensing in 18 wards including student belt around Coventry University.',
+        'fee_range': '£675-£950',
+        'term_years': 5,
+    },
+    'york': {
+        'tier': 'additional',
+        'scope': 'Additional licensing in Heslington, Hull Road, Heworth, Fishergate, Holgate — student belt around University of York.',
+        'fee_range': '£800-£1,050',
+        'term_years': 5,
+    },
+    'kingston upon hull': {
+        'tier': 'selective',
+        'scope': 'Selective Licensing in 13 designated areas covering ALL private rented stock; additional HMO licensing in some.',
+        'fee_range': '£550-£800',
+        'term_years': 5,
+    },
+    'bradford': {
+        'tier': 'selective',
+        'scope': 'Selective licensing in Manningham, Heaton, Toller, Bradford Moor.',
+        'fee_range': '£500-£750',
+        'term_years': 5,
+    },
+    'plymouth': {
+        'tier': 'additional',
+        'scope': 'Additional licensing across most of the urban area — small HMOs (3+ occupants).',
+        'fee_range': '£700-£950',
+        'term_years': 5,
+    },
+    'norwich': {
+        'tier': 'additional',
+        'scope': 'Citywide additional HMO licensing.',
+        'fee_range': '£800-£1,100',
+        'term_years': 5,
+    },
+    'lambeth': {
+        'tier': 'additional+selective',
+        'scope': 'Additional HMO + Selective licensing across the borough — covers HMOs of 3+ AND all rented houses in designated areas.',
+        'fee_range': '£900-£1,500',
+        'term_years': 5,
+    },
+    'newham': {
+        'tier': 'additional+selective',
+        'scope': 'Borough-wide Additional Licensing for HMOs of 3+ occupants AND Selective Licensing across the borough.',
+        'fee_range': '£950-£1,400',
+        'term_years': 5,
+    },
+    'waltham forest': {
+        'tier': 'selective',
+        'scope': 'Borough-wide Selective Licensing covers ALL private rented properties.',
+        'fee_range': '£725-£1,000',
+        'term_years': 5,
+    },
+    'brent': {
+        'tier': 'additional+selective',
+        'scope': 'Additional HMO licensing borough-wide plus Selective licensing in 12 wards (Harlesden, Wembley Central etc).',
+        'fee_range': '£1,100-£1,600',
+        'term_years': 5,
+    },
+    'haringey': {
+        'tier': 'additional+selective',
+        'scope': 'Additional HMO + Selective licensing in designated wards (Tottenham, Wood Green, Northumberland Park).',
+        'fee_range': '£900-£1,400',
+        'term_years': 5,
+    },
+    'hackney': {
+        'tier': 'additional',
+        'scope': 'Additional HMO licensing borough-wide for small HMOs.',
+        'fee_range': '£950-£1,400',
+        'term_years': 5,
+    },
+    'tower hamlets': {
+        'tier': 'additional+selective',
+        'scope': 'Additional HMO + Selective licensing in Whitechapel, Spitalfields, Weavers, parts of Bow.',
+        'fee_range': '£1,000-£1,500',
+        'term_years': 5,
+    },
+    'southwark': {
+        'tier': 'additional',
+        'scope': 'Additional HMO licensing borough-wide for small HMOs of 3+ occupants.',
+        'fee_range': '£950-£1,400',
+        'term_years': 5,
+    },
+    'enfield': {
+        'tier': 'additional+selective',
+        'scope': 'Additional + Selective licensing in 14 wards.',
+        'fee_range': '£900-£1,300',
+        'term_years': 5,
+    },
+    'redbridge': {
+        'tier': 'additional+selective',
+        'scope': 'Additional HMO + Selective licensing in designated wards (Loxford, Goodmayes, Ilford parts).',
+        'fee_range': '£950-£1,350',
+        'term_years': 5,
+    },
+    'barking and dagenham': {
+        'tier': 'selective',
+        'scope': 'Borough-wide Selective Licensing covers ALL private rented stock.',
+        'fee_range': '£725-£900',
+        'term_years': 5,
+    },
+    'edinburgh': {
+        'tier': 'additional',
+        'scope': 'HMO licensing in Scotland is more stringent — 3+ unrelated occupants triggers HMO licence (lower threshold than England). City of Edinburgh Council operates HMO Control Zones in some wards.',
+        'fee_range': '£600-£1,100',
+        'term_years': 3,
+        'notes': 'Scotland mandatory HMO threshold is lower than England (3+ unrelated occupants vs 5+).',
+    },
+    'glasgow': {
+        'tier': 'mandatory-scotland',
+        'scope': 'Scotland mandatory threshold (3+ unrelated occupants in 2+ households). Glasgow operates HMO Overprovision Policy in some wards (West End, Hillhead) capping new HMO licences.',
+        'fee_range': '£525-£950',
+        'term_years': 3,
+    },
+}
+
+
+# ── Short-Term Let (STR / SA / Airbnb) licensing rules per region ──────────
+# Three-tier framework: country-level rules (Scotland licensing scheme,
+# London 90-day cap, Wales emerging regs), council-specific Control Zones,
+# and the default "no specific STR licence" baseline elsewhere in England.
+STR_LICENSING_RULES = {
+    'london': {
+        'rule': '90-NIGHT CAP: Deregulation Act 2015 s44 caps entire-home short lets at 90 nights per calendar year across all 32 London boroughs + City of London. Beyond 90 nights requires planning consent for change of use (typically C3 → sui generis).',
+        'planning_use_class': 'C3 dwelling permitted for up to 90 nights/year. Above that = material change of use needing full planning.',
+        'enforcement': 'Westminster, Camden, Hammersmith & Fulham, Kensington & Chelsea enforce actively. Outer London less aggressive.',
+        'register_required': False,
+        'notes': 'Watch for the upcoming Mandatory National Register (England, expected 2025-26) which will add reporting requirements UK-wide.',
+    },
+    'scotland': {
+        'rule': 'STR LICENCE MANDATORY: Civic Government (Scotland) Act 1982 — all short-term lets need a council STR licence since 1 Oct 2023. Apply via the council where the property sits.',
+        'licence_required': True,
+        'term_years': 3,
+        'control_zones': {
+            'edinburgh': 'Entire City of Edinburgh = STR Control Zone. ALL new STR uses (since Sept 2022) need planning consent for change of use BEFORE applying for the licence. Severely restricts entire-home STR in dense flat blocks.',
+            'highland': 'Some areas (Skye, Lochaber) under additional pressure — local council can impose extra conditions.',
+        },
+        'fee_range': '£200-£1,000 (varies by property size and council)',
+        'enforcement': 'Active. Operating without a licence is a criminal offence (unlimited fine).',
+    },
+    'wales': {
+        'rule': 'Statutory STR REGISTER (under development) — Welsh Government 2024 consultation outcome confirmed a mandatory register; expected commencement 2025-26. Rent Smart Wales already requires landlord registration for rental properties.',
+        'rent_smart_wales': 'Landlords (including STR operators on long-let-then-sublet models) must register with Rent Smart Wales.',
+        'council_tax_premium': 'Welsh councils can apply up to 300% Council Tax premium on second homes / STRs (most councils now apply at least 100% premium).',
+        'enforcement': 'Council Tax premiums actively enforced (Gwynedd, Anglesey, Pembrokeshire most aggressive).',
+    },
+    'northern ireland': {
+        'rule': 'Tourist Board certification required (NI Tourism Act). Less mature regulatory framework than Scotland/Wales.',
+        'register_required': True,
+        'notes': 'NI Tourism Board administers Self-Catering Establishment registration. Apply before letting.',
+    },
+    'england-default': {
+        'rule': 'No specific STR licence required (yet). National Register expected 2025-26 under Levelling-Up Act provisions. Planning use class C3 generally permits STR for "established use" — but high-frequency commercial STR may need change-of-use to sui generis.',
+        'council_tax': 'Properties available for STR 140+ nights/year and let 70+ nights/year qualify for Business Rates (not Council Tax) — often results in Small Business Rates Relief = £0 rates bill.',
+        'notes': 'Local councils increasingly enforce planning enforcement against commercial STR operators (Bath, York, Cornwall).',
+    },
+    # Council-specific overrides (within England)
+    'bath and north east somerset': {
+        'rule': 'Bath enforces planning use class strictly — repeated short lets without consent flagged as change of use to sui generis. World Heritage Site pressure.',
+        'enforcement': 'Active. Investigated complaints lead to enforcement notices.',
+    },
+    'cornwall': {
+        'rule': 'Cornwall Council operates a STR Action Plan; some parishes lobby for licensing. Council Tax premium of 100% applies to second homes (from Apr 2025).',
+        'council_tax_premium': '100% premium on second homes / unfurnished STRs',
+    },
+    'york': {
+        'rule': 'York is a planning enforcement hotspot — repeated short-term lets in residential dwellings without consent are routinely served enforcement notices.',
+        'enforcement': 'Active.',
+    },
+}
+
+
+def _normalise_council(council: str) -> str:
+    """Strip suffixes to match the lookup tables."""
+    if not council:
+        return ''
+    c = council.lower().strip()
+    for suffix in [' city council', ' borough council', ' county council',
+                   ' district council', ' metropolitan council', ' council',
+                   ' city', ' london borough of ', 'london borough of ',
+                   ' borough', ' city of ', 'city of ']:
+        c = c.replace(suffix, '')
+    return c.strip()
+
+
+def _classify_region(postcode: str) -> str:
+    """Classify postcode → region for STR rules. Falls back to 'england-default'."""
+    if not postcode:
+        return 'england-default'
+    pc = postcode.strip().upper()
+    # Scotland postcodes
+    scotland_prefixes = ('AB', 'DD', 'DG', 'EH', 'FK', 'G', 'HS', 'IV',
+                         'KA', 'KW', 'KY', 'ML', 'PA', 'PH', 'TD', 'ZE')
+    if any(pc.startswith(p) for p in scotland_prefixes):
+        return 'scotland'
+    # Wales postcodes
+    wales_prefixes = ('CF', 'LD', 'LL', 'NP', 'SA', 'SY')
+    if any(pc.startswith(p) for p in wales_prefixes):
+        return 'wales'
+    # Northern Ireland
+    if pc.startswith('BT'):
+        return 'northern ireland'
+    # London (M25 area) — most common London postcode prefixes
+    london_prefixes = ('E', 'EC', 'N', 'NW', 'SE', 'SW', 'W', 'WC')
+    # Need to be careful: 'N' should match 'N1', 'N12' etc but not 'NE'/'NN'/'NR' etc
+    # Use district prefix (letters + first digit)
+    import re as _re
+    m = _re.match(r'^([A-Z]{1,2})(\d|$)', pc)
+    if m:
+        letters = m.group(1)
+        # Only true London if exact match
+        if letters in london_prefixes:
+            return 'london'
+    return 'england-default'
+
+
+def get_hmo_licensing_info(council: str) -> dict | None:
+    """Return HMO licensing tier info for the council, or None if not in lookup."""
+    key = _normalise_council(council)
+    if not key:
+        return None
+    # Direct match
+    if key in HMO_LICENSING_LOOKUP:
+        return HMO_LICENSING_LOOKUP[key]
+    # Substring match (handle "manchester" inside "greater manchester")
+    for k, v in HMO_LICENSING_LOOKUP.items():
+        if k in key or key in k:
+            return v
+    return None
+
+
+def get_str_licensing_info(postcode: str, council: str) -> dict:
+    """Return STR licensing rules. Always returns something (defaults to
+    england-default). Includes country-level rule + any council-specific
+    overlay (Bath, York, Cornwall etc) when applicable."""
+    region = _classify_region(postcode)
+    primary = STR_LICENSING_RULES.get(region) or STR_LICENSING_RULES['england-default']
+    overlay = None
+    if region in ('england-default', 'london'):
+        council_key = _normalise_council(council)
+        if council_key and council_key in STR_LICENSING_RULES:
+            overlay = STR_LICENSING_RULES[council_key]
+    # Scotland Control Zone overlay
+    elif region == 'scotland':
+        council_key = _normalise_council(council)
+        cz = primary.get('control_zones') or {}
+        if council_key in cz:
+            overlay = {'rule': cz[council_key]}
+    return {'region': region, 'primary': primary, 'overlay': overlay}
 
 
 def _area_cache_get(district: str, strategy: str):
@@ -7580,6 +7923,60 @@ def area_analysis():
 
         deal_block = "\n".join(deal_lines)
 
+        # ── Strategy-specific regulatory context blocks ───────────────────
+        # Threaded into the prompt so Claude can quote real licensing data
+        # in the HMO Regulation / STR Regulation sections.
+        reg_block = ""
+        if strategy == 'HMO':
+            hmo_info = get_hmo_licensing_info(council)
+            if hmo_info:
+                tier = hmo_info.get('tier', 'unknown')
+                reg_lines = [
+                    f"\nHMO LICENSING (verified for {council}):",
+                    f"- Tier: {tier.upper()}",
+                    f"- Scope: {hmo_info.get('scope', 'n/a')}",
+                ]
+                if hmo_info.get('selective_areas'):
+                    reg_lines.append(f"- Selective overlay: {hmo_info['selective_areas']}")
+                if hmo_info.get('fee_range'):
+                    reg_lines.append(f"- Fee range: {hmo_info['fee_range']}")
+                if hmo_info.get('term_years'):
+                    reg_lines.append(f"- Licence term: {hmo_info['term_years']} years")
+                if hmo_info.get('last_renewed'):
+                    reg_lines.append(f"- Last renewed: {hmo_info['last_renewed']}")
+                if hmo_info.get('notes'):
+                    reg_lines.append(f"- Notes: {hmo_info['notes']}")
+                if hmo_info.get('rent_smart_wales'):
+                    reg_lines.append(f"- Wales: {hmo_info['rent_smart_wales']}")
+                reg_block = "\n".join(reg_lines)
+            else:
+                reg_block = (
+                    f"\nHMO LICENSING: No additional/selective licensing scheme on file for "
+                    f"{council}. Mandatory licensing still applies (5+ unrelated occupants "
+                    f"in 2+ households requires licence UK-wide). Recommend checking "
+                    f"{council}'s website for current schemes."
+                )
+        elif strategy == 'R2SA':
+            str_info = get_str_licensing_info(postcode, council)
+            reg_lines = [f"\nSHORT-TERM-LET REGULATION ({str_info['region'].upper()} regime):"]
+            primary = str_info['primary']
+            reg_lines.append(f"- Rule: {primary.get('rule', 'n/a')}")
+            if primary.get('licence_required'):
+                reg_lines.append(f"- Licence: REQUIRED ({primary.get('term_years', '?')}yr term)")
+            if primary.get('fee_range'):
+                reg_lines.append(f"- Licence fee: {primary['fee_range']}")
+            if primary.get('council_tax_premium'):
+                reg_lines.append(f"- Council Tax premium: {primary['council_tax_premium']}")
+            if primary.get('enforcement'):
+                reg_lines.append(f"- Enforcement: {primary['enforcement']}")
+            if primary.get('council_tax'):
+                reg_lines.append(f"- Business rates: {primary['council_tax']}")
+            if primary.get('notes'):
+                reg_lines.append(f"- Notes: {primary['notes']}")
+            if str_info.get('overlay'):
+                reg_lines.append(f"- COUNCIL-SPECIFIC overlay for {council}: {str_info['overlay'].get('rule', 'n/a')}")
+            reg_block = "\n".join(reg_lines)
+
         # Market context (comps, valuations)
         market_lines = []
         sold = market.get('soldComparables') if isinstance(market.get('soldComparables'), list) else None
@@ -7612,6 +8009,7 @@ AREA MARKET DATA:
 - 12-month transaction volume: {tx_count}
 - Void rate proxy: {void_rate}%
 - Article 4 status: {a4_status} ({council})
+{reg_block}
 
 LIVE COMPARABLES:
 {market_block}
@@ -7621,7 +8019,8 @@ THIS DEAL:
 
 Return ONLY a valid JSON object — no markdown, no code fences. Use the
 EXACT section titles below (they are calibrated for {strategy}-specific
-investor questions):
+investor questions). Where the prompt context includes verified
+licensing/regulatory data above, QUOTE it directly — do not generalise:
 
 {{
   "items": [
