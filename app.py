@@ -3435,7 +3435,302 @@ def analyze_deal(data):
         fe_flip = data.get('flipComputed') or {}
         if isinstance(fe_flip, dict) and fe_flip:
             flip_metrics.update({k: v for k, v in fe_flip.items() if v is not None})
-    
+
+    # ── Development metrics (D2 + D3) ──────────────────────────────────
+    # Full property-development feasibility appraisal.
+    # SSOT: when Next.js sends _devContext, those values override; this
+    # block is the Python fallback / independent verifier for API consumers
+    # that don't send _devContext.
+    dev_metrics = {}
+    if deal_type == 'DEV':
+        # ── D2: ROBUST FIELD MAPPING ────────────────────────────────────
+        land_price = float(
+            data.get('landPrice')
+            or data.get('purchasePrice')
+            or 0
+        )
+        units = data.get('units') or data.get('unitMix') or []
+        if not isinstance(units, list):
+            units = []
+
+        build_cost_per_m2 = float(
+            data.get('buildCostPerM2')
+            or data.get('buildCost')
+            or data.get('constructionCostM2')
+            or 0
+        )
+        total_gia = float(
+            data.get('totalGia')
+            or data.get('grossInternalArea')
+            or data.get('giaM2')
+            or 0
+        )
+        if total_gia == 0 and units:
+            total_gia = sum(
+                float(u.get('count', 0) or 0) * float(u.get('sizeM2', 0) or 0)
+                for u in units
+            )
+
+        contingency_pct_d = float(data.get('contingency', 10) or 10) / 100
+        prof_fees_pct = float(
+            data.get('professionalFees')
+            or data.get('profFees')
+            or 12
+        ) / 100
+        cil = float(data.get('cil', 0) or 0)
+        s106 = float(data.get('s106', 0) or 0)
+        building_regs = float(data.get('buildingRegs', 3000) or 3000)
+
+        ltc_pct = float(
+            data.get('financeLtc')
+            or data.get('loanToCost')
+            or data.get('ltc')
+            or 70
+        ) / 100
+        finance_rate = float(
+            data.get('financeRate')
+            or data.get('developmentRate')
+            or 8
+        ) / 100
+        duration_months = float(
+            data.get('projectDuration')
+            or data.get('duration')
+            or 18
+        )
+        arrangement_pct_d = float(data.get('arrangementFee', 2) or 2) / 100
+        exit_pct_d = float(data.get('exitFee', 1) or 1) / 100
+        monitoring = float(data.get('monitoringSurveyor', 5000) or 5000)
+
+        agent_fee_pct_d = float(data.get('agentFee', 1.5) or 1.5) / 100
+        legal_per_unit = float(data.get('legalPerUnit', 1500) or 1500)
+        marketing_d = float(data.get('marketing', 15000) or 15000)
+        warranty_per_unit = float(data.get('warranty', 1000) or 1000)
+        legal_purchase_d = float(data.get('legalPurchase', 3000) or 3000)
+        survey_d = float(data.get('survey', 5000) or 5000)
+
+        gdv = float(
+            data.get('gdv')
+            or data.get('totalGdv')
+            or data.get('estimatedGdv')
+            or 0
+        )
+        if gdv == 0 and units:
+            gdv = sum(
+                float(u.get('count', 0) or 0) * float(u.get('salePricePerUnit', 0) or 0)
+                for u in units
+            )
+
+        # ── D3: REWRITTEN DEVELOPMENT CALCULATION ENGINE ────────────────
+        total_units = sum(int(u.get('count', 0) or 0) for u in units) if units else 0
+
+        base_build = build_cost_per_m2 * total_gia
+        contingency_amt_d = base_build * contingency_pct_d
+        total_construction = base_build + contingency_amt_d
+        prof_fees_amt = total_construction * prof_fees_pct
+
+        sdlt_d = calculate_stamp_duty(
+            land_price,
+            second_property=is_additional,
+            first_time_buyer=is_first_time,
+        )
+        total_acquisition_d = (
+            land_price + sdlt_d + legal_purchase_d + survey_d
+        )
+
+        planning_obligations = cil + s106 + building_regs
+
+        total_dev_costs = (
+            total_acquisition_d
+            + total_construction
+            + prof_fees_amt
+            + planning_obligations
+        )
+
+        # Finance
+        dev_loan = total_dev_costs * ltc_pct
+        dev_equity = total_dev_costs - dev_loan
+        rolled_interest = dev_loan * finance_rate * (duration_months / 12)
+        arrangement_fee_amt_d = dev_loan * arrangement_pct_d
+        exit_fee_amt_d = dev_loan * exit_pct_d
+        total_finance = (
+            rolled_interest + arrangement_fee_amt_d
+            + exit_fee_amt_d + monitoring
+        )
+
+        # Exit costs
+        agent_fee_amt_d = gdv * agent_fee_pct_d
+        sales_legal = legal_per_unit * total_units
+        warranty_total = warranty_per_unit * total_units
+        total_exit_d = (
+            agent_fee_amt_d + sales_legal + marketing_d + warranty_total
+        )
+
+        total_project_cost_d = total_dev_costs + total_finance + total_exit_d
+
+        # Profit metrics
+        gross_profit_d = gdv - total_project_cost_d
+        profit_on_gdv = (gross_profit_d / gdv * 100) if gdv > 0 else 0
+        profit_on_cost = (
+            (gross_profit_d / total_project_cost_d * 100)
+            if total_project_cost_d > 0 else 0
+        )
+
+        # Lender metrics
+        ltgdv = (dev_loan / gdv * 100) if gdv > 0 else 0
+        roe = (gross_profit_d / dev_equity * 100) if dev_equity > 0 else 0
+
+        # Residual land value (back-solve at 20% target profit-on-GDV)
+        target_profit_pct = 0.20
+        target_profit = gdv * target_profit_pct
+        rlv = gdv - (total_project_cost_d - land_price) - target_profit
+        land_premium = rlv - land_price
+
+        # Simple IRR — geometric ratio of GDV/cost annualised over duration
+        if total_project_cost_d > 0 and duration_months > 0:
+            try:
+                irr_d = (
+                    (gdv / total_project_cost_d) ** (12 / duration_months) - 1
+                ) * 100
+            except (ValueError, ZeroDivisionError):
+                irr_d = 0
+        else:
+            irr_d = 0
+
+        # Viability flags
+        profit_gdv_flag = (
+            'green' if profit_on_gdv >= 20 else
+            'amber' if profit_on_gdv >= 15 else 'red'
+        )
+        profit_cost_flag = (
+            'green' if profit_on_cost >= 25 else
+            'amber' if profit_on_cost >= 18 else 'red'
+        )
+        ltgdv_flag = (
+            'green' if ltgdv <= 65 else
+            'amber' if ltgdv <= 70 else 'red'
+        )
+
+        # ── DEVELOPMENT DEAL SCORE (4 axes, 100 pts) ───────────────────
+        if profit_on_gdv >= 25:
+            score_gdv = 35
+        elif profit_on_gdv >= 20:
+            score_gdv = 28
+        elif profit_on_gdv >= 15:
+            score_gdv = 18
+        elif profit_on_gdv >= 10:
+            score_gdv = 8
+        else:
+            score_gdv = 0
+
+        if profit_on_cost >= 30:
+            score_cost = 25
+        elif profit_on_cost >= 25:
+            score_cost = 20
+        elif profit_on_cost >= 18:
+            score_cost = 12
+        else:
+            score_cost = 0
+
+        if roe >= 40:
+            score_roe = 20
+        elif roe >= 25:
+            score_roe = 14
+        elif roe >= 15:
+            score_roe = 8
+        else:
+            score_roe = 0
+
+        if ltgdv <= 60:
+            score_ltgdv = 20
+        elif ltgdv <= 65:
+            score_ltgdv = 14
+        elif ltgdv <= 70:
+            score_ltgdv = 8
+        else:
+            score_ltgdv = 0
+
+        dev_score = score_gdv + score_cost + score_roe + score_ltgdv
+
+        if dev_score >= 90:
+            dev_verdict_label = "Exceptional Development"
+        elif dev_score >= 75:
+            dev_verdict_label = "Strong Viability"
+        elif dev_score >= 60:
+            dev_verdict_label = "Viable Scheme"
+        elif dev_score >= 45:
+            dev_verdict_label = "Marginal — Review Costs"
+        else:
+            dev_verdict_label = "Not Viable"
+
+        dev_metrics = {
+            'totalUnits': total_units,
+            'totalGia': total_gia,
+            'landPrice': round(land_price),
+            'sdlt': round(sdlt_d),
+            'legalPurchase': round(legal_purchase_d),
+            'survey': round(survey_d),
+            'totalAcquisition': round(total_acquisition_d),
+            'baseBuildCost': round(base_build),
+            'contingencyAmt': round(contingency_amt_d),
+            'totalConstruction': round(total_construction),
+            'professionalFees': round(prof_fees_amt),
+            'cil': round(cil),
+            's106': round(s106),
+            'buildingRegs': round(building_regs),
+            'planningObligations': round(planning_obligations),
+            'totalDevCosts': round(total_dev_costs),
+            'devLoan': round(dev_loan),
+            'devEquity': round(dev_equity),
+            'rolledInterest': round(rolled_interest),
+            'arrangementFeeAmt': round(arrangement_fee_amt_d),
+            'exitFeeAmt': round(exit_fee_amt_d),
+            'monitoringSurveyor': round(monitoring),
+            'totalFinance': round(total_finance),
+            'agentFeeAmt': round(agent_fee_amt_d),
+            'salesLegal': round(sales_legal),
+            'warrantyTotal': round(warranty_total),
+            'marketing': round(marketing_d),
+            'totalExit': round(total_exit_d),
+            'totalProjectCost': round(total_project_cost_d),
+            'gdv': round(gdv),
+            'grossProfit': round(gross_profit_d),
+            'profitOnGdv': round(profit_on_gdv, 2),
+            'profitOnCost': round(profit_on_cost, 2),
+            'ltgdv': round(ltgdv, 2),
+            'roe': round(roe, 2),
+            'irr': round(irr_d, 2),
+            'residualLandValue': round(rlv),
+            'landPremium': round(land_premium),
+            'profitGdvFlag': profit_gdv_flag,
+            'profitCostFlag': profit_cost_flag,
+            'ltgdvFlag': ltgdv_flag,
+            'devScore': dev_score,
+            'devVerdict': dev_verdict_label,
+            'scoreBreakdown': {
+                'profitOnGdv': score_gdv,
+                'profitOnCost': score_cost,
+                'returnOnEquity': score_roe,
+                'ltgdv': score_ltgdv,
+            },
+            # Inputs echoed back for UI
+            'buildCostPerM2': round(build_cost_per_m2, 2),
+            'contingencyPct': round(contingency_pct_d * 100, 2),
+            'profFeesPct': round(prof_fees_pct * 100, 2),
+            'ltcPct': round(ltc_pct * 100, 2),
+            'financeRatePct': round(finance_rate * 100, 2),
+            'durationMonths': duration_months,
+            'arrangementPct': round(arrangement_pct_d * 100, 2),
+            'exitPct': round(exit_pct_d * 100, 2),
+            'agentFeePct': round(agent_fee_pct_d * 100, 2),
+        }
+
+        # Merge frontend _devContext on top — SSOT: frontend authoritative.
+        fe_dev = data.get('_devContext') or {}
+        if isinstance(fe_dev, dict) and fe_dev:
+            for k, v in fe_dev.items():
+                if v is not None and k not in dev_metrics:
+                    dev_metrics[k] = v
+
     # Determine verdict
     if deal_type == 'BTL':
         if gross_yield >= 6 and monthly_cashflow >= 200 and cash_on_cash >= 8:
@@ -3520,6 +3815,22 @@ def analyze_deal(data):
             else:
                 verdict = "AVOID"
                 risk_level = "HIGH"
+    elif deal_type == 'DEV':
+        # Development verdict — anchored on RICS profit-on-cost benchmarks
+        # and lender LTGDV ceilings. Prefer Python dev_metrics; the merged
+        # _devContext keeps Frontend authoritative when supplied.
+        d_pog = dev_metrics.get('profitOnGdv', 0) or 0
+        d_poc = dev_metrics.get('profitOnCost', 0) or 0
+        d_ltgdv = dev_metrics.get('ltgdv', 100) or 100
+        if d_poc >= 20 and d_pog >= 15 and d_ltgdv <= 70:
+            verdict = "PROCEED"
+            risk_level = "MEDIUM"  # development always carries delivery risk
+        elif d_poc >= 15 and d_ltgdv <= 75:
+            verdict = "REVIEW"
+            risk_level = "MEDIUM"
+        else:
+            verdict = "AVOID"
+            risk_level = "HIGH"
     else:
         verdict = "REVIEW"
         risk_level = "MEDIUM"
@@ -3757,6 +4068,7 @@ def analyze_deal(data):
         'brr_metrics': brr_metrics,
         'flip_metrics': flip_metrics,
         'r2sa_metrics': r2sa_metrics,
+        'dev_metrics': dev_metrics,
         'bridging_loan_details': bridging_loan_details,
         'purchase_type': purchase_type,
         'deal_score': deal_score,
