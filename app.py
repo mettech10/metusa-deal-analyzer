@@ -2970,39 +2970,226 @@ def analyze_deal(data):
             or 3000
         )
 
-        # ── F2 legacy bridge: feed new vars into existing (F3-to-be-replaced) calc
-        flip_holding_months = int(bridging_term)
-        flip_agent_pct = agent_fee_pct * 100
-        flip_sale_legal = legal_sale
-        flip_marketing = marketing
+        # ── F3: REWRITTEN FLIP CALCULATION ENGINE ──────────────────────────
+        # Full bridging-financed flip model: acquisition + refurb + holding +
+        # exit, with CGT, 70% rule, break-even, and 4-axis deal score.
 
-        agent_fees = arv * agent_fee_pct
-        selling_costs = agent_fees + flip_sale_legal + flip_marketing
-        holding_finance = monthly_mortgage * flip_holding_months
-        total_costs = (
-            purchase_price + refurb_costs + stamp_duty + legal_fees
-            + valuation_fee + arrangement_fee + holding_finance + selling_costs
+        # ── ACQUISITION ──────────────────
+        bridging_loan = purchase_price * bridging_ltv
+        own_cash_purchase = purchase_price - bridging_loan
+        arrangement_fee_amt = bridging_loan * arrangement_pct
+        exit_fee_amt = bridging_loan * exit_pct
+
+        total_acquisition = (
+            purchase_price + stamp_duty
+            + legal_purchase + survey
+            + arrangement_fee_amt
         )
-        profit = arv - total_costs
-        flip_roi = (profit / total_costs) * 100 if total_costs > 0 else 0
+
+        # ── HOLDING COSTS ────────────────
+        bridging_interest = bridging_loan * bridging_rate * bridging_term
+        total_holding = bridging_interest + exit_fee_amt
+
+        # ── EXIT COSTS ───────────────────
+        agent_fee_amt = arv * agent_fee_pct
+        total_exit = agent_fee_amt + legal_sale + epc + marketing + warranty
+
+        # ── TOTAL PROJECT COST ───────────
+        total_project_cost = (
+            total_acquisition + total_refurb
+            + total_holding + total_exit
+        )
+
+        # ── PROFIT ───────────────────────
+        gross_profit = arv - total_project_cost
+
+        # Own cash (not borrowed)
+        own_cash_in = (
+            own_cash_purchase + stamp_duty
+            + legal_purchase + survey
+            + arrangement_fee_amt
+            + total_refurb + total_holding
+        )
+
+        # CGT
+        if cgt_enabled and gross_profit > 0:
+            taxable_gain = max(0, gross_profit - cgt_allowance)
+            cgt_amount = taxable_gain * cgt_rate
+        else:
+            cgt_amount = 0
+
+        net_profit = gross_profit - cgt_amount
+        net_roi = (net_profit / own_cash_in * 100) if own_cash_in > 0 else 0
+        annualised_roi = (
+            net_roi / (bridging_term / 12)
+            if bridging_term > 0 else 0
+        )
+        monthly_holding_burn = (
+            total_holding / bridging_term if bridging_term > 0 else 0
+        )
+
+        # 70% Rule
+        mao_70 = (arv * 0.70) - total_refurb
+        rule_passes = purchase_price <= mao_70
+        break_even = total_project_cost
+
+        # ── FLIP DEAL SCORE ──────────────
+        # Net ROI (35 pts)
+        if net_roi >= 25:
+            score_roi = 35
+        elif net_roi >= 15:
+            score_roi = 25
+        elif net_roi >= 10:
+            score_roi = 15
+        elif net_roi >= 5:
+            score_roi = 8
+        else:
+            score_roi = 0
+
+        # Profit Margin % of ARV (25 pts)
+        profit_margin = (net_profit / arv * 100) if arv > 0 else 0
+        if profit_margin >= 15:
+            score_margin = 25
+        elif profit_margin >= 10:
+            score_margin = 18
+        elif profit_margin >= 7:
+            score_margin = 10
+        elif profit_margin >= 4:
+            score_margin = 5
+        else:
+            score_margin = 0
+
+        # Cash Efficiency (20 pts)
+        if net_roi >= 30:
+            score_efficiency = 20
+        elif net_roi >= 20:
+            score_efficiency = 14
+        elif net_roi >= 10:
+            score_efficiency = 8
+        else:
+            score_efficiency = 0
+
+        # Timeline (20 pts)
+        if bridging_term <= 3:
+            score_timeline = 20
+        elif bridging_term <= 6:
+            score_timeline = 14
+        elif bridging_term <= 9:
+            score_timeline = 8
+        else:
+            score_timeline = 4
+
+        flip_score = (score_roi + score_margin
+                      + score_efficiency + score_timeline)
+
+        if flip_score >= 90:
+            flip_verdict = "Exceptional Flip"
+        elif flip_score >= 75:
+            flip_verdict = "Strong Flip"
+        elif flip_score >= 60:
+            flip_verdict = "Good Flip"
+        elif flip_score >= 45:
+            flip_verdict = "Marginal Flip"
+        else:
+            flip_verdict = "Weak Flip — Renegotiate"
 
         flip_metrics = {
-            # Legacy keys (retained for back-compat)
-            'total_costs': round(total_costs, 0),
-            'profit': round(profit, 0),
-            'flip_roi': round(flip_roi, 2),
-            'selling_costs': round(selling_costs, 0),
-            # Keys the AI prompt reads — previously missing, always resolved to 0
-            'refurb_cost': round(refurb_costs, 0),
-            'arv': round(arv, 0),
-            'flip_profit': round(profit, 0),
-            'holding_months': flip_holding_months,
-            'holding_finance': round(holding_finance, 0),
+            # ── New F3 spec keys ─────────────────
+            'purchasePrice': round(purchase_price),
+            'sdlt': round(stamp_duty),
+            'bridgingLoan': round(bridging_loan),
+            'ownCashPurchase': round(own_cash_purchase),
+            'arrangementFeeAmt': round(arrangement_fee_amt),
+            'exitFeeAmt': round(exit_fee_amt),
+            'baseRefurb': round(base_refurb),
+            'contingencyAmt': round(contingency_amt),
+            'totalRefurb': round(total_refurb),
+            'bridgingInterest': round(bridging_interest),
+            'totalHolding': round(total_holding),
+            'agentFeeAmt': round(agent_fee_amt),
+            'totalExit': round(total_exit),
+            'totalAcquisition': round(total_acquisition),
+            'totalProjectCost': round(total_project_cost),
+            'arv': round(arv),
+            'grossProfit': round(gross_profit),
+            'cgtAmount': round(cgt_amount),
+            'netProfit': round(net_profit),
+            'ownCashIn': round(own_cash_in),
+            'netRoi': round(net_roi, 2),
+            'annualisedRoi': round(annualised_roi, 2),
+            'profitMarginPct': round(profit_margin, 2),
+            'monthlyHoldingBurn': round(monthly_holding_burn, 2),
+            'mao70Rule': round(mao_70),
+            'rule70Passes': rule_passes,
+            'breakEvenPrice': round(break_even),
+            'flipScore': flip_score,
+            'flipVerdict': flip_verdict,
+            'scoreBreakdown': {
+                'netRoi': score_roi,
+                'profitMargin': score_margin,
+                'cashEfficiency': score_efficiency,
+                'timeline': score_timeline,
+            },
+            # Inputs echoed back for the results UI
+            'bridgingLtvPct': round(bridging_ltv * 100, 2),
+            'bridgingRatePct': round(bridging_rate * 100, 4),
+            'bridgingTermMonths': bridging_term,
+            'arrangementPct': round(arrangement_pct * 100, 2),
+            'exitPct': round(exit_pct * 100, 2),
+            'agentFeePct': round(agent_fee_pct * 100, 2),
+            'contingencyPct': round(contingency_pct * 100, 2),
+            'cgtEnabled': cgt_enabled,
+            'cgtRatePct': round(cgt_rate * 100, 2),
+            'cgtAllowance': round(cgt_allowance),
+            'refurbCategories': {
+                'kitchen': round(kitchen),
+                'bathroom': round(bathroom),
+                'decoration': round(decoration),
+                'flooring': round(flooring),
+                'electrics': round(electrics),
+                'structural': round(structural),
+                'other': round(other_refurb),
+            },
+            'legalPurchase': round(legal_purchase),
+            'legalSale': round(legal_sale),
+            'survey': round(survey),
+            'epc': round(epc),
+            'marketing': round(marketing),
+            'warranty': round(warranty),
+
+            # ── Legacy aliases (downstream AI prompt, verdict, deal_score) ──
+            'total_costs': round(total_project_cost),
+            'profit': round(net_profit),
+            'flip_roi': round(net_roi, 2),
+            'selling_costs': round(total_exit),
+            'refurb_cost': round(total_refurb),
+            'flip_profit': round(net_profit),
+            'holding_months': int(bridging_term),
+            'holding_finance': round(total_holding),
+            'preTaxProfit': round(gross_profit),
+            'postTaxProfit': round(net_profit),
+            'postTaxROI': round(net_roi, 2),
+            'taxType': 'cgt' if cgt_enabled else 'none',
+            'taxLiability': round(cgt_amount),
+            'taxRateUsed': round(cgt_rate * 100, 2) if cgt_enabled else 0,
+            'dealScore': flip_score,
+            'dealScoreLabel': flip_verdict,
+            'passesStrict70': rule_passes,
+            'passesSimple70': rule_passes,
+            'simpleMAO': round(mao_70),
+            'strictMAO': round(mao_70),
+            'percentOfARV': round((purchase_price / arv * 100) if arv > 0 else 0, 2),
+            'totalCapitalInvested': round(own_cash_in),
+            'holdingCostsTotal': round(total_holding),
+            'exitCostsTotal': round(total_exit),
+            'financeTotal': round(arrangement_fee_amt + bridging_interest + exit_fee_amt),
+            'refurbTotal': round(total_refurb),
+            'holdingMonths': int(bridging_term),
         }
 
         # If the Next.js engine sent its richer CalculationResults via
-        # flipComputed, merge it on top — these numbers are the source of
-        # truth (SDLT bands, CGT/CT, bridging, contingency modelled fully).
+        # flipComputed, merge it on top — SSOT pattern: frontend remains
+        # authoritative for any field it supplies.
         fe_flip = data.get('flipComputed') or {}
         if isinstance(fe_flip, dict) and fe_flip:
             flip_metrics.update({k: v for k, v in fe_flip.items() if v is not None})
