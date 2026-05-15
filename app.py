@@ -7312,8 +7312,251 @@ def ai_analyze():
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
 def _area_cache_key(district: str, strategy: str) -> str:
-    # v5 = + Planning approval rates per LPA (Phase 2D)
-    return f'area_analysis::v5::{district.upper()}::{strategy.upper()}'
+    # v6 = + Anchor proximity (universities/hospitals for HMO, transport hubs for SA) — Phase 3
+    return f'area_analysis::v6::{district.upper()}::{strategy.upper()}'
+
+
+# ── Phase 3: anchor-proximity helpers ───────────────────────────────────────
+# For HMO: distance to universities + major teaching hospitals — these are
+# the sharer-demand engines. For R2SA: distance to airports, mainline rail
+# and tourist hotspots — short-let demand drivers.
+import math as _math
+
+def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in statute miles."""
+    R = 3958.8
+    phi1, phi2 = _math.radians(lat1), _math.radians(lat2)
+    dphi = _math.radians(lat2 - lat1)
+    dlambda = _math.radians(lon2 - lon1)
+    a = _math.sin(dphi / 2) ** 2 + _math.cos(phi1) * _math.cos(phi2) * _math.sin(dlambda / 2) ** 2
+    return R * 2 * _math.asin(_math.sqrt(a))
+
+
+# Process-lifetime cache — postcode locations never change so cache forever.
+_POSTCODE_LATLON_CACHE: dict = {}
+
+def _postcode_latlon(postcode: str):
+    """Return (lat, lon) for a UK postcode via postcodes.io. Cached in
+    memory. Returns None on any failure."""
+    if not postcode:
+        return None
+    key = postcode.replace(' ', '').upper()
+    if key in _POSTCODE_LATLON_CACHE:
+        return _POSTCODE_LATLON_CACHE[key]
+    try:
+        resp = requests.get(f'https://api.postcodes.io/postcodes/{key}', timeout=5)
+        if resp.status_code != 200:
+            return None
+        result = resp.json().get('result') or {}
+        lat, lon = result.get('latitude'), result.get('longitude')
+        if lat is None or lon is None:
+            return None
+        out = (float(lat), float(lon))
+        _POSTCODE_LATLON_CACHE[key] = out
+        return out
+    except Exception as e:
+        app.logger.info(f'[postcode-latlon] {key} failed: {e}')
+        return None
+
+
+# ── UK Universities — top sharer-demand anchors for HMO strategy ───────────
+# Coordinates approximate the main campus centroid. Includes student count
+# (rounded to nearest 1k) to help Claude weight the demand signal.
+UK_UNIVERSITIES = [
+    # London
+    {'name': 'University College London (UCL)', 'lat': 51.5246, 'lon': -0.1340, 'students': 50000, 'tier': 'russell-group'},
+    {'name': "King's College London", 'lat': 51.5114, 'lon': -0.1163, 'students': 33000, 'tier': 'russell-group'},
+    {'name': 'Imperial College London', 'lat': 51.4988, 'lon': -0.1749, 'students': 22000, 'tier': 'russell-group'},
+    {'name': 'London School of Economics', 'lat': 51.5145, 'lon': -0.1167, 'students': 12000, 'tier': 'russell-group'},
+    {'name': 'Queen Mary, University of London', 'lat': 51.5246, 'lon': -0.0405, 'students': 32000, 'tier': 'russell-group'},
+    {'name': 'City, University of London', 'lat': 51.5283, 'lon': -0.1024, 'students': 20000},
+    {'name': 'University of Westminster', 'lat': 51.5174, 'lon': -0.1419, 'students': 19000},
+    {'name': 'University of Greenwich', 'lat': 51.4827, 'lon': 0.0067, 'students': 21000},
+    {'name': 'Goldsmiths, University of London', 'lat': 51.4742, 'lon': -0.0354, 'students': 10000},
+    {'name': 'Brunel University London', 'lat': 51.5325, 'lon': -0.4731, 'students': 16000},
+    # North-West
+    {'name': 'University of Manchester', 'lat': 53.4668, 'lon': -2.2339, 'students': 40000, 'tier': 'russell-group'},
+    {'name': 'Manchester Metropolitan University', 'lat': 53.4720, 'lon': -2.2403, 'students': 38000},
+    {'name': 'Salford University', 'lat': 53.4877, 'lon': -2.2740, 'students': 22000},
+    {'name': 'University of Liverpool', 'lat': 53.4051, 'lon': -2.9658, 'students': 23000, 'tier': 'russell-group'},
+    {'name': 'Liverpool John Moores University', 'lat': 53.4060, 'lon': -2.9683, 'students': 25000},
+    {'name': 'Lancaster University', 'lat': 54.0098, 'lon': -2.7864, 'students': 16000, 'tier': 'russell-group'},
+    # Yorkshire / North-East
+    {'name': 'University of Leeds', 'lat': 53.8067, 'lon': -1.5550, 'students': 38000, 'tier': 'russell-group'},
+    {'name': 'Leeds Beckett University', 'lat': 53.8217, 'lon': -1.5500, 'students': 25000},
+    {'name': 'University of Sheffield', 'lat': 53.3811, 'lon': -1.4878, 'students': 30000, 'tier': 'russell-group'},
+    {'name': 'Sheffield Hallam University', 'lat': 53.3782, 'lon': -1.4626, 'students': 31000},
+    {'name': 'University of York', 'lat': 53.9462, 'lon': -1.0563, 'students': 20000, 'tier': 'russell-group'},
+    {'name': 'University of Newcastle', 'lat': 54.9805, 'lon': -1.6147, 'students': 28000, 'tier': 'russell-group'},
+    {'name': 'Northumbria University', 'lat': 54.9805, 'lon': -1.6080, 'students': 35000},
+    {'name': 'Durham University', 'lat': 54.7651, 'lon': -1.5757, 'students': 19000, 'tier': 'russell-group'},
+    # Midlands
+    {'name': 'University of Birmingham', 'lat': 52.4508, 'lon': -1.9305, 'students': 38000, 'tier': 'russell-group'},
+    {'name': 'Birmingham City University', 'lat': 52.4862, 'lon': -1.8902, 'students': 32000},
+    {'name': 'University of Nottingham', 'lat': 52.9385, 'lon': -1.1957, 'students': 35000, 'tier': 'russell-group'},
+    {'name': 'Nottingham Trent University', 'lat': 52.9542, 'lon': -1.1530, 'students': 35000},
+    {'name': 'University of Leicester', 'lat': 52.6206, 'lon': -1.1239, 'students': 20000},
+    {'name': 'University of Warwick', 'lat': 52.3793, 'lon': -1.5615, 'students': 28000, 'tier': 'russell-group'},
+    {'name': 'Coventry University', 'lat': 52.4070, 'lon': -1.5046, 'students': 32000},
+    {'name': 'Loughborough University', 'lat': 52.7656, 'lon': -1.2330, 'students': 19000},
+    # South-West / South
+    {'name': 'University of Bristol', 'lat': 51.4585, 'lon': -2.6021, 'students': 28000, 'tier': 'russell-group'},
+    {'name': 'University of the West of England', 'lat': 51.5005, 'lon': -2.5471, 'students': 32000},
+    {'name': 'University of Bath', 'lat': 51.3793, 'lon': -2.3270, 'students': 19000},
+    {'name': 'University of Exeter', 'lat': 50.7361, 'lon': -3.5354, 'students': 28000, 'tier': 'russell-group'},
+    {'name': 'University of Plymouth', 'lat': 50.3753, 'lon': -4.1382, 'students': 19000},
+    {'name': 'University of Southampton', 'lat': 50.9358, 'lon': -1.3974, 'students': 25000, 'tier': 'russell-group'},
+    {'name': 'University of Portsmouth', 'lat': 50.7984, 'lon': -1.1018, 'students': 28000},
+    {'name': 'University of Brighton', 'lat': 50.8270, 'lon': -0.1335, 'students': 19000},
+    {'name': 'University of Sussex', 'lat': 50.8657, 'lon': -0.0876, 'students': 19000},
+    # East Anglia
+    {'name': 'University of Cambridge', 'lat': 52.2043, 'lon': 0.1218, 'students': 24000, 'tier': 'russell-group'},
+    {'name': 'Anglia Ruskin University', 'lat': 52.2050, 'lon': 0.1378, 'students': 35000},
+    {'name': 'University of East Anglia', 'lat': 52.6219, 'lon': 1.2415, 'students': 18000},
+    {'name': 'University of Essex', 'lat': 51.8779, 'lon': 0.9410, 'students': 18000},
+    # Oxford / Reading
+    {'name': 'University of Oxford', 'lat': 51.7548, 'lon': -1.2544, 'students': 26000, 'tier': 'russell-group'},
+    {'name': 'Oxford Brookes University', 'lat': 51.7551, 'lon': -1.2253, 'students': 17000},
+    {'name': 'University of Reading', 'lat': 51.4413, 'lon': -0.9419, 'students': 17000},
+    # Scotland
+    {'name': 'University of Edinburgh', 'lat': 55.9444, 'lon': -3.1883, 'students': 35000, 'tier': 'russell-group'},
+    {'name': 'Heriot-Watt University', 'lat': 55.9116, 'lon': -3.3221, 'students': 16000},
+    {'name': 'University of Glasgow', 'lat': 55.8721, 'lon': -4.2880, 'students': 30000, 'tier': 'russell-group'},
+    {'name': 'University of Strathclyde', 'lat': 55.8616, 'lon': -4.2425, 'students': 23000},
+    {'name': 'University of Dundee', 'lat': 56.4570, 'lon': -2.9783, 'students': 16000},
+    {'name': 'University of Aberdeen', 'lat': 57.1644, 'lon': -2.1018, 'students': 14000},
+    {'name': 'University of St Andrews', 'lat': 56.3398, 'lon': -2.7967, 'students': 10000},
+    # Wales
+    {'name': 'Cardiff University', 'lat': 51.4878, 'lon': -3.1788, 'students': 33000, 'tier': 'russell-group'},
+    {'name': 'Swansea University', 'lat': 51.6079, 'lon': -3.9826, 'students': 20000},
+    {'name': 'Aberystwyth University', 'lat': 52.4159, 'lon': -4.0653, 'students': 8000},
+    # Northern Ireland
+    {'name': "Queen's University Belfast", 'lat': 54.5847, 'lon': -5.9341, 'students': 25000, 'tier': 'russell-group'},
+    {'name': 'Ulster University', 'lat': 54.6072, 'lon': -5.9259, 'students': 27000},
+]
+
+
+# ── UK Major Teaching Hospitals — key healthcare-worker demand anchors ─────
+UK_HOSPITALS = [
+    # London
+    {'name': "St Thomas' Hospital", 'lat': 51.4988, 'lon': -0.1195, 'staff': 13000},
+    {'name': 'Royal London Hospital', 'lat': 51.5180, 'lon': -0.0594, 'staff': 8500},
+    {'name': "King's College Hospital", 'lat': 51.4683, 'lon': -0.0936, 'staff': 13000},
+    {'name': 'University College Hospital (UCLH)', 'lat': 51.5246, 'lon': -0.1356, 'staff': 11000},
+    {'name': "Guy's Hospital", 'lat': 51.5040, 'lon': -0.0866, 'staff': 8000},
+    {'name': 'Charing Cross Hospital', 'lat': 51.4870, 'lon': -0.2197, 'staff': 5500},
+    {'name': 'Hammersmith Hospital', 'lat': 51.5163, 'lon': -0.2369, 'staff': 5000},
+    {'name': 'Great Ormond Street Hospital', 'lat': 51.5226, 'lon': -0.1198, 'staff': 4500},
+    # North
+    {'name': 'Manchester Royal Infirmary', 'lat': 53.4623, 'lon': -2.2253, 'staff': 8000},
+    {'name': 'Salford Royal Hospital', 'lat': 53.4868, 'lon': -2.3197, 'staff': 7000},
+    {'name': 'Wythenshawe Hospital', 'lat': 53.3917, 'lon': -2.2914, 'staff': 6000},
+    {'name': 'Royal Liverpool University Hospital', 'lat': 53.4068, 'lon': -2.9624, 'staff': 7000},
+    {'name': 'Aintree University Hospital', 'lat': 53.4615, 'lon': -2.9444, 'staff': 4500},
+    {'name': 'Leeds General Infirmary', 'lat': 53.8014, 'lon': -1.5523, 'staff': 7500},
+    {'name': "St James's University Hospital, Leeds", 'lat': 53.8104, 'lon': -1.5236, 'staff': 6500},
+    {'name': 'Sheffield Northern General Hospital', 'lat': 53.4108, 'lon': -1.4774, 'staff': 7000},
+    {'name': 'Royal Hallamshire Hospital, Sheffield', 'lat': 53.3760, 'lon': -1.4926, 'staff': 5500},
+    {'name': 'Royal Victoria Infirmary, Newcastle', 'lat': 54.9817, 'lon': -1.6171, 'staff': 8000},
+    {'name': 'Freeman Hospital, Newcastle', 'lat': 55.0021, 'lon': -1.5944, 'staff': 5500},
+    {'name': 'Hull Royal Infirmary', 'lat': 53.7415, 'lon': -0.3563, 'staff': 5500},
+    # Midlands
+    {'name': 'Queen Elizabeth Hospital, Birmingham', 'lat': 52.4540, 'lon': -1.9418, 'staff': 8500},
+    {'name': 'Heartlands Hospital, Birmingham', 'lat': 52.4823, 'lon': -1.8195, 'staff': 5000},
+    {'name': 'Nottingham City Hospital', 'lat': 52.9740, 'lon': -1.1872, 'staff': 8000},
+    {'name': 'Queen Medical Centre, Nottingham', 'lat': 52.9416, 'lon': -1.1832, 'staff': 9000},
+    {'name': 'Leicester Royal Infirmary', 'lat': 52.6300, 'lon': -1.1409, 'staff': 7500},
+    {'name': 'University Hospital Coventry', 'lat': 52.4194, 'lon': -1.4400, 'staff': 7500},
+    # South / South-West
+    {'name': 'Bristol Royal Infirmary', 'lat': 51.4576, 'lon': -2.5969, 'staff': 7000},
+    {'name': 'Southmead Hospital, Bristol', 'lat': 51.4920, 'lon': -2.6005, 'staff': 6500},
+    {'name': 'Royal United Hospital, Bath', 'lat': 51.3941, 'lon': -2.3839, 'staff': 4500},
+    {'name': 'University Hospital Southampton', 'lat': 50.9332, 'lon': -1.4326, 'staff': 11000},
+    {'name': 'Queen Alexandra Hospital, Portsmouth', 'lat': 50.8474, 'lon': -1.0681, 'staff': 7500},
+    {'name': 'Royal Sussex County Hospital, Brighton', 'lat': 50.8205, 'lon': -0.1188, 'staff': 5500},
+    {'name': 'Royal Devon and Exeter Hospital', 'lat': 50.7290, 'lon': -3.5077, 'staff': 8000},
+    {'name': 'Derriford Hospital, Plymouth', 'lat': 50.4174, 'lon': -4.1133, 'staff': 7000},
+    # East
+    {'name': "Addenbrooke's Hospital, Cambridge", 'lat': 52.1751, 'lon': 0.1397, 'staff': 11000},
+    {'name': 'Norfolk and Norwich University Hospital', 'lat': 52.6195, 'lon': 1.2218, 'staff': 8000},
+    # Oxford
+    {'name': 'John Radcliffe Hospital, Oxford', 'lat': 51.7641, 'lon': -1.2210, 'staff': 13000},
+    # Scotland
+    {'name': 'Edinburgh Royal Infirmary', 'lat': 55.9216, 'lon': -3.1397, 'staff': 8500},
+    {'name': 'Queen Elizabeth University Hospital, Glasgow', 'lat': 55.8631, 'lon': -4.3361, 'staff': 10000},
+    {'name': 'Glasgow Royal Infirmary', 'lat': 55.8657, 'lon': -4.2348, 'staff': 6500},
+    {'name': 'Aberdeen Royal Infirmary', 'lat': 57.1390, 'lon': -2.1340, 'staff': 7000},
+    {'name': 'Ninewells Hospital, Dundee', 'lat': 56.4642, 'lon': -3.0379, 'staff': 6000},
+    # Wales
+    {'name': 'University Hospital of Wales, Cardiff', 'lat': 51.5054, 'lon': -3.1929, 'staff': 8500},
+    # Northern Ireland
+    {'name': 'Royal Victoria Hospital, Belfast', 'lat': 54.5905, 'lon': -5.9519, 'staff': 7000},
+]
+
+
+# ── UK Transport Hubs — short-let demand anchors ───────────────────────────
+UK_TRANSPORT_HUBS = [
+    # Airports — major
+    {'name': 'Heathrow Airport', 'lat': 51.4700, 'lon': -0.4543, 'type': 'airport-major', 'pax_m': 80},
+    {'name': 'Gatwick Airport', 'lat': 51.1537, 'lon': -0.1821, 'type': 'airport-major', 'pax_m': 47},
+    {'name': 'Manchester Airport', 'lat': 53.3537, 'lon': -2.2750, 'type': 'airport-major', 'pax_m': 30},
+    {'name': 'Stansted Airport', 'lat': 51.8860, 'lon': 0.2389, 'type': 'airport-major', 'pax_m': 28},
+    {'name': 'Luton Airport', 'lat': 51.8747, 'lon': -0.3683, 'type': 'airport-major', 'pax_m': 18},
+    {'name': 'Birmingham Airport', 'lat': 52.4539, 'lon': -1.7480, 'type': 'airport-major', 'pax_m': 13},
+    {'name': 'Edinburgh Airport', 'lat': 55.9500, 'lon': -3.3725, 'type': 'airport-major', 'pax_m': 15},
+    {'name': 'Glasgow Airport', 'lat': 55.8642, 'lon': -4.4326, 'type': 'airport-regional', 'pax_m': 8},
+    {'name': 'Bristol Airport', 'lat': 51.3827, 'lon': -2.7191, 'type': 'airport-regional', 'pax_m': 10},
+    {'name': 'East Midlands Airport', 'lat': 52.8311, 'lon': -1.3281, 'type': 'airport-regional', 'pax_m': 4},
+    {'name': 'Liverpool John Lennon Airport', 'lat': 53.3336, 'lon': -2.8497, 'type': 'airport-regional', 'pax_m': 5},
+    {'name': 'Newcastle Airport', 'lat': 55.0375, 'lon': -1.6917, 'type': 'airport-regional', 'pax_m': 5},
+    {'name': 'Cardiff Airport', 'lat': 51.3967, 'lon': -3.3433, 'type': 'airport-regional', 'pax_m': 1},
+    {'name': 'Belfast International Airport', 'lat': 54.6575, 'lon': -6.2158, 'type': 'airport-regional', 'pax_m': 6},
+    # Mainline rail
+    {'name': "King's Cross Station, London", 'lat': 51.5308, 'lon': -0.1238, 'type': 'mainline-rail'},
+    {'name': 'St Pancras International, London', 'lat': 51.5320, 'lon': -0.1265, 'type': 'mainline-rail'},
+    {'name': 'Euston Station, London', 'lat': 51.5283, 'lon': -0.1330, 'type': 'mainline-rail'},
+    {'name': 'Paddington Station, London', 'lat': 51.5154, 'lon': -0.1755, 'type': 'mainline-rail'},
+    {'name': 'Waterloo Station, London', 'lat': 51.5031, 'lon': -0.1132, 'type': 'mainline-rail'},
+    {'name': 'Victoria Station, London', 'lat': 51.4952, 'lon': -0.1441, 'type': 'mainline-rail'},
+    {'name': 'Liverpool Street Station, London', 'lat': 51.5178, 'lon': -0.0822, 'type': 'mainline-rail'},
+    {'name': 'Manchester Piccadilly Station', 'lat': 53.4775, 'lon': -2.2304, 'type': 'mainline-rail'},
+    {'name': 'Birmingham New Street Station', 'lat': 52.4778, 'lon': -1.8997, 'type': 'mainline-rail'},
+    {'name': 'Leeds Station', 'lat': 53.7950, 'lon': -1.5478, 'type': 'mainline-rail'},
+    {'name': 'Edinburgh Waverley', 'lat': 55.9523, 'lon': -3.1893, 'type': 'mainline-rail'},
+    {'name': 'Glasgow Central Station', 'lat': 55.8590, 'lon': -4.2576, 'type': 'mainline-rail'},
+    {'name': 'Bristol Temple Meads', 'lat': 51.4495, 'lon': -2.5814, 'type': 'mainline-rail'},
+    {'name': 'York Station', 'lat': 53.9580, 'lon': -1.0935, 'type': 'mainline-rail'},
+    {'name': 'Newcastle Central Station', 'lat': 54.9685, 'lon': -1.6178, 'type': 'mainline-rail'},
+    {'name': 'Liverpool Lime Street', 'lat': 53.4078, 'lon': -2.9779, 'type': 'mainline-rail'},
+    {'name': 'Cardiff Central Station', 'lat': 51.4756, 'lon': -3.1797, 'type': 'mainline-rail'},
+    # Tourist hotspots / city centres
+    {'name': 'Edinburgh Old Town (Royal Mile)', 'lat': 55.9495, 'lon': -3.1907, 'type': 'tourist-hub'},
+    {'name': 'Bath Spa town centre', 'lat': 51.3811, 'lon': -2.3590, 'type': 'tourist-hub'},
+    {'name': 'York Minster / city centre', 'lat': 53.9622, 'lon': -1.0822, 'type': 'tourist-hub'},
+    {'name': 'Cambridge town centre / Backs', 'lat': 52.2053, 'lon': 0.1186, 'type': 'tourist-hub'},
+    {'name': 'Oxford city centre', 'lat': 51.7520, 'lon': -1.2577, 'type': 'tourist-hub'},
+    {'name': "Stratford-upon-Avon (Shakespeare's birthplace)", 'lat': 52.1916, 'lon': -1.7080, 'type': 'tourist-hub'},
+    {'name': 'Lake District (Windermere)', 'lat': 54.3804, 'lon': -2.9069, 'type': 'tourist-hub'},
+    {'name': 'Brighton seafront', 'lat': 50.8195, 'lon': -0.1357, 'type': 'tourist-hub'},
+    {'name': 'Liverpool Albert Dock', 'lat': 53.4007, 'lon': -2.9924, 'type': 'tourist-hub'},
+    {'name': 'Greenwich (Royal Observatory)', 'lat': 51.4769, 'lon': -0.0005, 'type': 'tourist-hub'},
+]
+
+
+def get_nearby_anchors(postcode: str, anchors: list, max_miles: float, top_n: int = 4) -> list:
+    """Return the top N anchors within max_miles of the postcode, sorted
+    closest-first. Returns [] if postcode lookup fails."""
+    loc = _postcode_latlon(postcode)
+    if not loc:
+        return []
+    lat, lon = loc
+    enriched = []
+    for a in anchors:
+        d = _haversine_miles(lat, lon, a['lat'], a['lon'])
+        if d <= max_miles:
+            enriched.append({**a, 'distance_miles': round(d, 2)})
+    enriched.sort(key=lambda x: x['distance_miles'])
+    return enriched[:top_n]
 
 
 # ── Planning approval climate per LPA (Phase 2D) ────────────────────────────
@@ -8344,6 +8587,66 @@ def area_analysis():
                     lines.append(f"- 12-month transaction volume: {dom['sales_volume_12m']} sales")
                 dom_block = "\n".join(lines)
 
+        # ── Phase 3: anchor-proximity blocks ──────────────────────────────
+        # HMO → nearby universities + hospitals (sharer-demand engines).
+        # R2SA → nearby airports + mainline rail + tourist hubs (short-let
+        # demand drivers).
+        anchor_block = ""
+        if strategy == 'HMO':
+            unis = get_nearby_anchors(postcode, UK_UNIVERSITIES, max_miles=3.0, top_n=4)
+            hospitals = get_nearby_anchors(postcode, UK_HOSPITALS, max_miles=2.5, top_n=3)
+            lines = []
+            if unis:
+                total_students = sum(u.get('students', 0) for u in unis)
+                lines.append(f"\nSHARER DEMAND ANCHORS (within 3 mi of {postcode}):")
+                lines.append(f"- Universities ({total_students:,} students combined):")
+                for u in unis:
+                    tag = ' (Russell Group)' if u.get('tier') == 'russell-group' else ''
+                    lines.append(f"   · {u['name']}{tag} — {u['distance_miles']} mi · ~{u.get('students', 0):,} students")
+            if hospitals:
+                total_staff = sum(h.get('staff', 0) for h in hospitals)
+                if not lines:
+                    lines.append(f"\nSHARER DEMAND ANCHORS (within 2.5 mi of {postcode}):")
+                lines.append(f"- Major hospitals ({total_staff:,} staff combined):")
+                for h in hospitals:
+                    lines.append(f"   · {h['name']} — {h['distance_miles']} mi · ~{h.get('staff', 0):,} staff")
+            if not unis and not hospitals:
+                lines.append(
+                    f"\nSHARER DEMAND ANCHORS: No major universities or teaching hospitals within "
+                    f"3 mi of {postcode}. Sharer demand likely driven by employer hubs or "
+                    f"transport links — recommend checking ONS travel-to-work data for "
+                    f"the area before pricing rooms."
+                )
+            anchor_block = "\n".join(lines)
+        elif strategy == 'R2SA':
+            hubs = get_nearby_anchors(postcode, UK_TRANSPORT_HUBS, max_miles=5.0, top_n=5)
+            if hubs:
+                lines = [f"\nSHORT-LET DEMAND ANCHORS (within 5 mi of {postcode}):"]
+                airports = [h for h in hubs if 'airport' in h.get('type', '')]
+                rail = [h for h in hubs if h.get('type') == 'mainline-rail']
+                tourism = [h for h in hubs if h.get('type') == 'tourist-hub']
+                if airports:
+                    lines.append('- Airports (business + leisure traffic):')
+                    for a in airports:
+                        pax = a.get('pax_m')
+                        pax_note = f" · {pax}M pax/yr" if pax else ''
+                        lines.append(f"   · {a['name']} — {a['distance_miles']} mi{pax_note}")
+                if rail:
+                    lines.append('- Mainline rail (commuter + city break traffic):')
+                    for r in rail:
+                        lines.append(f"   · {r['name']} — {r['distance_miles']} mi")
+                if tourism:
+                    lines.append('- Tourist hubs (city-break demand):')
+                    for t in tourism:
+                        lines.append(f"   · {t['name']} — {t['distance_miles']} mi")
+                anchor_block = "\n".join(lines)
+            else:
+                anchor_block = (
+                    f"\nSHORT-LET DEMAND ANCHORS: No major airports, mainline stations or "
+                    f"tourist hubs within 5 mi of {postcode}. Short-let demand likely "
+                    f"thin — verify with Airroi market data above before pricing."
+                )
+
         # ── Strategy-specific regulatory context blocks ───────────────────
         # Threaded into the prompt so Claude can quote real licensing data
         # in the HMO Regulation / STR Regulation sections.
@@ -8463,6 +8766,7 @@ AREA MARKET DATA:
 - Void rate proxy: {void_rate}%
 - Article 4 status: {a4_status} ({council})
 {dom_block}
+{anchor_block}
 {reg_block}
 
 LIVE COMPARABLES:
