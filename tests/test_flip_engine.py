@@ -103,7 +103,7 @@ FLIP_PAYLOAD = {
 # Expected values from the F5 spec (£100 EPC default included where applicable)
 # Tolerances are tight (±£5) because the engine is deterministic.
 EXPECTED = {
-    "sdlt":                   9_250,    # investment £185k → £9,250 SDLT
+    "sdlt":                  10_450,    # investment £185k → £10,450 SDLT (Apr-2025 bands, 5% surcharge)
     "bridgingLoan":         129_500,
     "arrangementFeeAmt":      2_590,
     "baseRefurb":            26_000,
@@ -144,18 +144,19 @@ def test_flip_engine_matches_spec_currency_values():
         pytest.fail("F5 spec mismatches:\n" + "\n".join(failures))
 
 
-def test_flip_engine_net_roi_is_about_17_5_pct():
+def test_flip_engine_net_roi_is_about_16_5_pct():
     flip = _result_flip(FLIP_PAYLOAD)
     net_roi = float(flip.get("netRoi", 0))
-    # Spec target: ~17.5%; our engine produces 17.51%.
-    assert 17.0 <= net_roi <= 18.0, f"netRoi={net_roi} not in [17.0, 18.0]"
+    # Apr-2025 SDLT bands raise SDLT from £9,250 to £10,450, eroding the
+    # 17.5% half-year ROI by ~1pp. Engine now produces 16.47%.
+    assert 16.0 <= net_roi <= 17.0, f"netRoi={net_roi} not in [16.0, 17.0]"
 
 
-def test_flip_engine_annualised_roi_is_about_35_pct():
+def test_flip_engine_annualised_roi_is_about_33_pct():
     flip = _result_flip(FLIP_PAYLOAD)
     ann = float(flip.get("annualisedRoi", 0))
-    # Spec target: ~35%; 6-month project doubles the 17.5% half-year ROI.
-    assert 34.0 <= ann <= 36.0, f"annualisedRoi={ann} not in [34.0, 36.0]"
+    # 6-month project doubles the half-year ROI → ~32.94% post-SDLT-correction.
+    assert 32.0 <= ann <= 34.0, f"annualisedRoi={ann} not in [32.0, 34.0]"
 
 
 def test_flip_engine_70_rule_fails_for_overpaid_purchase():
@@ -166,13 +167,14 @@ def test_flip_engine_70_rule_fails_for_overpaid_purchase():
 
 
 def test_flip_engine_cgt_is_applied():
-    """CGT should be ~£4.9k–£5.0k on gross profit minus £3k allowance."""
+    """CGT ~£4.5k–£4.8k on gross profit minus £3k allowance (post-Apr-2025 SDLT)."""
     flip = _result_flip(FLIP_PAYLOAD)
     cgt = float(flip.get("cgtAmount", 0))
-    assert 4_800 <= cgt <= 5_000, f"cgtAmount={cgt} not in expected band"
-    # Net profit should be ~£18.6k–£18.8k
+    assert 4_500 <= cgt <= 4_800, f"cgtAmount={cgt} not in expected band"
+    # Higher SDLT (£10,450 vs old £9,250) cuts net profit by ~£1.2k
+    # post-CGT-tax. New net band: ~£17.5k–£18.0k.
     net = float(flip.get("netProfit", 0))
-    assert 18_500 <= net <= 18_800, f"netProfit={net} not in expected band"
+    assert 17_500 <= net <= 18_000, f"netProfit={net} not in expected band"
 
 
 def test_flip_engine_cgt_disabled_zero_tax():

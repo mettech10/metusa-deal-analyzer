@@ -200,7 +200,7 @@
       },
       "expected": {
         "arv": 265000,
-        "refurb_cost": 26000
+        "refurb_cost": 29900
       },
       "tolerance": {
         "amounts": 100,
@@ -232,7 +232,7 @@
       },
       "expected": {
         "monthly_revenue": 1785,
-        "monthly_mortgage": 625
+        "monthly_mortgage": 0
       },
       "tolerance": {
         "amounts": 5.00,

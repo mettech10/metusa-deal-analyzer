@@ -112,20 +112,23 @@ def test_dev_construction_stack():
 
 def test_dev_acquisition_stack():
     d = _result_dev(DEV_PAYLOAD)
-    assert d.get("sdlt") == 19_500   # investment SDLT on £350k
-    assert d.get("totalAcquisition") == 377_500   # land + sdlt + legal + survey
+    # Apr-2025 SDLT bands: 5% surcharge on additional property
+    #   £125k×5% + £125k×7% + £100k×10% = £25,000
+    assert d.get("sdlt") == 25_000
+    assert d.get("totalAcquisition") == 383_000   # land + sdlt + legal + survey
     assert d.get("planningObligations") == 133_000   # 50k CIL + 80k s106 + 3k regs
-    assert d.get("totalDevCosts") == 1_732_644
+    assert d.get("totalDevCosts") == 1_738_144
 
 
 def test_dev_finance_stack():
     d = _result_dev(DEV_PAYLOAD)
-    assert d.get("devLoan") == 1_212_851
-    assert d.get("devEquity") == 519_793
-    assert d.get("rolledInterest") == 145_542   # loan × 8% × 18/12
-    assert d.get("arrangementFeeAmt") == 24_257
-    assert d.get("exitFeeAmt") == 12_129
-    assert d.get("totalFinance") == 186_928
+    # Higher SDLT cascades through totalDevCosts → larger 70% loan
+    assert d.get("devLoan") == 1_216_701
+    assert d.get("devEquity") == 521_443
+    assert d.get("rolledInterest") == 146_004   # loan × 8% × 18/12
+    assert d.get("arrangementFeeAmt") == 24_334
+    assert d.get("exitFeeAmt") == 12_167
+    assert d.get("totalFinance") == 187_505
 
 
 def test_dev_exit_costs_and_total_project_cost():
@@ -134,32 +137,34 @@ def test_dev_exit_costs_and_total_project_cost():
     assert d.get("salesLegal") == 12_000          # 8 × £1,500
     assert d.get("warrantyTotal") == 8_000        # 8 × £1,000
     assert d.get("totalExit") == 68_000           # agent + legal + warranty + £15k mkt
-    assert d.get("totalProjectCost") == 1_987_572
+    assert d.get("totalProjectCost") == 1_993_649
 
 
 def test_dev_profit_metrics_match_spec():
     d = _result_dev(DEV_PAYLOAD)
-    assert d.get("grossProfit") == 212_428
-    assert abs(float(d.get("profitOnGdv", 0)) - 9.66) < 0.01
-    assert abs(float(d.get("profitOnCost", 0)) - 10.69) < 0.01
-    assert abs(float(d.get("ltgdv", 0)) - 55.13) < 0.05
-    assert abs(float(d.get("roe", 0)) - 40.87) < 0.05
+    # Apr-2025 SDLT correction reduces gross profit by ~£6.1k
+    assert d.get("grossProfit") == 206_351
+    assert abs(float(d.get("profitOnGdv", 0)) - 9.38) < 0.01
+    assert abs(float(d.get("profitOnCost", 0)) - 10.35) < 0.01
+    assert abs(float(d.get("ltgdv", 0)) - 55.30) < 0.05
+    assert abs(float(d.get("roe", 0)) - 39.57) < 0.05
 
 
 def test_dev_residual_land_value():
     d = _result_dev(DEV_PAYLOAD)
-    assert d.get("residualLandValue") == 122_428
-    # Land paid £350k, RLV £122,428 → over-paying by £227,572
-    assert d.get("landPremium") == -227_572
+    # RLV back-solved at 20% profit target — drops £6.1k after SDLT correction
+    assert d.get("residualLandValue") == 116_351
+    # Land paid £350k, RLV £116,351 → over-paying by £233,649
+    assert d.get("landPremium") == -233_649
 
 
 def test_dev_viability_flags():
     d = _result_dev(DEV_PAYLOAD)
-    # Profit on GDV 9.66% → red (target 20%, lender floor 15%)
+    # Profit on GDV 9.38% → red (target 20%, lender floor 15%)
     assert d.get("profitGdvFlag") == "red"
-    # Profit on cost 10.69% → red (target 25%, lender floor 18%)
+    # Profit on cost 10.35% → red (target 25%, lender floor 18%)
     assert d.get("profitCostFlag") == "red"
-    # LTGDV 55.1% → green (cap 65%)
+    # LTGDV 55.3% → green (cap 65%)
     assert d.get("ltgdvFlag") == "green"
 
 
