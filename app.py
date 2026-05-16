@@ -6695,14 +6695,32 @@ GDV & profit:
 Cost stack (by category):
 {cost_stack_lines}
 
+Detailed cost breakdown:
+- Professional fees inside that category:
+    Architect {_fmt(dev.get('feeArchitect'))} · Structural {_fmt(dev.get('feeStructural'))} · QS {_fmt(dev.get('feeQS'))} · PM {_fmt(dev.get('feePM'))}
+    Planning consultant {_fmt(dev.get('feePlanningConsultant'))} · Building control {_fmt(dev.get('feeBuildingControl'))} · NHBC {_fmt(dev.get('feeWarranty'))}
+    SAP/EPC {_fmt(dev.get('feeSapEpc'))} · Party wall {_fmt(dev.get('feePartyWall'))}
+- Planning obligations breakdown:
+    CIL {_fmt(dev.get('cilTotal'))} · S106 {_fmt(dev.get('s106Total'))} · Building Regs {_fmt(dev.get('buildingRegsFee'))} · Planning app fee {_fmt(dev.get('planningAppFee'))}
+- Exit / sales breakdown:
+    Agent fee {_fmt(dev.get('salesAgentFee'))} · Sales legal {_fmt(dev.get('salesLegalTotal'))} · Marketing+show-home {_fmt(dev.get('marketingTotal'))} (show home capex {_fmt(dev.get('showHomeCost'))})
+
 Finance:
 - Facility size:               {_fmt(dev.get('financeFacilityLoan'))}   (LTC {_pct(dev.get('ltc'))})
 - Day-1 advance vs land:       {_fmt(dev.get('financeDay1Drawdown'))}
 - Total interest:              {_fmt(dev.get('financeInterest'))}    (50% avg-utilisation basis)
+- Sales overrun interest:      {_fmt(dev.get('financeSalesOverrunInterest'))}    (extra rolled-up if sales window > facility allowance)
+- Lender valuation fee:        {_fmt(dev.get('financeValuationFee'))}
 - Arrangement + exit + monit.: {_fmt((dev.get('financeArrangementFee') or 0) + (dev.get('financeExitFee') or 0) + (dev.get('financeMonitoringTotal') or 0))}
 - Peak funding:                {_fmt(dev.get('peakFunding'))}
 - Rolled-up:                   {'YES' if dev.get('financeRolledUp') else 'NO (serviced monthly)'}
 - Rate / Term:                 {float(dev.get('financeRateUsed') or 0):.2f}% over {dev.get('financeTermMonths') or 0} months
+
+Sales programme:
+- Sales period:                {float(dev.get('salesPeriodMonths') or 0):.1f} months
+- Absorption rate:             {float(dev.get('absorptionRatePerMonth') or 0):.2f} units/month
+- Implied period (units÷rate): {float(dev.get('impliedSalesPeriodMonths') or 0):.1f} months
+- VAT applicable:              {'YES' if dev.get('vatApplicable') else 'NO (new-build residential zero-rated)'}
 
 Leverage & equity:
 - LTGDV:                       {_pct(dev.get('ltgdv'))}    (lender appetite caps ~70%; >75% rare)
@@ -6739,7 +6757,27 @@ WHEN ANALYSING THIS DEVELOPMENT:
   committing capital.
 - For planning route: comment on construction type vs typical planning
   pathway (new-build → Full PP usually; conversion → may have PD rights
-  under Class MA / Class Q; refurb → minor works only)."""
+  under Class MA / Class Q; refurb → minor works only).
+- SAP/EPC sign-off: comment if SAP/EPC line is zero — required for
+  Building Regs sign-off (~£300-£800/unit). If left out, total cost is
+  understated.
+- Party wall: if scheme is terraced/semi/abutting (most urban infill),
+  the party wall line typically £1.5k-£5k per affected boundary. If
+  blank on a non-greenfield site, flag the omission.
+- Planning application fee: 2025 schedule is £293 minor + £578/unit for
+  major dwelling schemes. If zero on a real application, flag.
+- Lender valuation fee: every dev facility has one (~£1k-£2k). If zero,
+  the finance cost is understated.
+- Sales programme: if the sales-overrun interest line is > 0, the
+  facility term is shorter than the marketing window — extra rolled-up
+  interest is eroding profit. Recommend either extending the facility
+  or raising absorption rate. Cite the absolute £ overrun number.
+- Absorption rate < 0.5 units/month is slow for UK schemes; verify
+  market demand. Typical is 1-2 units/month.
+- VAT: new-build residential is zero-rated, developers reclaim input
+  VAT. Mixed-use/conversion (5%)/commercial (20%) follow different
+  rules — if VAT flag set, remind user to check costs net and GDV with
+  VAT on commercial units."""
 
     # ── Airroi SA market data (appended to strategy context if available) ──
     if deal_type in ('R2SA', 'SA') and AIRROI_AVAILABLE and airroi_service:
