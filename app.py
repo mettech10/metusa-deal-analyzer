@@ -3508,6 +3508,19 @@ def analyze_deal(data):
         legal_purchase_d = float(data.get('legalPurchase', 3000) or 3000)
         survey_d = float(data.get('survey', 5000) or 5000)
 
+        # New (May 2026) cost-stack additions — mirror frontend engine.
+        # Read from either the dev* form-field names (Next.js POSTs these via
+        # `...propertyData` spread) or the unprefixed shorthand for direct
+        # API consumers.
+        sap_epc_per_unit_d   = float(data.get('devSapEpcCostPerUnit')   or data.get('sapEpcPerUnit')        or 0)
+        party_wall_d         = float(data.get('devPartyWallCost')       or data.get('partyWallCost')        or 0)
+        planning_app_fee_d   = float(data.get('devPlanningAppFee')      or data.get('planningAppFee')       or 0)
+        lender_valuation_d   = float(data.get('devLenderValuationFee')  or data.get('lenderValuationFee')   or 0)
+        show_home_cost_d     = float(data.get('devShowHomeCost')        or data.get('showHomeCost')         or 0)
+        sales_period_mo_d    = float(data.get('devSalesPeriodMonths')   or data.get('salesPeriodMonths')    or 0)
+        absorption_rate_d    = float(data.get('devAbsorptionRatePerMonth') or data.get('absorptionRatePerMonth') or 0)
+        vat_applicable_d     = bool(data.get('devVATApplicable')        or data.get('vatApplicable')        or False)
+
         gdv = float(
             data.get('gdv')
             or data.get('totalGdv')
@@ -3526,7 +3539,13 @@ def analyze_deal(data):
         base_build = build_cost_per_m2 * total_gia
         contingency_amt_d = base_build * contingency_pct_d
         total_construction = base_build + contingency_amt_d
-        prof_fees_amt = total_construction * prof_fees_pct
+        # Professional fees: % of construction PLUS new fixed items
+        sap_epc_total_d = sap_epc_per_unit_d * total_units
+        prof_fees_amt = (
+            total_construction * prof_fees_pct
+            + sap_epc_total_d
+            + party_wall_d
+        )
 
         sdlt_d = calculate_stamp_duty(
             land_price,
@@ -3537,7 +3556,8 @@ def analyze_deal(data):
             land_price + sdlt_d + legal_purchase_d + survey_d
         )
 
-        planning_obligations = cil + s106 + building_regs
+        # Planning obligations now include statutory LPA application fee
+        planning_obligations = cil + s106 + building_regs + planning_app_fee_d
 
         total_dev_costs = (
             total_acquisition_d
@@ -3546,23 +3566,29 @@ def analyze_deal(data):
             + planning_obligations
         )
 
-        # Finance
+        # Finance — lender valuation fee + sales overrun interest
         dev_loan = total_dev_costs * ltc_pct
         dev_equity = total_dev_costs - dev_loan
         rolled_interest = dev_loan * finance_rate * (duration_months / 12)
         arrangement_fee_amt_d = dev_loan * arrangement_pct_d
         exit_fee_amt_d = dev_loan * exit_pct_d
+        # If sales period exceeds the facility's implicit 6mo marketing
+        # window, charge extra rolled-up interest on the peak balance.
+        sales_overrun_months_d = max(0.0, sales_period_mo_d - 6.0) if sales_period_mo_d > 0 else 0.0
+        sales_overrun_interest_d = dev_loan * finance_rate * (sales_overrun_months_d / 12)
         total_finance = (
             rolled_interest + arrangement_fee_amt_d
             + exit_fee_amt_d + monitoring
+            + lender_valuation_d + sales_overrun_interest_d
         )
 
-        # Exit costs
+        # Exit costs — show home as separate capex line in marketing
         agent_fee_amt_d = gdv * agent_fee_pct_d
         sales_legal = legal_per_unit * total_units
         warranty_total = warranty_per_unit * total_units
+        marketing_with_show_home_d = marketing_d + show_home_cost_d
         total_exit_d = (
-            agent_fee_amt_d + sales_legal + marketing_d + warranty_total
+            agent_fee_amt_d + sales_legal + marketing_with_show_home_d + warranty_total
         )
 
         total_project_cost_d = total_dev_costs + total_finance + total_exit_d
@@ -3686,10 +3712,19 @@ def analyze_deal(data):
             'exitFeeAmt': round(exit_fee_amt_d),
             'monitoringSurveyor': round(monitoring),
             'totalFinance': round(total_finance),
+            'sapEpcTotal': round(sap_epc_total_d),
+            'partyWallCost': round(party_wall_d),
+            'planningAppFee': round(planning_app_fee_d),
+            'lenderValuationFee': round(lender_valuation_d),
+            'salesOverrunInterest': round(sales_overrun_interest_d),
+            'salesPeriodMonths': round(sales_period_mo_d, 1),
+            'absorptionRatePerMonth': round(absorption_rate_d, 2),
+            'vatApplicable': vat_applicable_d,
             'agentFeeAmt': round(agent_fee_amt_d),
             'salesLegal': round(sales_legal),
             'warrantyTotal': round(warranty_total),
-            'marketing': round(marketing_d),
+            'marketing': round(marketing_with_show_home_d),
+            'showHomeCost': round(show_home_cost_d),
             'totalExit': round(total_exit_d),
             'totalProjectCost': round(total_project_cost_d),
             'gdv': round(gdv),
