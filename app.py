@@ -7000,6 +7000,7 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
     # Call Claude if API key is available                                  #
     # ------------------------------------------------------------------ #
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    ai_response = None
     if api_key:
         try:
             import anthropic
@@ -7017,13 +7018,19 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
                 raw = re.sub(r'\n?```$', '', raw)
             ai_response = json.loads(raw)
             app.logger.info(f"[AI] Claude analysis successful for {property_data.get('postcode', '?')}")
-            return ai_response
         except json.JSONDecodeError as e:
             app.logger.error(f"[AI] Claude returned non-JSON: {e}")
         except Exception as e:
             app.logger.error(f"[AI] Claude API error: {e}")
     else:
         app.logger.warning("[AI] ANTHROPIC_API_KEY not set — using rule-based fallback")
+
+    # If Claude returned a *partial* response (e.g. empty strengths / risks /
+    # next_steps), don't ship a blank card to the UI — merge in the
+    # heuristic fallback for any missing or empty field. The frontend
+    # otherwise hides whole sections that arrive empty (the "missing
+    # Strengths / Risks / Next Steps cards" bug). This keeps Claude's
+    # output where present and only fills in the gaps.
 
     # ------------------------------------------------------------------ #
     # Rule-based fallback (no API key / API error)                        #
@@ -7075,7 +7082,7 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
             _a4_step = "5. Consider HMO as an alternative strategy — no Article 4 barrier, just standard licensing required"
 
     if verdict == 'PROCEED':
-        return {
+        fallback = {
             "verdict": (
                 f"Strong deal scoring {score}/100. The gross yield of {gross:.1f}% beats the "
                 f"{benchmarks['gross_yield']}% benchmark and monthly cashflow of £{cashflow:,.0f} "
@@ -7112,7 +7119,7 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
             _alt_strategy = "HMO or BRR"
         else:
             _alt_strategy = "BRR or social housing lease"
-        return {
+        fallback = {
             "verdict": (
                 f"Borderline deal scoring {score}/100. The yield of {gross:.1f}% and cashflow of "
                 f"£{cashflow:,.0f}/month are below target benchmarks — further due diligence or "
@@ -7143,7 +7150,7 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
             ],
         }
     else:
-        return {
+        fallback = {
             "verdict": (
                 f"Weak deal scoring {score}/100. Gross yield of {gross:.1f}% and cashflow of "
                 f"£{cashflow:,.0f}/month are materially below target — this deal does not meet "
@@ -7172,6 +7179,26 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
                 _a4_step.split('. ', 1)[-1] if '. ' in _a4_step else _a4_step,
             ],
         }
+
+    # ── Merge Claude response (where present) with the heuristic fallback ──
+    # If Claude succeeded, prefer its content; only fill from `fallback` when
+    # the AI response is missing or empty for a given key. This guarantees
+    # the response ALWAYS has populated strengths / risks / next_steps /
+    # verdict / area arrays so the frontend's "Strengths / Risks / Next
+    # Steps" cards never silently disappear.
+    if ai_response and isinstance(ai_response, dict):
+        merged = dict(fallback)
+        for k, v in ai_response.items():
+            if v is None:
+                continue
+            if isinstance(v, list) and len(v) == 0:
+                continue              # keep heuristic for empty arrays
+            if isinstance(v, str) and not v.strip():
+                continue              # keep heuristic for empty strings
+            merged[k] = v
+        return merged
+
+    return fallback
 
 @app.route('/ai-analyze', methods=['POST'])
 @limiter.limit("5 per minute")  # Lower limit for AI analysis
