@@ -1381,28 +1381,66 @@ def _cache_store(district: str, listings: List[Dict[str, Any]]) -> None:
         print(f"[SpareRoom] Cache store error: {e}")
 
 
+# ── In-process cache backstop ────────────────────────────────────────────────
+# Supabase is the primary cache (24h, cross-worker). But if Supabase env
+# vars aren't set, scrapes flap between 8-listings and 0-listings runs
+# because BrightData's form submission is non-deterministic. This
+# module-level dict gives every worker a 1h in-process cache as a
+# backstop so a successful scrape doesn't immediately get replaced by
+# an empty one on the next request.
+_INPROC_CACHE: Dict[str, Dict[str, Any]] = {}
+_INPROC_TTL_SECS = 3600
+
+
+def _inproc_get(district: str) -> Optional[List[Dict[str, Any]]]:
+    entry = _INPROC_CACHE.get(district.upper())
+    if not entry:
+        return None
+    if time.time() - entry.get("ts", 0) > _INPROC_TTL_SECS:
+        _INPROC_CACHE.pop(district.upper(), None)
+        return None
+    return entry.get("listings")
+
+
+def _inproc_put(district: str, listings: List[Dict[str, Any]]) -> None:
+    if not listings:
+        return
+    _INPROC_CACHE[district.upper()] = {"ts": time.time(), "listings": listings}
+
+
 # ── module-level convenience for app.py ──────────────────────────────────────
 def scrape_spareroom_live(postcode: str, max_results: int = 12) -> List[Dict[str, Any]]:
     """Drop-in replacement for ``scrape_spareroom_with_apify``.
 
-    Same signature, same return shape. Now also:
-    1. Checks Supabase cache first (serves data < 24h old)
-    2. On fresh scrape, stores results to Supabase for future requests
+    Same signature, same return shape. Cache cascade:
+      1. In-process dict (1h, per worker) — avoids the BrightData flap
+         where one fetch lands 8 listings and the next lands 0.
+      2. Supabase ``spareroom_listings`` (24h, cross-worker) — only
+         active when SUPABASE_SERVICE_ROLE_KEY is set.
+      3. Fresh scrape via BrightData.
     """
     district = (postcode or "").upper().strip().split()[0] if postcode else ""
     if not district:
         return []
 
-    # 1) Check cache
+    # 1) In-process cache
+    cached_local = _inproc_get(district)
+    if cached_local:
+        print(f"[SpareRoom] In-proc cache HIT for {district}: {len(cached_local)} listings")
+        return cached_local[:max_results]
+
+    # 2) Supabase cache
     cached = _cache_lookup(district, max_results)
     if cached:
+        _inproc_put(district, cached)
         return cached
 
-    # 2) Fresh scrape
+    # 3) Fresh scrape
     results = SpareRoomScraper().scrape_live(postcode=postcode, max_results=max_results)
 
-    # 3) Store to cache (async-safe, non-blocking on failure)
+    # 4) Store to caches (best-effort, non-blocking on failure)
     if results:
+        _inproc_put(district, results)
         _cache_store(district, results)
 
     return results
