@@ -7004,7 +7004,11 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
     if api_key:
         try:
             import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
+            # Explicit 75s timeout: bound the AI call so the request
+            # falls through to the heuristic fallback instead of hanging,
+            # which previously caused the empty "AI insights couldn't be
+            # generated" card to surface after a long stall.
+            client = anthropic.Anthropic(api_key=api_key, timeout=75.0)
             model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
             message = client.messages.create(
                 model=model_id,
@@ -8897,7 +8901,10 @@ licensing/regulatory data above, QUOTE it directly — do not generalise:
 
         try:
             import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
+            # Explicit 75s timeout: the frontend proxy has a 90s AbortSignal,
+            # so failing here at 75s lets us return a clean JSON error before
+            # the proxy times out and shows "operation was aborted".
+            client = anthropic.Anthropic(api_key=api_key, timeout=75.0)
             model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
             message = client.messages.create(
                 model=model_id,

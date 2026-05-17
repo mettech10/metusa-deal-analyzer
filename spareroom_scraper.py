@@ -161,6 +161,30 @@ def _area_code(district_or_postcode: str) -> str:
     return m.group(1).upper() if m else ""
 
 
+def _build_search_pl_url(location: str, offset: int = 0) -> str:
+    """Direct hit on SpareRoom's /flatshare/search.pl handler.
+
+    This is the URL that the on-site search form POSTs to, but it accepts
+    GET as well. Navigating to it directly bypasses the form-submission
+    dance (cookie banner, country modal, Playwright navigation race) and
+    consistently returns a real ``search_id`` plus the actual local
+    results list — not the "featured ads only" teaser that the
+    /flatshare/?search_by=postcode variant falls back to.
+
+    The form's hidden inputs (nmsq_mode=normal, action=search) are
+    included so SpareRoom treats it like a real submission.
+    """
+    raw = _sanitise(location, 40)
+    first_token = raw.split()[0] if raw else ""
+    loc = first_token.replace(" ", "+")
+    return (
+        f"https://www.spareroom.co.uk/flatshare/search.pl"
+        f"?nmsq_mode=normal&action=search&search={loc}"
+        f"&flatshare_type=offered&miles_from_max=5"
+        f"&rooms_for=0&rooms_offered=1&mode=list&offset={offset}"
+    )
+
+
 def _build_search_url(location: str, offset: int = 0) -> str:
     """SpareRoom search URL.
 
@@ -658,43 +682,53 @@ class SpareRoomScraper:
         listing dicts in the canonical shape — EMPTY list on any failure
         (caller's existing fallback handles it).
 
-        Always uses form-submission mode (mode="form") because SpareRoom
-        serves a "featured ads only" teaser page for direct-URL navigation —
-        the form gives us a real search_id token that unlocks actual results.
+        Strategy: direct navigation to /flatshare/search.pl with the
+        same hidden form fields the on-page form submits. This bypasses
+        the brittle Playwright form-submission dance (cookie banner,
+        country modal, navigation race conditions) and returns a real
+        search_id with the actual local results list — not the "featured
+        ads only" teaser that /flatshare/?search_by=postcode falls back
+        to. Form-submit mode is kept as a fallback.
 
-        Retries once on transient errors (TargetClosedError, timeout, form
-        submission failure) since Bright Data's Scraping Browser sessions
-        can occasionally die mid-page-load.
+        Retries once on transient errors (TargetClosedError, timeout,
+        form submission failure) since Bright Data's Scraping Browser
+        sessions can occasionally die mid-page-load.
         """
-        retries = 2
-        for attempt in range(1, retries + 1):
-            debug = self.scrape_live_debug(postcode, max_results=max_results, mode="form")
-            listings = debug.get("listings", [])
-            error = debug.get("error")
+        # Try direct → form → url, falling through on transient errors
+        modes = ["direct", "form", "url"]
+        for mode in modes:
+            retries = 2
+            for attempt in range(1, retries + 1):
+                debug = self.scrape_live_debug(postcode, max_results=max_results, mode=mode)
+                listings = debug.get("listings", [])
+                error = debug.get("error")
 
-            if listings:
-                return listings
+                if listings:
+                    return listings
 
-            if not error:
-                # No error but no results — genuine empty search
-                return []
+                if not error:
+                    # No error but no results — try next mode (this mode may
+                    # have hit the "featured-only" teaser); only return []
+                    # after every mode has had a clean run.
+                    break
 
-            # Retry on transient errors
-            is_transient = any(kw in (error or "") for kw in [
-                "TargetClosedError", "timeout", "could not submit",
-                "Execution context", "Target page",
-            ])
-            if is_transient and attempt < retries:
-                wait_secs = 5 * attempt
-                print(f"[SpareRoom] LIVE retry {attempt}/{retries} after "
-                      f"{wait_secs}s — error was: {error[:80]}")
-                time.sleep(wait_secs)
-                continue
+                # Retry on transient errors within this mode
+                is_transient = any(kw in (error or "") for kw in [
+                    "TargetClosedError", "timeout", "could not submit",
+                    "Execution context", "Target page",
+                ])
+                if is_transient and attempt < retries:
+                    wait_secs = 5 * attempt
+                    print(f"[SpareRoom] LIVE retry {attempt}/{retries} ({mode}) after "
+                          f"{wait_secs}s — error was: {error[:80]}")
+                    time.sleep(wait_secs)
+                    continue
 
-            # Non-transient error or last attempt — give up
-            print(f"[SpareRoom] LIVE giving up after {attempt} attempt(s): {error[:120]}")
-            return []
+                # Non-transient error — fall through to next mode
+                print(f"[SpareRoom] LIVE {mode} failed: {error[:120]} — trying next mode")
+                break
 
+        print(f"[SpareRoom] LIVE all modes exhausted for {postcode}")
         return []
 
     def scrape_live_debug(
@@ -719,8 +753,11 @@ class SpareRoomScraper:
             }
         """
         district = self._district_from_postcode(postcode)
-        url = _build_search_url(district, offset=0)
-        print(f"[SpareRoom] LIVE scrape {district} — {url}")
+        if mode == "direct":
+            url = _build_search_pl_url(district, offset=0)
+        else:
+            url = _build_search_url(district, offset=0)
+        print(f"[SpareRoom] LIVE scrape {district} ({mode}) — {url}")
 
         result: Dict[str, Any] = {
             "listings": [],
@@ -763,6 +800,8 @@ class SpareRoomScraper:
                         result["elapsed_ms"] = int((time.time() - t0) * 1000)
                         return result
                 else:
+                    # mode == "direct" → /flatshare/search.pl?action=search&...
+                    # mode == "url"    → /flatshare/?search_by=postcode&...
                     try:
                         page.goto(url, wait_until="domcontentloaded",
                                   timeout=LIVE_TIMEOUT_SECS * 1000)
