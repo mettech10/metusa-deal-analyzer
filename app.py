@@ -34,7 +34,7 @@ from scrapling_extractor import extract_property_from_url  # For most sites
 
 # Import SpareRoom scraper (Bright Data Scraping Browser)
 try:
-    from spareroom_scraper import SpareRoomScraper
+    from spareroom_scraper import SpareRoomScraper, scrape_spareroom_live
     SPAREROOM_AVAILABLE = True
 except ImportError:
     SPAREROOM_AVAILABLE = False
@@ -6137,10 +6137,13 @@ def get_comparables():
         source = 'fallback'
 
         # 1) SpareRoom live scraper (Bright Data Scraping Browser) — primary
+        # Use the cached wrapper so successful scrapes persist in Supabase
+        # for 24h. The bare scrape_live() call this used to make was
+        # producing the "8 listings then 0 listings" flap on retry,
+        # because BrightData's form-submit success is non-deterministic.
         if SPAREROOM_AVAILABLE:
             try:
-                scraper = SpareRoomScraper()
-                live_listings = scraper.scrape_live(postcode, max_results=max_results)
+                live_listings = scrape_spareroom_live(postcode, max_results=max_results)
                 if live_listings:
                     for ll in live_listings:
                         ll.setdefault('source', 'spareroom-live')

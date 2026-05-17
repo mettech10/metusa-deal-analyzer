@@ -694,10 +694,14 @@ class SpareRoomScraper:
         form submission failure) since Bright Data's Scraping Browser
         sessions can occasionally die mid-page-load.
         """
-        # Try direct → form → url, falling through on transient errors
+        # Try direct → form → url, falling through on transient errors.
+        # Form mode gets more retries because it's the only mode that
+        # actually returns local results (direct hits robots.txt block
+        # via BrightData; url returns featured-only nationwide ads that
+        # the area-code filter then rejects).
         modes = ["direct", "form", "url"]
         for mode in modes:
-            retries = 2
+            retries = 3 if mode == "form" else 2
             for attempt in range(1, retries + 1):
                 debug = self.scrape_live_debug(postcode, max_results=max_results, mode=mode)
                 listings = debug.get("listings", [])
