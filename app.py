@@ -5759,6 +5759,42 @@ def not_found_handler(e):
         'message': 'Endpoint not found'
     }), 404
 
+
+def _log_admin_error(error_type: str, message: str, stack: str = '', endpoint: str = ''):
+    """Append a row to admin_error_log on Supabase. Best-effort, never raises.
+
+    Powers the /admin/errors dashboard in the Next.js app. The Flask
+    backend already POSTs visits to its internal table via
+    _record_visit(); this is the cross-stack equivalent — every
+    unhandled server error here surfaces in the admin UI alongside
+    Next.js-side frontend errors and webhook failures.
+    """
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return
+    try:
+        # Truncate to match the column caps used by the Next.js writer
+        # (lib/admin-logs.ts) so behaviour is symmetric across stacks.
+        payload = {
+            'error_type': error_type,
+            'message': (message or '')[:4000],
+            'stack': (stack or '')[:8000] if stack else None,
+            'endpoint': (endpoint or '')[:500] if endpoint else None,
+        }
+        requests.post(
+            f'{_SUPABASE_URL}/rest/v1/admin_error_log',
+            headers={
+                'apikey': _SUPABASE_KEY,
+                'Authorization': f'Bearer {_SUPABASE_KEY}',
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal',
+            },
+            json=payload,
+            timeout=3,
+        )
+    except Exception as e:  # noqa: BLE001 — never let logging crash a request
+        app.logger.warning(f'[admin-log] failed to persist error row: {e}')
+
+
 @app.errorhandler(500)
 def server_error_handler(e):
     """Handle 500 errors"""
@@ -5770,9 +5806,40 @@ def server_error_handler(e):
         is_error=True,
         error_detail={'message': 'Internal server error', 'path': request.path, 'type': 'server'},
     )
+    # Mirror into admin_error_log so the Next.js dashboard sees it.
+    _log_admin_error(
+        error_type='flask_5xx',
+        message=str(e)[:4000] or 'Internal server error',
+        endpoint=request.path or '',
+    )
     return jsonify({
         'success': False,
         'message': 'Internal server error. Please try again later.'
+    }), 500
+
+
+@app.errorhandler(Exception)
+def unhandled_exception_handler(e):
+    """Global catch-all — surfaces any uncaught exception in admin_error_log
+    before letting Flask render its default 500 response.
+
+    Werkzeug HTTP exceptions are passed through unchanged so the
+    specific 4xx/5xx handlers above still own their cases.
+    """
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    import traceback as _tb
+    app.logger.error(f'Unhandled exception: {e}')
+    _log_admin_error(
+        error_type='flask_5xx',
+        message=f'{type(e).__name__}: {str(e)[:3500]}',
+        stack=_tb.format_exc(),
+        endpoint=getattr(request, 'path', '') or '',
+    )
+    return jsonify({
+        'success': False,
+        'message': 'Internal server error. Please try again later.',
     }), 500
 
 # ============================================================================
