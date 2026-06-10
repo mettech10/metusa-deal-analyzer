@@ -49,12 +49,13 @@ export function calculateSDLT(
   if (rateType === "non-residential" || rateType === "mixed-use") {
     return calculateNonResidentialSDLT(price)
   }
-  // First-time buyer relief: 0% up to £425k, 5% on £425k–£625k, standard above £625k
-  // (relief removed entirely if price > £625,000)
-  if (buyerType === "first-time" && price <= 625000) {
+  // First-time buyer relief (England/NI, from 1 April 2025): 0% up to £300k,
+  // 5% on £300k–£500k, relief removed entirely if price > £500,000.
+  // (The temporary £425k/£625k thresholds expired 31 March 2025.)
+  if (buyerType === "first-time" && price <= 500000) {
     const bands = [
-      { threshold: 425000, rate: 0, label: "Up to 425,000" },
-      { threshold: 625000, rate: 0.05, label: "425,001 - 625,000" },
+      { threshold: 300000, rate: 0, label: "Up to 300,000" },
+      { threshold: 500000, rate: 0.05, label: "300,001 - 500,000" },
     ]
     let remaining = price
     let total = 0

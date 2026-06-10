@@ -1030,7 +1030,7 @@ export function PropertyForm({ onSubmit, isLoading, defaultValues, prefilled }: 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="additional">Second Home / Investment (5% SDLT surcharge)</SelectItem>
-                        <SelectItem value="first-time">First-Time Buyer (0% up to £425k, 5% on £425k–£625k)</SelectItem>
+                        <SelectItem value="first-time">First-Time Buyer (0% up to £300k, 5% on £300k–£500k)</SelectItem>
                       </SelectContent>
                     </Select>
                   )}
