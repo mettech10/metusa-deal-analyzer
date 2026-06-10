@@ -39,7 +39,7 @@
     },
     {
       "name": "BTL FTB SDLT",
-      "description": "First time buyer SDLT = £0 under £425k",
+      "description": "First time buyer SDLT = £0 under £300k",
       "input": {
         "strategy": "BTL",
         "purchasePrice": 200000,
@@ -91,7 +91,7 @@
     },
     {
       "name": "BTL FTB 500k",
-      "description": "FTB £500k — partial relief: £75k × 5% = £3,750",
+      "description": "FTB £500k — partial relief: £200k × 5% = £10,000",
       "input": {
         "strategy": "BTL",
         "purchasePrice": 500000,
@@ -108,7 +108,7 @@
         "survey": 500
       },
       "expected": {
-        "sdlt": 3750
+        "sdlt": 10000
       },
       "tolerance": {
         "amounts": 0,

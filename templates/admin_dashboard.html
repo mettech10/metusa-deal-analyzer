@@ -598,7 +598,7 @@
                     <span class="error-msg">${escHtml(msg)}</span>
                     <span class="error-time">${formatTime(e.ts)}</span>
                 </div>
-                <div class="error-meta">${typeLabel} &nbsp; ${escHtml(path)} &nbsp; ${e.method || ''} &nbsp; ${e.ip ? 'IP: ' + e.ip : ''}</div>
+                <div class="error-meta">${typeLabel} &nbsp; ${escHtml(path)} &nbsp; ${escHtml(e.method || '')} &nbsp; ${e.ip ? 'IP: ' + escHtml(e.ip) : ''}</div>
             </div>`;
         }).join('');
     }
@@ -617,7 +617,7 @@
                 <td><span class="badge badge-muted">${escHtml(r.method)}</span></td>
                 <td style="font-size:12px;font-family:monospace">${escHtml(r.path)}</td>
                 <td><span class="badge ${statusClass}">${r.status || '—'}</span></td>
-                <td style="font-size:11px;color:var(--text-muted)">${r.ip || '—'}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${escHtml(r.ip || '—')}</td>
             </tr>`;
         }).join('');
     }

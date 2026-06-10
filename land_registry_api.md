@@ -1,6 +1,6 @@
 # Land Registry API Integration
 
-API Key: 9f426bbe-b54e-487f-bc20-42f38f143686
+API Key: set via LAND_REGISTRY_API_KEY env var (never commit the real key)
 
 ## Endpoints
 
@@ -58,7 +58,7 @@ WHERE {
 import requests
 import json
 
-LAND_REGISTRY_API_KEY = "9f426bbe-b54e-487f-bc20-42f38f143686"
+LAND_REGISTRY_API_KEY = "<your-key-from-env>"
 LAND_REGISTRY_ENDPOINT = "http://landregistry.data.gov.uk/landregistry/query"
 
 def get_sold_prices(postcode, limit=10):

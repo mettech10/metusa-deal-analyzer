@@ -12,7 +12,7 @@ import os
 
 # API Configuration
 LAND_REGISTRY_ENDPOINT = "http://landregistry.data.gov.uk/landregistry/query"
-API_KEY = os.getenv('LAND_REGISTRY_API_KEY', '9f426bbe-b54e-487f-bc20-42f38f143686')
+API_KEY = os.getenv('LAND_REGISTRY_API_KEY', '')
 
 class LandRegistryAPI:
     """Client for UK Land Registry Price Paid Data"""

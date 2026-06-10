@@ -9,8 +9,8 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 # Configuration
-TFL_APP_ID = os.getenv('TFL_APP_ID', 'afcaf66b')
-TFL_APP_KEY = os.getenv('TFL_APP_KEY', '01143ec72ae2c8e4c3aa631e5f27b845')
+TFL_APP_ID = os.getenv('TFL_APP_ID', '')
+TFL_APP_KEY = os.getenv('TFL_APP_KEY', '')
 TFL_BASE_URL = "https://api.tfl.gov.uk"
 
 @dataclass
