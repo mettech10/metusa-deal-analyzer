@@ -1316,10 +1316,61 @@ def validate_numeric(value, min_val=0, max_val=100000000):
     except (ValueError, TypeError):
         return False
 
+def is_safe_external_url(url, max_len=2000):
+    """SSRF guard for endpoints that fetch user-supplied URLs server-side.
+
+    Allows only plain http(s) URLs on default ports whose host resolves
+    exclusively to public addresses — blocks loopback/private/link-local
+    ranges (cloud metadata, internal services). DNS-rebinding after this
+    check is still theoretically possible; scrapers should not be granted
+    network access beyond what they need.
+    """
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+
+    if not url or len(url) > max_len:
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ('http', 'https'):
+        return False
+    if not parsed.hostname or parsed.username or parsed.password:
+        return False
+    if parsed.port not in (None, 80, 443):
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except (socket.gaierror, UnicodeError):
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
 app = Flask(__name__, template_folder='templates')
+
+# Render/Railway terminate TLS at a single proxy hop — trust one X-Forwarded-*
+# entry so request.remote_addr (rate-limit key, admin log IP) is the real
+# client, not the proxy. Without this every visitor shares one limiter bucket.
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # Security: Generate secret key from environment or random
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+if not os.environ.get('SECRET_KEY'):
+    # Random fallback is secure but rotates on every restart/worker, which
+    # invalidates admin sessions — set SECRET_KEY in the environment.
+    app.logger.warning(
+        'SECRET_KEY env var not set — using a random per-process key; '
+        'admin sessions will not survive restarts or multiple workers.')
 
 # Security: Session configuration
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -1433,10 +1484,16 @@ CORS(app, resources={
 })
 
 # Security: Rate limiting to prevent abuse
+# Use Redis-backed limits when available so they survive restarts and are
+# shared across workers; in-memory only as a local-dev fallback.
+_limiter_storage = (os.environ.get('RATELIMIT_STORAGE_URI')
+                    or os.environ.get('REDIS_URL')
+                    or 'memory://')
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=_limiter_storage,
 )
 
 # Security: Add hardening headers to every response
@@ -1562,28 +1619,29 @@ def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
     Rates effective from 1 April 2025 (mirrors lib/calculations.ts in dealcheck-uk).
 
     Three buyer categories:
-    1. First-time buyer: 0% to £425k, 5% on £425k-£625k; relief lost above £625k
-       (falls back to standard residential bands above £625k — NO surcharge)
+    1. First-time buyer: 0% to £300k, 5% on £300k-£500k; relief lost above £500k
+       (falls back to standard residential bands above £500k — NO surcharge)
     2. Standard buyer (primary residence, no surcharge): 0/2/5/10/12%
     3. Additional property (investment/second home): standard + 5% surcharge
 
     Apr-2025 changes from previous code:
-    - FTB threshold reverted from £300k/£500k to £425k/£625k (the temporary
-      pandemic-era cut expired 31 March 2025).
+    - FTB relief reverted from the temporary £425k/£625k (Sep 2022 – Mar 2025)
+      back to the permanent £300k/£500k thresholds when the temporary cut
+      expired 31 March 2025.
     - Standard residential 0% threshold reverted from £250k to £125k, and
       the £125k–£250k @ 2% band was reinstated.
     - Additional-property surcharge was already 5% (correct for Apr 2025).
     """
     if first_time_buyer:
         # First-time buyer relief (England/NI, Apr-2025+)
-        # 0% up to £425,000
-        # 5% on £425,001 to £625,000
-        # Above £625,000: relief does not apply — fall through to standard rates (NO surcharge)
-        if price <= 425000:
+        # 0% up to £300,000
+        # 5% on £300,001 to £500,000
+        # Above £500,000: relief does not apply — fall through to standard rates (NO surcharge)
+        if price <= 300000:
             return 0
-        elif price <= 625000:
-            return (price - 425000) * 0.05
-        # else: FTB relief lost above £625k — fall through to standard residential
+        elif price <= 500000:
+            return (price - 300000) * 0.05
+        # else: FTB relief lost above £500k — fall through to standard residential
     if first_time_buyer or not second_property:
         # Standard residential rates (primary residence, no surcharge)
         # Also used for FTB above £625k (relief lost).
@@ -6072,10 +6130,15 @@ def extract_url():
             return jsonify({'success': False, 'message': 'URL is required'}), 400
         
         url = data['url']
-        
+
         # Validate URL
         if not url.startswith(('http://', 'https://')):
             return jsonify({'success': False, 'message': 'Invalid URL format'}), 400
+
+        # SSRF guard: the basic scraper fetches this URL from our server, so
+        # refuse hosts that resolve to loopback/private/metadata addresses.
+        if not is_safe_external_url(url):
+            return jsonify({'success': False, 'message': 'URL is not allowed'}), 400
         
         # Route to the right Apify actor based on the listing URL domain,
         # then fall back to Firecrawl and the basic scraper for unknown sites.

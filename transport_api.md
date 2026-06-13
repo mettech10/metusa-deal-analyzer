@@ -18,8 +18,8 @@
 ## API Credentials
 
 ```
-App ID: afcaf66b
-App Key: 01143ec72ae2c8e4c3aa631e5f27b845
+App ID: set via TFL_APP_ID env var
+App Key: set via TFL_APP_KEY env var (never commit the real key)
 ```
 
 ## Key Endpoints
@@ -53,8 +53,8 @@ import requests
 import os
 from typing import List, Dict
 
-TFL_APP_ID = "afcaf66b"
-TFL_APP_KEY = "01143ec72ae2c8e4c3aa631e5f27b845"
+TFL_APP_ID = "<from-env>"
+TFL_APP_KEY = "<from-env>"
 TFL_BASE_URL = "https://api.tfl.gov.uk"
 
 class TransportAPI:
