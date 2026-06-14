@@ -18,6 +18,7 @@ import secrets
 import re
 import io
 from html import escape
+from ai_gateway import ai_gateway
 
 # Import Land Registry API
 from land_registry import land_registry
@@ -1937,9 +1938,6 @@ def check_article_4(postcode):
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
     if api_key:
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
             prompt = (
                 f'You are a UK property and planning expert. Determine the Article 4 Direction status '
                 f'for HMO (House in Multiple Occupation C3\u2192C4) conversions at UK postcode: {postcode_clean}\n\n'
@@ -1955,12 +1953,11 @@ def check_article_4(postcode):
                 '  "advice": "One sentence of planning advice for an investor considering HMO here"\n'
                 '}'
             )
-            message = client.messages.create(
-                model=model_id,
+            result = ai_gateway.complete(
+                messages=[{'role': 'user', 'content': prompt}],
                 max_tokens=300,
-                messages=[{'role': 'user', 'content': prompt}]
             )
-            raw = message.content[0].text.strip()
+            raw = result['content'].strip()
             if raw.startswith('```'):
                 raw = re.sub(r'^```[a-z]*\n?', '', raw)
                 raw = re.sub(r'\n?```$', '', raw)
@@ -2386,9 +2383,6 @@ def get_location_from_ai(postcode):
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
     if api_key:
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
             context = f' (postcodes.io admin_district: "{admin_district}")' if admin_district else ''
             prompt = (
                 f'Given the UK postcode "{postcode}"{context}, provide the following in JSON:\n'
@@ -2401,12 +2395,11 @@ def get_location_from_ai(postcode):
                 'Return ONLY valid JSON, no markdown or explanation:\n'
                 '{"country": "...", "region": "...", "council": "..."}'
             )
-            message = client.messages.create(
-                model=model_id,
+            result = ai_gateway.complete(
+                messages=[{'role': 'user', 'content': prompt}],
                 max_tokens=150,
-                messages=[{'role': 'user', 'content': prompt}]
             )
-            raw = message.content[0].text.strip()
+            raw = result['content'].strip()
             if raw.startswith('```'):
                 raw = re.sub(r'^```[a-z]*\n?', '', raw)
                 raw = re.sub(r'\n?```$', '', raw)
@@ -5504,13 +5497,9 @@ def pdf_upload():
         if not api_key:
             return jsonify({'success': False, 'message': 'AI service not configured'}), 500
 
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
         print(f"[PDF-UPLOAD] Processing {filename} ({len(pdf_base64)//1024}KB base64)")
 
-        message = client.messages.create(
-            model="claude-sonnet-4-5",
+        result = ai_gateway.complete(
             max_tokens=1000,
             messages=[{
                 "role": "user",
@@ -5555,7 +5544,7 @@ def pdf_upload():
         )
 
         # Parse Claude's response
-        response_text = message.content[0].text.strip()
+        response_text = result['content'].strip()
         print(f"[PDF-UPLOAD] Claude response: {response_text[:500]}")
 
         # Extract JSON from response (handle markdown code blocks)
@@ -6439,16 +6428,11 @@ Respond with a JSON object (no markdown, raw JSON only) with exactly these field
             }
             return jsonify({'success': True, 'analysis': analysis})
 
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
-
-        message = client.messages.create(
-            model=model_id,
-            max_tokens=1500,
+        result = ai_gateway.complete(
             messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=1500,
         )
-        raw_text = message.content[0].text.strip()
+        raw_text = result['content'].strip()
         # Strip markdown code fences if present
         if raw_text.startswith('```'):
             raw_text = re.sub(r'^```(?:json)?\s*', '', raw_text)
@@ -7136,19 +7120,16 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
     ai_response = None
     if api_key:
         try:
-            import anthropic
             # Explicit 75s timeout: bound the AI call so the request
             # falls through to the heuristic fallback instead of hanging,
             # which previously caused the empty "AI insights couldn't be
             # generated" card to surface after a long stall.
-            client = anthropic.Anthropic(api_key=api_key, timeout=75.0)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
-            message = client.messages.create(
-                model=model_id,
+            result = ai_gateway.complete(
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}]
+                timeout=75.0,
             )
-            raw = message.content[0].text.strip()
+            raw = result['content'].strip()
             # Strip any accidental markdown fences
             if raw.startswith('```'):
                 raw = re.sub(r'^```[a-z]*\n?', '', raw)
@@ -9033,19 +9014,16 @@ licensing/regulatory data above, QUOTE it directly — do not generalise:
             }), 503
 
         try:
-            import anthropic
             # Explicit 75s timeout: the frontend proxy has a 90s AbortSignal,
             # so failing here at 75s lets us return a clean JSON error before
             # the proxy times out and shows "operation was aborted".
-            client = anthropic.Anthropic(api_key=api_key, timeout=75.0)
-            model_id = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-5')
-            message = client.messages.create(
-                model=model_id,
-                max_tokens=2000,
-                system=sys_prompt,
+            result = ai_gateway.complete(
                 messages=[{"role": "user", "content": user_prompt}],
+                system=sys_prompt,
+                max_tokens=2000,
+                timeout=75.0,
             )
-            raw = message.content[0].text.strip()
+            raw = result['content'].strip()
             if raw.startswith('```'):
                 raw = re.sub(r'^```[a-z]*\n?', '', raw)
                 raw = re.sub(r'\n?```$', '', raw)
