@@ -71,10 +71,18 @@ class MetalyziAIGateway:
         enriched = self._inject_context(messages, context)
         call_id = self._log_call(enriched, model)
 
-        if self.provider == "openai":
-            response = self._call_openai(enriched, system, max_tokens, model,
-                                         temperature, timeout)
-        else:  # default + explicit 'anthropic'
+        try:
+            if self.provider == "openai":
+                response = self._call_openai(enriched, system, max_tokens, model,
+                                             temperature, timeout)
+            else:  # default + explicit 'anthropic'
+                response = self._call_anthropic(enriched, system, max_tokens, model,
+                                                temperature, timeout)
+        except NotImplementedError:
+            # Graceful sovereignty fallback: a configured-but-unavailable
+            # provider never takes the platform down — we fall back to
+            # Anthropic. The accumulated intelligence is untouched.
+            logger.warning("AI_PROVIDER=%s not implemented — falling back to anthropic", self.provider)
             response = self._call_anthropic(enriched, system, max_tokens, model,
                                             temperature, timeout)
 
