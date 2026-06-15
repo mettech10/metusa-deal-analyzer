@@ -7128,6 +7128,7 @@ JSON schema (use arrays — no HTML, no <br>, no bullet characters):
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=2000,
                 timeout=75.0,
+                context=property_data.get('_intelligenceContext') if isinstance(property_data, dict) else None,
             )
             raw = result['content'].strip()
             # Strip any accidental markdown fences
@@ -9022,6 +9023,7 @@ licensing/regulatory data above, QUOTE it directly — do not generalise:
                 system=sys_prompt,
                 max_tokens=2000,
                 timeout=75.0,
+                context=body.get('_intelligenceContext') if isinstance(body, dict) else None,
             )
             raw = result['content'].strip()
             if raw.startswith('```'):

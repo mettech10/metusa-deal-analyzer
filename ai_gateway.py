@@ -85,52 +85,52 @@ class MetalyziAIGateway:
     def _inject_context(self, messages, context):
         """Prepend Metalyzi proprietary context to the first user message.
 
-        `context` is a dict with optional keys: area_deals, user_profile,
-        platform_benchmarks, relevant_patterns. When None/empty the messages
-        are returned unchanged, so today's behaviour is identical until the
-        intelligence pipeline (Section 5) starts passing context.
+        `context` is the MetalyziContext dict produced by the TypeScript
+        context builder and sent over the wire, so the keys are camelCase
+        (areaDeals, userProfile, platformBenchmarks, relevantPatterns). When
+        None/empty the messages are returned unchanged.
         """
         if not context:
             return messages
 
         blocks = []
 
-        area = context.get("area_deals")
+        area = context.get("areaDeals")
         if area:
             blocks.append(
                 "METALYZI AREA INTELLIGENCE "
-                f"(from {area.get('deal_count', 0)} platform analyses):\n"
-                f"Median BTL yield in area: {area.get('median_btl_yield')}%\n"
-                f"Median HMO yield in area: {area.get('median_hmo_yield')}%\n"
-                f"Typical void rate observed: {area.get('observed_void_rate')}\n"
-                f"SA occupancy observed: {area.get('observed_sa_occupancy')}%\n"
+                f"(from {area.get('dealCount', 0)} platform analyses):\n"
+                f"Median BTL yield in area: {area.get('medianBtlYield')}%\n"
+                f"Median HMO yield in area: {area.get('medianHmoYield')}%\n"
+                f"Typical void rate observed: {area.get('observedVoidRate')}\n"
+                f"SA occupancy observed: {area.get('observedSaOccupancy')}%\n"
                 f"Most common strategy used by investors in area: "
-                f"{area.get('dominant_strategy')}"
+                f"{area.get('dominantStrategy')}"
             )
 
-        profile = context.get("user_profile")
+        profile = context.get("userProfile")
         if profile:
             blocks.append(
                 "INVESTOR PROFILE (learned from their history):\n"
-                f"Preferred strategies: {', '.join(profile.get('preferred_strategies', []))}\n"
-                f"Typical budget range: £{profile.get('typical_budget_min')}"
-                f"–£{profile.get('typical_budget_max')}\n"
-                f"Preferred areas: {', '.join(profile.get('preferred_areas', []))}\n"
-                f"Risk appetite: {profile.get('risk_appetite')}\n"
-                f"Previous analyses: {profile.get('total_analyses')} deals"
+                f"Preferred strategies: {', '.join(profile.get('preferredStrategies', []))}\n"
+                f"Typical budget range: £{profile.get('typicalBudgetMin')}"
+                f"–£{profile.get('typicalBudgetMax')}\n"
+                f"Preferred areas: {', '.join(profile.get('preferredAreas', []))}\n"
+                f"Risk appetite: {profile.get('riskAppetite')}\n"
+                f"Previous analyses: {profile.get('totalAnalyses')} deals"
             )
 
-        bench = context.get("platform_benchmarks")
+        bench = context.get("platformBenchmarks")
         if bench:
             blocks.append(
                 "METALYZI PLATFORM BENCHMARKS "
-                f"(from {bench.get('total_deals', 0)} UK deals analysed):\n"
-                f"National median BTL yield: {bench.get('national_btl_yield')}%\n"
-                f"National median HMO yield: {bench.get('national_hmo_yield')}%\n"
-                f"Deals with positive cashflow: {bench.get('positive_cashflow_pct')}%"
+                f"(from {bench.get('totalDeals', 0)} UK deals analysed):\n"
+                f"National median BTL yield: {bench.get('nationalBtlYield')}%\n"
+                f"National median HMO yield: {bench.get('nationalHmoYield')}%\n"
+                f"Deals with positive cashflow: {bench.get('positiveCashflowPct')}%"
             )
 
-        patterns = context.get("relevant_patterns") or []
+        patterns = context.get("relevantPatterns") or []
         if patterns:
             lines = "\n".join(
                 f"- {p.get('description')} (observed in {p.get('frequency')} deals)"
