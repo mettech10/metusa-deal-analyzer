@@ -72,3 +72,110 @@ services:
         value: "https://metusa-deal-analyzer.onrender.com"
       - key: BENCHMARK_CRON_SECRET
         sync: false
+
+  # ── Self-learning agents ────────────────────────────────────────────────
+  # Each cron POSTs to the Next.js route /api/agents/<slug> on the frontend
+  # with `Authorization: Bearer ${CRON_SECRET}`. The agent runs inside that
+  # request (Vercel can't do post-response work) and updates the intelligence
+  # database. CRON_SECRET must match the value set in the Vercel project.
+  # Schedules mirror each agent's constructor.
+
+  - type: cron
+    name: agent-market-price       # MarketPriceAgent
+    runtime: python
+    plan: free
+    schedule: "0 3 1 * *"          # 03:00 UTC, 1st of each month
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['FRONTEND_URL'].rstrip('/') + '/api/agents/market-price'
+      r = requests.post(url, headers={'Authorization': 'Bearer ' + os.environ['CRON_SECRET']}, timeout=600)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: FRONTEND_URL
+        value: "https://metalyzi.co.uk"
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: agent-planning-monitor   # PlanningMonitorAgent
+    runtime: python
+    plan: free
+    schedule: "0 6 * * 1"          # 06:00 UTC every Monday
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['FRONTEND_URL'].rstrip('/') + '/api/agents/planning-monitor'
+      r = requests.post(url, headers={'Authorization': 'Bearer ' + os.environ['CRON_SECRET']}, timeout=600)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: FRONTEND_URL
+        value: "https://metalyzi.co.uk"
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: agent-rental-trend       # RentalTrendAgent
+    runtime: python
+    plan: free
+    schedule: "0 4 1 * *"          # 04:00 UTC, 1st of each month
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['FRONTEND_URL'].rstrip('/') + '/api/agents/rental-trend'
+      r = requests.post(url, headers={'Authorization': 'Bearer ' + os.environ['CRON_SECRET']}, timeout=600)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: FRONTEND_URL
+        value: "https://metalyzi.co.uk"
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: agent-macro-signal       # MacroSignalAgent
+    runtime: python
+    plan: free
+    schedule: "0 8 * * *"          # 08:00 UTC daily
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['FRONTEND_URL'].rstrip('/') + '/api/agents/macro-signal'
+      r = requests.post(url, headers={'Authorization': 'Bearer ' + os.environ['CRON_SECRET']}, timeout=600)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: FRONTEND_URL
+        value: "https://metalyzi.co.uk"
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: agent-self-reflection    # SelfReflectionAgent
+    runtime: python
+    plan: free
+    schedule: "0 2 * * 0"          # 02:00 UTC every Sunday
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['FRONTEND_URL'].rstrip('/') + '/api/agents/self-reflection'
+      r = requests.post(url, headers={'Authorization': 'Bearer ' + os.environ['CRON_SECRET']}, timeout=600)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: FRONTEND_URL
+        value: "https://metalyzi.co.uk"
+      - key: CRON_SECRET
+        sync: false
