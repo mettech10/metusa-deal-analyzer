@@ -307,11 +307,12 @@ See [docs/licensing.md](docs/licensing.md) for the request/response contract, co
   "postcode": "M14 6LT",
   "occupants": 5,
   "households": 2,
-  "intended_use": "hmo"
+  "intended_use": "hmo",
+  "conversion_from_c3": true
 }
 ```
 
-**Response:** `flags[]` with `severity`, `confidence`, `sources`, `analyse_hooks`, plus first-class `freshness`. UPRN and CON29 are out of scope.
+**Response:** `flags[]` with `severity` (`deal_killer` | `compliance_cost` | `soft_warning` | `info`), structured `deal_impact` / `analyse_hooks`, `disclaimer`, plus first-class `freshness`. Gated by `LICENSING_CHECKER_V1`. UPRN and CON29 are out of scope.
 
 ---
 

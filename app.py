@@ -5612,9 +5612,23 @@ def health_check():
 @app.route('/v1/licensing/check', methods=['POST'])
 @limiter.limit("30 per minute")
 def v1_licensing_check():
-    """Metalyzi Licensing Checker P0–P2: postcode → England HMO / Article 4 / schemes."""
+    """Metalyzi Licensing Checker P0–P2: postcode → England HMO / Article 4 / schemes.
+
+    Must not use HMO_LICENSING_LOOKUP / get_hmo_licensing_info (those include
+    Wales/Scotland rows and are legacy area-analysis context only).
+    """
     from licensing.api import handle_check
-    return handle_check(district_fallback=check_article_4)
+
+    def _article4_district_only(postcode: str) -> dict:
+        info = check_article_4(postcode) or {}
+        return {
+            "is_article_4": bool(info.get("is_article_4")),
+            "known": bool(info.get("known")),
+            "council": info.get("council"),
+            "note": info.get("note") or info.get("advice"),
+        }
+
+    return handle_check(district_fallback=_article4_district_only)
 
 
 @app.route('/v1/licensing/schemes', methods=['GET'])
@@ -8515,7 +8529,12 @@ def _classify_region(postcode: str) -> str:
 
 
 def get_hmo_licensing_info(council: str) -> dict | None:
-    """Return HMO licensing tier info for the council, or None if not in lookup."""
+    """Legacy area-analysis helper. Includes Wales/Scotland rows.
+
+    Do not call from /v1/licensing/check. The v1 checker uses
+    licensing/data/priority_schemes.json (England-only) and must not be
+    overridden by this lookup.
+    """
     key = _normalise_council(council)
     if not key:
         return None

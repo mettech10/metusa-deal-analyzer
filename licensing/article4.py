@@ -257,8 +257,17 @@ def article4_flags(
     result: Article4Result,
     *,
     district_fallback: Optional[dict[str, Any]] = None,
+    conversion_from_c3: Optional[bool] = None,
+    intended_use: str = "unknown",
 ) -> list[Flag]:
-    """Build Article 4 flags from Planning Data plus optional district index."""
+    """Build Article 4 flags from Planning Data plus optional district index.
+
+    conversion_from_c3=True is an explicit C3→C4 conversion play (deal_killer on hit).
+    conversion_from_c3=False means continued use — the direction exists but is not
+    a conversion blocker. None + intended_use=hmo is treated as conversion-relevant.
+    """
+    from licensing.models import hook
+
     flags: list[Flag] = []
     src = planning_data_source()
     fetched = result.fetched_at
@@ -268,34 +277,72 @@ def article4_flags(
         basis="live_lookup" if result.ok else "lookup_failed",
         notes=result.note,
     )
+    conversion_play = _is_conversion_play(conversion_from_c3, intended_use)
 
     if result.hmo_hits:
         primary = result.hmo_hits[0]
         names = "; ".join(
             (h.name or h.reference or f"entity {h.entity}") for h in result.hmo_hits[:4]
         )
+        if conversion_from_c3 is False:
+            severity = "info"
+            applies = "yes"
+            title = "Article 4 (HMO / C3→C4) present — not a conversion play"
+            summary = (
+                f"Planning Data covers this point with {len(result.hmo_hits)} HMO-related "
+                f"Article 4 area(s): {names}. conversion_from_c3 is false, so this is "
+                "not treated as a C3→C4 planning blocker for continued use."
+            )
+            hooks = [
+                hook("planning.article4_hmo", "planning", "info"),
+                hook("planning.c3_to_c4", "planning", "info"),
+                hook("verify.lpa", "verify", "info"),
+            ]
+        elif conversion_play:
+            severity = "deal_killer"
+            applies = "yes"
+            title = "Article 4 (HMO / C3→C4) blocks permitted development"
+            summary = (
+                f"Planning Data geometry covers this coordinate with "
+                f"{len(result.hmo_hits)} HMO-related Article 4 area(s): {names}. "
+                "C3→C4 permitted development is removed — full planning permission "
+                "is required for a conversion play."
+            )
+            hooks = [
+                hook("planning.article4_hmo", "planning", "deal_killer"),
+                hook("planning.c3_to_c4", "planning", "deal_killer"),
+                hook("blocker.planning_permission", "blocker", "deal_killer"),
+                hook("verify.lpa", "verify", "info"),
+            ]
+        else:
+            severity = "compliance_cost"
+            applies = "yes"
+            title = "Article 4 (HMO / C3→C4) indicated at this point"
+            summary = (
+                f"Planning Data geometry covers this coordinate with "
+                f"{len(result.hmo_hits)} HMO-related Article 4 area(s): {names}. "
+                "If this is a C3→C4 conversion, planning permission is required. "
+                "Pass conversion_from_c3 to classify the play."
+            )
+            hooks = [
+                hook("planning.article4_hmo", "planning", "compliance_cost"),
+                hook("planning.c3_to_c4", "planning", "compliance_cost"),
+                hook("blocker.planning_permission", "blocker", "deal_killer"),
+                hook("verify.lpa", "verify", "info"),
+            ]
         flags.append(
             Flag(
                 id="article4_hmo",
                 category="planning",
-                title="Article 4 (HMO / C3→C4) indicated at this point",
-                summary=(
-                    f"Planning Data geometry covers this coordinate with "
-                    f"{len(result.hmo_hits)} HMO-related Article 4 area(s): {names}. "
-                    "C3→C4 permitted development is likely removed — full planning "
-                    "permission is the safe assumption."
-                ),
+                title=title,
+                summary=summary,
                 detail=primary.relevance_reason,
-                severity="high",
-                applies="yes",
+                severity=severity,
+                deal_impact=severity,
+                applies=applies,
                 confidence=result.confidence,
                 sources=[src],
-                analyse_hooks=[
-                    "planning.article4_hmo",
-                    "planning.c3_to_c4",
-                    "blocker.planning_permission",
-                    "verify.lpa",
-                ],
+                analyse_hooks=hooks,
                 last_verified_at=fetched,
                 freshness=freshness,
                 spatial_resolution="point_in_polygon",
@@ -312,11 +359,14 @@ def article4_flags(
                     "coordinate but none were classified as Class L / HMO / C3–C4. "
                     "They may still affect other PD rights. Verify with the LPA."
                 ),
-                severity="low",
+                severity="soft_warning",
                 applies="possible",
                 confidence=result.confidence,
                 sources=[src],
-                analyse_hooks=["planning.article4_other", "verify.lpa"],
+                analyse_hooks=[
+                    hook("planning.article4_other", "planning", "soft_warning"),
+                    hook("verify.lpa", "verify", "info"),
+                ],
                 last_verified_at=fetched,
                 freshness=freshness,
                 spatial_resolution="point_in_polygon",
@@ -333,11 +383,14 @@ def article4_flags(
                     "this point. That is not evidence the LPA has no HMO Article 4 — "
                     "dataset coverage is incomplete. Verify with the local planning authority."
                 ),
-                severity="medium",
+                severity="soft_warning" if not conversion_play else "compliance_cost",
                 applies="possible",
                 confidence=result.confidence,
                 sources=[src],
-                analyse_hooks=["planning.article4_hmo", "verify.lpa"],
+                analyse_hooks=[
+                    hook("planning.article4_hmo", "planning", "soft_warning"),
+                    hook("verify.lpa", "verify", "info"),
+                ],
                 last_verified_at=fetched,
                 freshness=freshness,
                 spatial_resolution="point_in_polygon",
@@ -353,11 +406,14 @@ def article4_flags(
                     "Could not query planning.data.gov.uk. Article 4 status is unknown. "
                     f"{result.error or ''}"
                 ).strip(),
-                severity="medium",
+                severity="compliance_cost",
                 applies="possible",
                 confidence=0.0,
                 sources=[src],
-                analyse_hooks=["planning.article4_hmo", "verify.lpa"],
+                analyse_hooks=[
+                    hook("planning.article4_hmo", "planning", "soft_warning"),
+                    hook("verify.lpa", "verify", "info"),
+                ],
                 last_verified_at=fetched,
                 freshness=freshness,
                 spatial_resolution="unknown",
@@ -365,22 +421,46 @@ def article4_flags(
         )
 
     if district_fallback:
-        flags.extend(_district_fallback_flags(district_fallback, result))
+        flags.extend(
+            _district_fallback_flags(
+                district_fallback,
+                result,
+                conversion_from_c3=conversion_from_c3,
+                conversion_play=conversion_play,
+            )
+        )
 
     return flags
+
+
+def _is_conversion_play(conversion_from_c3: Optional[bool], intended_use: str) -> bool:
+    if conversion_from_c3 is True:
+        return True
+    if conversion_from_c3 is False:
+        return False
+    return (intended_use or "").lower() == "hmo"
 
 
 def _district_fallback_flags(
     fallback: dict[str, Any],
     planning_result: Article4Result,
+    *,
+    conversion_from_c3: Optional[bool] = None,
+    conversion_play: bool = False,
 ) -> list[Flag]:
-    """Optional postcode-district index — not a legal boundary."""
+    """Optional postcode-district index — not a legal boundary.
+
+    Article 4 district index only. Must never be fed HMO_LICENSING_LOOKUP / Wales rows.
+    """
+    from licensing.models import hook
+
     if not fallback.get("known"):
+        return []
+    if fallback.get("tier") or fallback.get("rent_smart_wales") or fallback.get("scope"):
         return []
     active = bool(fallback.get("is_article_4") or fallback.get("isArticle4"))
     council = fallback.get("council") or "Local planning authority"
     note = fallback.get("note") or fallback.get("advice") or ""
-    # If Planning Data already gave an HMO hit, the district index is corroboration only.
     if planning_result.hmo_hits and active:
         applies: str = "yes"
         severity = "info"
@@ -394,7 +474,7 @@ def _district_fallback_flags(
         return []
     elif active:
         applies = "possible"
-        severity = "high"
+        severity = "deal_killer" if conversion_play else "compliance_cost"
         confidence = 0.55
         title = "District index indicates HMO Article 4 (not address-level)"
         summary = (
@@ -405,6 +485,7 @@ def _district_fallback_flags(
     else:
         return []
 
+    impact = "deal_killer" if conversion_play and active and not planning_result.hmo_hits else severity
     return [
         Flag(
             id="article4_hmo_district_index",
@@ -412,6 +493,7 @@ def _district_fallback_flags(
             title=title,
             summary=summary,
             severity=severity,
+            deal_impact=impact,
             applies=applies,  # type: ignore[arg-type]
             confidence=confidence,
             sources=[
@@ -421,7 +503,11 @@ def _district_fallback_flags(
                     note="District-level only. Not a legal boundary. Do not invent polygons from this.",
                 )
             ],
-            analyse_hooks=["planning.article4_hmo", "verify.lpa", "verify.scheme_boundary"],
+            analyse_hooks=[
+                hook("planning.article4_hmo", "planning", impact),  # type: ignore[arg-type]
+                hook("verify.lpa", "verify", "info"),
+                hook("verify.scheme_boundary", "verify", "soft_warning"),
+            ],
             last_verified_at=None,
             freshness=component_freshness(
                 None,

@@ -3,6 +3,9 @@
 Seeds are curator-edited JSON. Boundaries are never invented: coverage is
 `citywide`, `designated_areas` (named areas only), or `unknown`. Address-level
 membership is not resolved without an official geometry (out of scope here).
+
+England-only: ONS codes must start with E. Wales/Scotland/NI rows are discarded
+and must never override /v1/licensing/check.
 """
 
 from __future__ import annotations
@@ -15,15 +18,22 @@ from pathlib import Path
 from typing import Any, Optional
 
 from licensing.models import (
-    HMO_LICENCE_STALE_AFTER_DAYS,
+    SCHEME_STALE_AFTER_DAYS_COVERED,
+    SCHEME_STALE_AFTER_DAYS_PRIORITY,
     Flag,
     Source,
     component_freshness,
     confidence_band,
+    disclaimer_payload,
+    fee_from_range,
+    hook,
     parse_iso,
 )
 
 DATA_PATH = Path(__file__).parent / "data" / "priority_schemes.json"
+
+# Isolation: this module is the only scheme source for /v1/licensing/check.
+# Do not import app.HMO_LICENSING_LOOKUP, STR_LICENSING_RULES, or Wales rows.
 
 
 def _norm(name: str) -> str:
@@ -31,6 +41,16 @@ def _norm(name: str) -> str:
     text = re.sub(r"\b(city|metropolitan|borough|council|london borough of|royal borough of)\b", " ", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
+
+
+def _is_england_la_code(code: str) -> bool:
+    return (code or "").strip().upper().startswith("E")
+
+
+def stale_after_days_for_tier(tier: str) -> int:
+    if (tier or "priority").lower() == "priority":
+        return SCHEME_STALE_AFTER_DAYS_PRIORITY
+    return SCHEME_STALE_AFTER_DAYS_COVERED
 
 
 @dataclass
@@ -54,12 +74,13 @@ class SchemeCoverage:
 class LicenceScheme:
     la_code: str
     la_name: str
-    scheme_type: str  # additional | selective
+    scheme_type: str  # additional | selective | unknown
     coverage: SchemeCoverage
     confidence: float
     last_verified_at: Optional[str]
     sources: list[Source]
-    status: str = "active"  # active | expired | proposed | unknown
+    status: str = "active"
+    coverage_tier: str = "priority"  # priority (30d) | covered (90d)
     term_years: Optional[int] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -68,19 +89,23 @@ class LicenceScheme:
     curator_notes: Optional[str] = None
     verification_method: Optional[str] = None
 
+    def stale_after_days(self) -> int:
+        return stale_after_days_for_tier(self.coverage_tier)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "la_code": self.la_code,
             "la_name": self.la_name,
             "scheme_type": self.scheme_type,
             "status": self.status,
+            "coverage_tier": self.coverage_tier,
             "coverage": self.coverage.to_dict(),
             "confidence": round(self.confidence, 3),
             "confidence_band": confidence_band(self.confidence),
             "last_verified_at": self.last_verified_at,
             "freshness": component_freshness(
                 self.last_verified_at,
-                stale_after_days=HMO_LICENCE_STALE_AFTER_DAYS,
+                stale_after_days=self.stale_after_days(),
                 basis="curated_seed",
                 notes=self.verification_method,
             ).to_dict(),
@@ -95,7 +120,10 @@ class LicenceScheme:
         }
 
 
-def _parse_scheme(raw: dict[str, Any]) -> LicenceScheme:
+def _parse_scheme(raw: dict[str, Any]) -> Optional[LicenceScheme]:
+    la_code = (raw.get("la_code") or "").strip()
+    if not _is_england_la_code(la_code):
+        return None
     cov = raw.get("coverage") or {}
     sources = [
         Source(
@@ -107,10 +135,11 @@ def _parse_scheme(raw: dict[str, Any]) -> LicenceScheme:
         for s in (raw.get("sources") or [])
     ]
     return LicenceScheme(
-        la_code=raw["la_code"],
+        la_code=la_code,
         la_name=raw["la_name"],
-        scheme_type=raw["scheme_type"],
+        scheme_type=raw.get("scheme_type") or "unknown",
         status=raw.get("status") or "active",
+        coverage_tier=raw.get("coverage_tier") or "priority",
         coverage=SchemeCoverage(
             kind=cov.get("kind") or "unknown",
             spatial_resolution=cov.get("spatial_resolution") or "none",
@@ -134,15 +163,27 @@ def _parse_scheme(raw: dict[str, Any]) -> LicenceScheme:
 def load_priority_schemes(path: Optional[str] = None) -> list[LicenceScheme]:
     target = Path(path) if path else DATA_PATH
     payload = json.loads(target.read_text(encoding="utf-8"))
-    return [_parse_scheme(row) for row in payload.get("schemes") or []]
+    schemes = []
+    for row in payload.get("schemes") or []:
+        parsed = _parse_scheme(row)
+        if parsed is not None:
+            schemes.append(parsed)
+    return schemes
 
 
 def schemes_meta(path: Optional[str] = None) -> dict[str, Any]:
     target = Path(path) if path else DATA_PATH
     payload = json.loads(target.read_text(encoding="utf-8"))
     meta = dict(payload.get("meta") or {})
-    meta["scheme_count"] = len(payload.get("schemes") or [])
-    meta["la_count"] = len({s.get("la_code") for s in payload.get("schemes") or []})
+    schemes = payload.get("schemes") or []
+    england = [s for s in schemes if _is_england_la_code(s.get("la_code") or "")]
+    priority_las = meta.get("priority_las") or []
+    meta["scheme_count"] = len(england)
+    meta["la_count"] = len(priority_las) if priority_las else len({s.get("la_code") for s in england})
+    meta["stale_slo_days"] = {
+        "priority": SCHEME_STALE_AFTER_DAYS_PRIORITY,
+        "covered": SCHEME_STALE_AFTER_DAYS_COVERED,
+    }
     return meta
 
 
@@ -152,9 +193,11 @@ def match_schemes(
     la_name: str,
     path: Optional[str] = None,
 ) -> list[LicenceScheme]:
-    """Match by ONS LA code first, then normalised name. No spatial join."""
-    schemes = load_priority_schemes(path)
+    """Match by ONS LA code first, then normalised name. England codes only."""
     code = (la_code or "").strip().upper()
+    if not _is_england_la_code(code):
+        return []
+    schemes = [s for s in load_priority_schemes(path) if _is_england_la_code(s.la_code)]
     by_code = [s for s in schemes if s.la_code.upper() == code]
     if by_code:
         return by_code
@@ -166,7 +209,6 @@ def match_schemes(
         key = _norm(scheme.la_name)
         if needle == key or needle in key or key in needle:
             hits.append(scheme)
-    # Deduplicate by (la_code, scheme_type) if name matching is loose
     seen: set[tuple[str, str]] = set()
     unique: list[LicenceScheme] = []
     for s in hits:
@@ -196,11 +238,11 @@ def scheme_flags(
                 category="licensing",
                 title="No curated additional/selective scheme for this LA",
                 summary=(
-                    "This local authority is not in the priority seed (~25 LAs). "
-                    "That is not evidence there is no additional or selective licensing. "
-                    "Check the council's private-rented licensing pages."
+                    "This local authority is not in the priority seed, or only has an "
+                    "uncurated placeholder. That is not evidence there is no additional "
+                    "or selective licensing. Check the council's private-rented licensing pages."
                 ),
-                severity="medium",
+                severity="compliance_cost",
                 applies="possible",
                 confidence=0.35,
                 sources=[
@@ -210,13 +252,17 @@ def scheme_flags(
                         note="Seed is intentionally incomplete. Do not treat a miss as 'no scheme'.",
                     )
                 ],
-                analyse_hooks=["licence.additional_hmo", "licence.selective", "verify.lpa"],
+                analyse_hooks=[
+                    hook("licence.additional_hmo", "licence", "compliance_cost"),
+                    hook("licence.selective", "licence", "compliance_cost"),
+                    hook("verify.lpa", "verify", "info"),
+                ],
                 last_verified_at=None,
                 freshness=component_freshness(
                     None,
-                    stale_after_days=HMO_LICENCE_STALE_AFTER_DAYS,
+                    stale_after_days=SCHEME_STALE_AFTER_DAYS_COVERED,
                     basis="seed_miss",
-                    notes="LA not present in priority_schemes.json.",
+                    notes="LA not present in priority_schemes.json (90d covered SLO).",
                 ),
                 spatial_resolution="none",
             )
@@ -235,6 +281,7 @@ def _flag_for_scheme(
     rentalish: bool,
     admin_ward: Optional[str],
 ) -> Flag:
+    slo = scheme.stale_after_days()
     citywide = scheme.coverage.kind == "citywide"
     designated = scheme.coverage.kind == "designated_areas"
 
@@ -245,7 +292,6 @@ def _flag_for_scheme(
     elif designated:
         applies = "possible"
         spatial = "named_areas_only"
-        # Named ward match is a hint only — wards are not boundaries we own.
         if admin_ward and any(
             _norm(admin_ward) == _norm(n) or _norm(admin_ward) in _norm(n)
             for n in scheme.coverage.named_areas
@@ -258,28 +304,62 @@ def _flag_for_scheme(
         spatial = "none"
         confidence = min(scheme.confidence, 0.40)
 
+    fee = fee_from_range(
+        kind="hmo_licence" if scheme.scheme_type != "selective" else "selective_licence",
+        range_text=scheme.fee_range,
+        term_years=scheme.term_years,
+        include_in_cashflow=True,
+        confidence=0.4 if scheme.fee_range else 0.0,
+    )
+
+    if scheme.scheme_type == "unknown":
+        return Flag(
+            id="priority_la_uncurated",
+            category="licensing",
+            title=f"Priority LA — scheme not yet curated ({scheme.la_name})",
+            summary=(
+                f"{scheme.la_name} is on the priority list but additional/selective "
+                "designations have not been curated. Do not invent coverage. Verify with the LPA."
+            ),
+            detail=scheme.curator_notes,
+            severity="soft_warning",
+            applies="possible",
+            confidence=min(confidence, 0.35),
+            sources=list(scheme.sources),
+            analyse_hooks=[
+                hook("licence.additional_hmo", "licence", "soft_warning"),
+                hook("licence.selective", "licence", "soft_warning"),
+                hook("verify.lpa", "verify", "info"),
+            ],
+            last_verified_at=scheme.last_verified_at,
+            freshness=component_freshness(
+                scheme.last_verified_at,
+                stale_after_days=slo,
+                basis="curated_seed",
+                notes=scheme.verification_method,
+            ),
+            spatial_resolution="none",
+        )
+
     if scheme.scheme_type == "additional":
         flag_id = "additional_hmo_licence"
-        hooks = ["licence.additional_hmo", "cost.hmo_licence_fee", "verify.lpa"]
         title = f"Additional HMO licensing — {scheme.la_name}"
         if occupants is not None and occupants >= 5:
             summary_extra = (
                 " Occupancy is already at/above the mandatory threshold; additional "
                 "licensing is secondary to the mandatory HMO licence."
             )
-            severity = "low"
+            severity = "soft_warning"
         elif occupants is not None and occupants < 3:
             summary_extra = (
                 " Occupancy is below typical additional-HMO size (3–4). Confirm whether "
                 "the property is still an HMO on household grounds."
             )
-            severity = "low"
+            severity = "soft_warning"
             applies = "possible"
         else:
             summary_extra = ""
-            severity = "high" if citywide else "medium"
-        if designated:
-            hooks.append("verify.scheme_boundary")
+            severity = "compliance_cost"
         area_bit = (
             "citywide / borough-wide designation"
             if citywide
@@ -293,13 +373,23 @@ def _flag_for_scheme(
             f"Curated additional HMO licensing scheme for {scheme.la_name} "
             f"({area_bit}).{summary_extra}"
         )
+        hooks = [
+            hook("licence.additional_hmo", "licence", severity, fee=fee),
+            hook(
+                "cost.hmo_licence_fee",
+                "cost",
+                "compliance_cost",
+                summary=f"Seed fee range: {scheme.fee_range}" if scheme.fee_range else "Fee not in seed.",
+                fee=fee,
+            ),
+            hook("verify.lpa", "verify", "info"),
+        ]
+        if designated:
+            hooks.append(hook("verify.scheme_boundary", "verify", "soft_warning"))
     else:
         flag_id = "selective_licence"
-        hooks = ["licence.selective", "cost.selective_licence_fee", "verify.lpa"]
         title = f"Selective licensing — {scheme.la_name}"
-        severity = "high" if citywide else "medium"
-        if designated:
-            hooks.append("verify.scheme_boundary")
+        severity = "compliance_cost"
         area_bit = (
             "covers all private rented properties in the LA (citywide / borough-wide)"
             if citywide
@@ -313,22 +403,36 @@ def _flag_for_scheme(
             f"Curated selective licensing scheme for {scheme.la_name}: {area_bit}. "
             "Selective licensing applies to privately rented homes, not only HMOs."
         )
+        hooks = [
+            hook("licence.selective", "licence", "compliance_cost", fee=fee),
+            hook(
+                "cost.selective_licence_fee",
+                "cost",
+                "compliance_cost",
+                summary=f"Seed fee range: {scheme.fee_range}" if scheme.fee_range else "Fee not in seed.",
+                fee=fee,
+            ),
+            hook("verify.lpa", "verify", "info"),
+        ]
+        if designated:
+            hooks.append(hook("verify.scheme_boundary", "verify", "soft_warning"))
 
     if scheme.end_date:
         end = parse_iso(scheme.end_date)
         summary += f" Published designation end date (if still current): {scheme.end_date}."
-        _ = end  # parsed for future expiry logic; curator must confirm
+        _ = end
 
     if scheme.fee_range:
         summary += f" Seed fee range (unverified): {scheme.fee_range}."
 
     return Flag(
-        id=flag_id if not _duplicate_id_needed(scheme) else f"{flag_id}_{scheme.la_code.lower()}",
+        id=flag_id,
         category="licensing",
         title=title,
         summary=summary.strip(),
         detail=scheme.curator_notes,
         severity=severity,  # type: ignore[arg-type]
+        deal_impact=severity,  # type: ignore[arg-type]
         applies=applies,  # type: ignore[arg-type]
         confidence=confidence,
         sources=list(scheme.sources)
@@ -344,18 +448,12 @@ def _flag_for_scheme(
         last_verified_at=scheme.last_verified_at,
         freshness=component_freshness(
             scheme.last_verified_at,
-            stale_after_days=HMO_LICENCE_STALE_AFTER_DAYS,
+            stale_after_days=slo,
             basis="curated_seed",
-            notes=scheme.verification_method,
+            notes=f"{scheme.verification_method or 'curated_seed'}; SLO {slo}d ({scheme.coverage_tier})",
         ),
         spatial_resolution=spatial,
     )
-
-
-def _duplicate_id_needed(scheme: LicenceScheme) -> bool:
-    # Keep stable ids per type so analyse_hooks stay aggregatable. Engine
-    # may emit both additional and selective for the same LA.
-    return False
 
 
 def seed_inventory() -> dict[str, Any]:
@@ -364,7 +462,9 @@ def seed_inventory() -> dict[str, Any]:
     for s in schemes:
         by_la.setdefault(s.la_code, []).append(s.scheme_type)
     return {
+        "ok": True,
         "meta": schemes_meta(),
+        "disclaimer": disclaimer_payload(),
         "local_authorities": [
             {"la_code": code, "scheme_types": types} for code, types in sorted(by_la.items())
         ],

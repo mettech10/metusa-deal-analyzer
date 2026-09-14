@@ -5,14 +5,33 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from licensing.engine import run_licensing_check
+from licensing.feature import licensing_checker_v1_enabled
 from licensing.geo import GeoError
+from licensing.models import FEATURE_FLAG, disclaimer_payload
 from licensing.schemes import seed_inventory
 
 
+def _disabled_response():
+    return jsonify({
+        "ok": False,
+        "feature_flag": FEATURE_FLAG,
+        "disclaimer": disclaimer_payload(),
+        "error": {
+            "code": "feature_disabled",
+            "message": "licensing_checker_v1 is disabled (LICENSING_CHECKER_V1).",
+        },
+    }), 404
+
+
 def handle_check(district_fallback=None):
+    if not licensing_checker_v1_enabled():
+        return _disabled_response()
+
     if not request.is_json:
         return jsonify({
             "ok": False,
+            "feature_flag": FEATURE_FLAG,
+            "disclaimer": disclaimer_payload(),
             "error": {"code": "invalid_content_type", "message": "Content-Type must be application/json"},
         }), 400
 
@@ -20,12 +39,16 @@ def handle_check(district_fallback=None):
     if not isinstance(payload, dict):
         return jsonify({
             "ok": False,
+            "feature_flag": FEATURE_FLAG,
+            "disclaimer": disclaimer_payload(),
             "error": {"code": "invalid_json", "message": "Request body must be a JSON object"},
         }), 400
 
     if len(str(payload)) > 10000:
         return jsonify({
             "ok": False,
+            "feature_flag": FEATURE_FLAG,
+            "disclaimer": disclaimer_payload(),
             "error": {"code": "payload_too_large", "message": "Request too large"},
         }), 413
 
@@ -34,11 +57,15 @@ def handle_check(district_fallback=None):
     except GeoError as exc:
         return jsonify({
             "ok": False,
+            "feature_flag": FEATURE_FLAG,
+            "disclaimer": disclaimer_payload(),
             "error": {"code": exc.code, "message": str(exc)},
         }), exc.http_status
     except Exception:
         return jsonify({
             "ok": False,
+            "feature_flag": FEATURE_FLAG,
+            "disclaimer": disclaimer_payload(),
             "error": {
                 "code": "internal_error",
                 "message": "Licensing check failed. Please retry.",
@@ -50,4 +77,10 @@ def handle_check(district_fallback=None):
 
 def handle_seed_inventory():
     """Curator helper — list seeded LAs. Not a substitute for /check."""
-    return jsonify({"ok": True, **seed_inventory()}), 200
+    if not licensing_checker_v1_enabled():
+        return _disabled_response()
+    payload = seed_inventory()
+    payload["feature_flag"] = FEATURE_FLAG
+    if "disclaimer" not in payload:
+        payload["disclaimer"] = disclaimer_payload()
+    return jsonify(payload), 200

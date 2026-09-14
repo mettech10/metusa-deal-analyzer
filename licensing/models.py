@@ -12,7 +12,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-Severity = Literal["high", "medium", "low", "info"]
+# deal_killer > compliance_cost > soft_warning > info
+Severity = Literal["deal_killer", "compliance_cost", "soft_warning", "info"]
 Applies = Literal["yes", "no", "possible", "conditional"]
 ConfidenceBand = Literal["high", "medium", "low", "unknown"]
 SourceKind = Literal[
@@ -23,12 +24,43 @@ SourceKind = Literal[
     "district_index",
     "geo",
 ]
+HookKind = Literal[
+    "licence",
+    "planning",
+    "cost",
+    "blocker",
+    "verify",
+    "analyse",
+    "scope",
+    "ruleset",
+]
 
 STATUTE_VERIFIED_AT = "2018-10-01T00:00:00+00:00"  # 2018 HMO prescribed-description order
 
-HMO_LICENCE_STALE_AFTER_DAYS = 365
-ARTICLE4_STALE_AFTER_DAYS = 180
+# Scheme stale SLOs (not 365d): priority LAs re-verify monthly; other covered rows quarterly.
+SCHEME_STALE_AFTER_DAYS_PRIORITY = 30
+SCHEME_STALE_AFTER_DAYS_COVERED = 90
+ARTICLE4_STALE_AFTER_DAYS = 90
 GEO_STALE_AFTER_DAYS = 30
+
+DISCLAIMER_VERSION = "licensing-checker-disclaimer-v1"
+DISCLAIMER_TEXT = (
+    "Indicative England-only licensing and planning flags for research. "
+    "Not legal advice, not a CON29, and not a substitute for the local authority. "
+    "Confirm designations, maps, and fees with the LPA before acting. "
+    "Absence of a hit is not evidence of no restriction unless a national "
+    "statutory rule says so. UPRN is not resolved. Do not apply this output "
+    "in Wales, Scotland, or Northern Ireland."
+)
+
+SEVERITY_RANK = {
+    "deal_killer": 3,
+    "compliance_cost": 2,
+    "soft_warning": 1,
+    "info": 0,
+}
+
+FEATURE_FLAG = "licensing_checker_v1"
 
 
 def utcnow() -> datetime:
@@ -84,6 +116,16 @@ def is_stale(
     return (now - dt).days > stale_after_days
 
 
+def disclaimer_payload() -> dict[str, str]:
+    return {"version": DISCLAIMER_VERSION, "text": DISCLAIMER_TEXT}
+
+
+def worst_severity(levels: list[str]) -> Severity:
+    if not levels:
+        return "info"
+    return max(levels, key=lambda s: SEVERITY_RANK.get(s, 0))  # type: ignore[return-value]
+
+
 @dataclass
 class Source:
     name: str
@@ -94,6 +136,54 @@ class Source:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         return {k: v for k, v in data.items() if v is not None}
+
+
+@dataclass
+class FeeHook:
+    kind: str  # hmo_licence | selective_licence
+    include_in_cashflow: bool
+    range_text: Optional[str] = None
+    min_gbp: Optional[int] = None
+    max_gbp: Optional[int] = None
+    term_years: Optional[int] = None
+    currency: str = "GBP"
+    known: bool = False
+    confidence: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        return {k: v for k, v in data.items() if v is not None}
+
+
+@dataclass
+class AnalyseHook:
+    id: str
+    kind: HookKind
+    deal_impact: Severity
+    summary: Optional[str] = None
+    fee: Optional[FeeHook] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "kind": self.kind,
+            "deal_impact": self.deal_impact,
+        }
+        if self.summary:
+            payload["summary"] = self.summary
+        if self.fee:
+            payload["fee"] = self.fee.to_dict()
+        return payload
+
+
+def hook(
+    hook_id: str,
+    kind: HookKind,
+    deal_impact: Severity,
+    summary: Optional[str] = None,
+    fee: Optional[FeeHook] = None,
+) -> AnalyseHook:
+    return AnalyseHook(id=hook_id, kind=kind, deal_impact=deal_impact, summary=summary, fee=fee)
 
 
 @dataclass
@@ -119,13 +209,15 @@ class Flag:
     applies: Applies
     confidence: float
     sources: list[Source] = field(default_factory=list)
-    analyse_hooks: list[str] = field(default_factory=list)
+    analyse_hooks: list[AnalyseHook] = field(default_factory=list)
     last_verified_at: Optional[str] = None
     freshness: Optional[Freshness] = None
     detail: Optional[str] = None
     spatial_resolution: Optional[str] = None
+    deal_impact: Optional[Severity] = None
 
     def to_dict(self) -> dict[str, Any]:
+        impact = self.deal_impact or self.severity
         return {
             "id": self.id,
             "category": self.category,
@@ -133,11 +225,12 @@ class Flag:
             "summary": self.summary,
             "detail": self.detail,
             "severity": self.severity,
+            "deal_impact": impact,
             "applies": self.applies,
             "confidence": round(self.confidence, 3),
             "confidence_band": confidence_band(self.confidence),
             "sources": [s.to_dict() for s in self.sources],
-            "analyse_hooks": list(self.analyse_hooks),
+            "analyse_hooks": [h.to_dict() for h in self.analyse_hooks],
             "last_verified_at": self.last_verified_at,
             "freshness": self.freshness.to_dict() if self.freshness else None,
             "spatial_resolution": self.spatial_resolution,
@@ -175,3 +268,45 @@ def component_freshness(
         basis=basis,
         notes=notes,
     )
+
+
+def fee_from_range(
+    *,
+    kind: str,
+    range_text: Optional[str],
+    term_years: Optional[int],
+    include_in_cashflow: bool,
+    confidence: float = 0.4,
+) -> Optional[FeeHook]:
+    if not range_text and term_years is None:
+        return None
+    min_gbp, max_gbp = _parse_gbp_range(range_text)
+    return FeeHook(
+        kind=kind,
+        include_in_cashflow=include_in_cashflow,
+        range_text=range_text,
+        min_gbp=min_gbp,
+        max_gbp=max_gbp,
+        term_years=term_years,
+        known=bool(range_text),
+        confidence=confidence if range_text else 0.0,
+    )
+
+
+def _parse_gbp_range(text: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    if not text:
+        return None, None
+    import re
+
+    nums = re.findall(r"£\s*([\d,]+)", text)
+    values = []
+    for n in nums:
+        try:
+            values.append(int(n.replace(",", "")))
+        except ValueError:
+            continue
+    if len(values) >= 2:
+        return values[0], values[1]
+    if len(values) == 1:
+        return values[0], values[0]
+    return None, None

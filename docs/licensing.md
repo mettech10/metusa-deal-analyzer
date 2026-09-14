@@ -3,10 +3,17 @@
 Backend foundations for **England** HMO / planning licensing checks.
 
 - **Endpoint:** `POST /v1/licensing/check`
+- **Feature flag:** `licensing_checker_v1` (`LICENSING_CHECKER_V1`, default on)
 - **Out of scope:** UPRN (P4), CON29, Wales / Scotland / NI rule engines, any other Metalyzi module
 
 This is a **flags + confidence** API. It does not give legal advice. Absence of a
 hit is never treated as “no restriction” unless a national statutory rule says so.
+
+Every check response (including errors) includes a versioned `disclaimer`.
+
+Legacy `HMO_LICENSING_LOOKUP` / `get_hmo_licensing_info` in `app.py` **cannot**
+override this endpoint. Those tables include Wales and Scotland rows and are
+area-analysis context only.
 
 ## Request
 
@@ -21,7 +28,9 @@ Content-Type: application/json
   "occupants": 5,
   "households": 2,
   "sharing_amenities": true,
-  "intended_use": "hmo"
+  "intended_use": "hmo",
+  "conversion_from_c3": true,
+  "purpose_built_flat_in_block_of_3_plus": false
 }
 ```
 
@@ -30,160 +39,99 @@ Content-Type: application/json
 | `postcode` | yes | Full UK postcode. Outward-only and UPRN are rejected. |
 | `occupants` | no | Headcount. If omitted, occupancy flags are `conditional`. |
 | `households` | no | Housing Act household count. |
-| `sharing_amenities` | no | Boolean. Default assumed true only when occupancy is supplied for mandatory tests. |
+| `sharing_amenities` | no | Boolean. |
 | `intended_use` | no | `hmo` \| `btl` \| `sa` \| `str` \| `rental` \| `unknown` |
+| `conversion_from_c3` | no | `true` = C3→C4 conversion play (Article 4 is a deal killer on hit). `false` = continued use. |
+| `purpose_built_flat_in_block_of_3_plus` | no | Mandatory HMO carve-out when true. |
+| `purpose_built_flat` + `self_contained_flats_in_block` | no | Alternative carve-out inputs (`flats_in_block >= 3`). |
 | `skip_article4` | no | Test hook. Skip planning.data.gov.uk. |
 
 ## Response (shape)
 
+`disclaimer.version` is `licensing-checker-disclaimer-v1`.
+
+`severity` / `deal_impact` taxonomy: `deal_killer` | `compliance_cost` | `soft_warning` | `info`.
+
+`analyse_hooks` are objects, not string tags:
+
 ```json
 {
-  "ok": true,
-  "api_version": "v1",
-  "checked_at": "2026-09-14T20:00:00Z",
-  "scope": {
-    "nation": "England",
-    "modules": ["postcode_to_la", "mandatory_hmo", "sui_generis", "article4_planning_data", "additional_selective_schemes"],
-    "exclusions": ["uprn", "con29", "wales", "scotland", "northern_ireland"]
-  },
-  "location": {
-    "postcode": "M14 6LT",
-    "la_name": "Manchester",
-    "la_code": "E08000003",
-    "country": "England",
-    "confidence": 0.95,
-    "freshness": {"last_verified_at": "...", "stale": false, "basis": "live_lookup"}
-  },
-  "freshness": {
-    "overall_confidence": 0.45,
-    "overall_confidence_band": "low",
-    "stale": false,
-    "stale_components": [],
-    "components": []
-  },
-  "flags": [
-    {
-      "id": "mandatory_hmo_licence",
-      "category": "licensing",
-      "severity": "high",
-      "applies": "yes",
-      "confidence": 0.99,
-      "confidence_band": "high",
-      "sources": [{"name": "Housing Act 2004 Part 2", "kind": "legislation", "url": "..."}],
-      "analyse_hooks": ["licence.mandatory_hmo", "cost.hmo_licence_fee"],
-      "last_verified_at": "2018-10-01T00:00:00+00:00",
-      "freshness": {"stale": false, "basis": "statutory"}
-    }
-  ],
-  "article4": {},
-  "schemes": {},
-  "warnings": []
+  "id": "cost.hmo_licence_fee",
+  "kind": "cost",
+  "deal_impact": "compliance_cost",
+  "fee": {
+    "kind": "hmo_licence",
+    "include_in_cashflow": true,
+    "range_text": "£700-£1,300",
+    "min_gbp": 700,
+    "max_gbp": 1300,
+    "term_years": 5,
+    "known": true
+  }
 }
 ```
+
+Top-level `deal_impact` rolls up the worst material flag and lists `fee_hooks`.
 
 `applies` is one of `yes` | `no` | `possible` | `conditional`.
 
 `overall_confidence` is the **minimum** confidence among the location lookup and
-every high/medium flag that is `yes`, `possible`, or `conditional`. Inspect
-`freshness.components[]` rather than treating the headline number as a pass/fail.
+every `deal_killer` / `compliance_cost` flag that is `yes`, `possible`, or
+`conditional`. Inspect `freshness.components[]`.
 
 ## What each layer does
 
 ### 1. Postcode → local authority
 
-[postcodes.io](https://postcodes.io) (ONS Postcode Directory). Returns `la_code`
-(ONS admin district), coordinates, country, ward name.
-
-Ward name is a **label** for curator hints. It is not a spatial join.
+[postcodes.io](https://postcodes.io) (ONSPD). Returns ONS `la_code`, coordinates, country, ward name.
 
 ### 2. Mandatory HMO + sui generis (England statute)
 
 | Rule | Trigger | Flag |
 | --- | --- | --- |
-| Mandatory HMO licence | 5+ people, 2+ households, shared amenities (2018 Order; no storey test) | `mandatory_hmo_licence` |
+| Mandatory HMO licence | 5+ people, 2+ households, shared amenities | `mandatory_hmo_licence` `deal_killer` |
+| **Carve-out** | Purpose-built flat in a block of 3+ self-contained flats | `applies: no` (additional/selective may still apply) |
 | Planning C4 | 3–6 residents, not a single household | `planning_use_class` |
-| Sui generis HMO | 7+ residents | `sui_generis_hmo` |
+| Sui generis HMO | 7+ residents | `sui_generis_hmo` `deal_killer` |
 
-C3 → C4 is permitted development (GPDO Part 3 Class L) unless Article 4 removes it.
-C3/C4 → sui generis is **never** PD.
-
-Non-England postcodes return `england_scope` and stop. They do not apply English rules.
+Non-England postcodes return `england_scope` and stop. They do not apply English
+rules and do not consult `HMO_LICENSING_LOOKUP`.
 
 ### 3. Article 4 ingest (partial)
 
-Live point query:
+Live point query against planning.data.gov.uk `article-4-direction-area`.
 
-`GET https://www.planning.data.gov.uk/entity.json?latitude=…&longitude=…&dataset=article-4-direction-area`
+`conversion_from_c3=true` (or `intended_use=hmo` when the flag is omitted) treats
+an HMO Class L hit as a conversion **deal_killer**. `conversion_from_c3=false`
+keeps the hit as information for continued use.
 
-HMO relevance is classified from `permitted-development-rights` (Class L / `3L`)
-and text (HMO / C3–C4). The MHCLG dataset is **beta and incomplete**. A miss is
-`applies: possible` with low confidence, never “no Article 4”.
+A miss is `applies: possible`, never “no Article 4”.
 
-Optional corroboration: the existing in-repo postcode-district index
-(`check_article_4` in `app.py`) is attached as `article4_hmo_district_index`
-with `spatial_resolution: postcode_district`. That is not a legal boundary.
+### 4. Additional / selective schemes (25 priority LAs)
 
-Offline helper (does not save geometries):
+[`licensing/data/priority_schemes.json`](../licensing/data/priority_schemes.json).
 
-```bash
-python scripts/ingest_article4.py OX1 1BP
-```
+Stale SLO: **30 days** for `coverage_tier=priority`, **90 days** for `covered`.
 
-### 4. Additional / selective schemes (~25 priority LAs)
+Join key: ONS `la_code` starting with `E`. Wales/Scotland/NI codes are discarded.
 
-Curated JSON: [`licensing/data/priority_schemes.json`](../licensing/data/priority_schemes.json).
-Editor guide: [`licensing/data/README.md`](../licensing/data/README.md).
+- `citywide` → `applies: yes` (medium confidence; seed is not a live scrape)
+- `designated_areas` → `applies: possible`, named areas only, no polygons
+- `unknown` placeholder → `priority_la_uncurated`
+- Unseeded LA → `local_schemes_unseeded`
 
-- Join key: ONS `la_code`.
-- `citywide` → `applies: yes` (still medium confidence; seed is not a live scrape).
-- `designated_areas` → `applies: possible`, **no polygons**, named areas only.
-- Unseeded LA → `local_schemes_unseeded` (`possible`, low confidence).
+Inventory: `GET /v1/licensing/schemes` (same feature flag).
 
-Inventory: `GET /v1/licensing/schemes`.
+## Feature flag
 
-## `analyse_hooks`
-
-Stable IDs for the deal-analyse pipeline (P3+ wiring, not implemented here):
-
-| Hook | Meaning |
-| --- | --- |
-| `licence.mandatory_hmo` | Mandatory HMO licence in play |
-| `licence.additional_hmo` | Additional scheme may apply |
-| `licence.selective` | Selective scheme may apply |
-| `planning.c3_to_c4` | Small HMO planning route |
-| `planning.sui_generis` | Large HMO planning permission |
-| `planning.article4_hmo` | Article 4 may remove C3→C4 PD |
-| `cost.hmo_licence_fee` | Include licence fee in cashflow |
-| `cost.selective_licence_fee` | Include selective fee |
-| `blocker.planning_permission` | Planning is a conversion blocker |
-| `blocker.unlicensed_hmo` | Operating without a mandatory licence |
-| `verify.lpa` | Confirm with the local authority |
-| `verify.scheme_boundary` | Need official map / geometry |
-| `analyse.need_occupancy` | Ask the user for occupants / households |
-| `scope.not_england` | Do not apply England rules |
-
-## Confidence bands
-
-| Band | Score |
-| --- | --- |
-| high | ≥ 0.85 |
-| medium | ≥ 0.55 |
-| low | ≥ 0.30 |
-| unknown | < 0.30 |
-
-Typical values: statute 0.99, postcodes.io quality-1 0.95, Planning Data HMO hit
-0.80, citywide curated scheme ~0.62, designated-area seed ~0.45, Planning Data
-miss 0.30.
-
-Scheme seeds go stale after 365 days (`last_verified_at`). Statutory flags never
-stale. Live geo / Article 4 lookups use the check timestamp.
+`LICENSING_CHECKER_V1=false` → HTTP 404 `feature_disabled` (disclaimer still present).
 
 ## Errors
 
 | HTTP | `error.code` |
 | --- | --- |
 | 400 | `invalid_postcode`, `invalid_input`, `invalid_json`, `invalid_content_type` |
-| 404 | `postcode_not_found` |
+| 404 | `postcode_not_found`, `feature_disabled` |
 | 413 | `payload_too_large` |
 | 429 | rate limit (30/min) |
 | 502 | `geo_upstream_error`, `geo_incomplete` |
@@ -193,5 +141,3 @@ stale. Live geo / Article 4 lookups use the check timestamp.
 ```bash
 pytest tests/test_licensing.py tests/test_licensing_api.py -v
 ```
-
-Tests are offline (stubbed postcodes.io + planning.data.gov.uk).
