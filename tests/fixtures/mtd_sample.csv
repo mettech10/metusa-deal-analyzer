@@ -1,0 +1,5 @@
+date,property_id,category,amount_pence,description,counterparty
+2026-04-10,,uk_rent_income,125000,April rent,Tenant A
+2026-04-12,,repairs,4500,Boiler service,GasSafe Ltd
+2026-04-15,,mortgage interest,32000,Residential mortgage interest April,Lender
+2026-04-20,,insurance,12000,Buildings insurance,Insurer
