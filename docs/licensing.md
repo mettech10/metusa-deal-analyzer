@@ -50,11 +50,13 @@ Content-Type: application/json
 
 `disclaimer.version` is `licensing-checker-disclaimer-v1`.
 
-`severity` is kept for FE compatibility. `severity_class` is the same taxonomy
-(`deal_killer` | `compliance_cost` | `soft_warning` | `info`). Legacy
+`severity` is kept for FE compatibility (taxonomy values). `severity_class` is
+`deal_killer` | `compliance_cost` | `soft_warning` | `info`. Legacy
 `high`/`medium`/`low` values are mapped: `high` → `deal_killer` (planning/scope)
 or `compliance_cost` (other); `medium` → `compliance_cost`; `low` → `info`.
-Stale scheme seeds are emitted as `soft_warning` with `freshness.stale=true`.
+Stale or partial (`applies` possible/conditional) flags emit
+`severity_class=soft_warning` unless they are already a `deal_killer` (Article 4
+conversion plays stay elevated). Stale scheme seeds also set `freshness.stale=true`.
 
 Per-flag `analyse_hooks` are objects, not string tags. Top-level `deal_impact`
 also carries structured Analyse hooks:
@@ -108,7 +110,7 @@ every `deal_killer` / `compliance_cost` flag that is `yes`, `possible`, or
 | Rule | Trigger | Flag |
 | --- | --- | --- |
 | Mandatory HMO licence | 5+ people, 2+ households, shared amenities | `mandatory_hmo_licence` `deal_killer` |
-| **Carve-out** | Purpose-built flat in a block of 3+ self-contained flats | `applies: no` (additional/selective may still apply) |
+| **Carve-out** | Purpose-built flat in a block of 3+ self-contained flats (`purpose_built_flat` + `flats_in_block>=3`) | `applies: no`. If purpose-built but block size unknown: `conditional` citing MHCLG. Additional/selective may still apply. |
 | Planning C4 | 3–6 residents, not a single household | `planning_use_class` |
 | Sui generis HMO | 7+ residents | `sui_generis_hmo` `deal_killer` |
 

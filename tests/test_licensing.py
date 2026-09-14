@@ -210,6 +210,26 @@ def test_purpose_built_flat_miss_when_block_too_small():
     assert flags["mandatory_hmo_licence"].severity == "deal_killer"
 
 
+def test_purpose_built_flat_via_flats_in_block_kwarg():
+    flags = {f.id: f for f in england_mandatory_and_sui_generis_flags(
+        occupants=5, households=2, sharing_amenities=True, intended_use="hmo",
+        purpose_built_flat=True,
+        flats_in_block=3,
+    )}
+    assert flags["mandatory_hmo_licence"].applies == "no"
+    assert "mhclg" in flags["mandatory_hmo_licence"].summary.lower()
+
+
+def test_purpose_built_flat_without_block_count_is_conditional():
+    flags = {f.id: f for f in england_mandatory_and_sui_generis_flags(
+        occupants=5, households=2, sharing_amenities=True, intended_use="hmo",
+        purpose_built_flat=True,
+    )}
+    assert flags["mandatory_hmo_licence"].applies == "conditional"
+    assert flags["mandatory_hmo_licence"].severity == "compliance_cost"
+    assert "mhclg" in flags["mandatory_hmo_licence"].summary.lower()
+
+
 def test_sui_generis_applies_at_seven_occupants():
     flags = {f.id: f for f in england_mandatory_and_sui_generis_flags(
         occupants=7, households=2, sharing_amenities=True, intended_use="hmo"
@@ -363,6 +383,7 @@ def test_engine_manchester_hmo_flags_include_hooks_and_freshness():
     assert additional["applies"] == "possible"
     assert additional["spatial_resolution"] == "named_areas_only"
     assert additional["freshness"]["stale_after_days"] == 30
+    assert additional["severity_class"] == "soft_warning"
     sel_fee = next(h for h in additional["analyse_hooks"] if h["id"] == "cost.hmo_licence_fee")
     assert sel_fee["fee"]["range_text"]
     assert "severity_class" in mandatory
@@ -424,6 +445,27 @@ def test_engine_conversion_from_c3_false_is_not_a_blocker():
     a4 = next(f for f in result["flags"] if f["id"] == "article4_hmo")
     assert a4["severity"] == "info"
     assert "blocker.planning_permission" not in _hook_ids(a4)
+
+
+def test_engine_conversion_from_c3_elevates_possible_district_article4():
+    def fallback(_postcode):
+        return {
+            "is_article_4": True,
+            "known": True,
+            "council": "Manchester City Council",
+            "note": "district index",
+        }
+
+    result = run_licensing_check(
+        {"postcode": "M14 6LT", "intended_use": "hmo", "conversion_from_c3": True},
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+        district_fallback=fallback,
+    )
+    district = next(f for f in result["flags"] if f["id"] == "article4_hmo_district_index")
+    assert district["applies"] == "possible"
+    assert district["deal_impact"] == "deal_killer"
+    assert district["severity_class"] == "deal_killer"
 
 
 def test_engine_liverpool_citywide_selective_fee_hook():

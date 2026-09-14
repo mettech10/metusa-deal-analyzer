@@ -235,6 +235,13 @@ class Flag:
     def to_dict(self) -> dict[str, Any]:
         severity = canonical_severity(self.severity, category=self.category)
         impact = canonical_severity(self.deal_impact or self.severity, category=self.category)
+        # F4: keep `severity` for FE; severity_class is the taxonomy. Stale/partial
+        # coverage is soft_warning unless already a deal_killer (F6 conversion plays).
+        severity_class = impact
+        stale = bool(self.freshness and self.freshness.stale)
+        partial = self.applies in {"possible", "conditional"}
+        if (stale or partial) and impact != "deal_killer":
+            severity_class = "soft_warning"
         return {
             "id": self.id,
             "category": self.category,
@@ -242,7 +249,7 @@ class Flag:
             "summary": self.summary,
             "detail": self.detail,
             "severity": severity,
-            "severity_class": severity,
+            "severity_class": severity_class,
             "deal_impact": impact,
             "applies": self.applies,
             "confidence": round(self.confidence, 3),

@@ -81,14 +81,25 @@ def england_mandatory_and_sui_generis_flags(
     purpose_built_flat_in_block_of_3_plus: Optional[bool] = None,
     purpose_built_flat: Optional[bool] = None,
     self_contained_flats_in_block: Optional[int] = None,
+    flats_in_block: Optional[int] = None,
 ) -> list[Flag]:
     """Return statutory England flags. Occupants/households may be unknown."""
     use = (intended_use or "unknown").lower()
     sharing = True if sharing_amenities is None else bool(sharing_amenities)
+    block = (
+        self_contained_flats_in_block
+        if self_contained_flats_in_block is not None
+        else flats_in_block
+    )
     carve_out = _resolve_purpose_built_carve_out(
         explicit=purpose_built_flat_in_block_of_3_plus,
         purpose_built_flat=purpose_built_flat,
-        flats_in_block=self_contained_flats_in_block,
+        flats_in_block=block,
+    )
+    carve_out_needs_block_count = (
+        purpose_built_flat is True
+        and block is None
+        and purpose_built_flat_in_block_of_3_plus is None
     )
 
     flags: list[Flag] = [_threshold_explainer(carve_out=carve_out)]
@@ -99,6 +110,7 @@ def england_mandatory_and_sui_generis_flags(
             sharing=sharing,
             intended_use=use,
             carve_out=carve_out,
+            carve_out_needs_block_count=carve_out_needs_block_count,
         )
     )
     flags.append(_planning_use_class_flag(occupants=occupants, households=households))
@@ -195,6 +207,7 @@ def _mandatory_hmo_flag(
     sharing: bool,
     intended_use: str,
     carve_out: Optional[bool],
+    carve_out_needs_block_count: bool = False,
 ) -> Flag:
     if carve_out is True:
         return _base_flag(
@@ -269,11 +282,32 @@ def _mandatory_hmo_flag(
         )
 
     known_hmo_size = occ is not None and hh is not None and occ >= 5 and hh >= 2 and sharing
+    if known_hmo_size and carve_out_needs_block_count:
+        return _base_flag(
+            id="mandatory_hmo_licence",
+            category="licensing",
+            title="Mandatory HMO licence — MHCLG purpose-built carve-out needs block size",
+            summary=(
+                "Occupancy meets the England mandatory HMO threshold, but this is flagged "
+                "as a purpose-built flat without flats_in_block. MHCLG carve-out: a "
+                "purpose-built flat in a block of 3+ self-contained flats is excluded from "
+                "mandatory licensing (2018 Prescribed Description Order). Converted (s257) "
+                "blocks are not carved out. Supply flats_in_block to resolve."
+            ),
+            severity="compliance_cost",
+            applies="conditional",
+            analyse_hooks=_mandatory_hooks(impact="compliance_cost", include_fee=False)
+            + [
+                hook("analyse.need_flats_in_block", "analyse", "soft_warning"),
+                hook("licence.additional_hmo", "licence", "compliance_cost"),
+            ],
+        )
     if known_hmo_size:
         if carve_out is None:
             extra_note = (
                 " Purpose-built-flat carve-out was not supplied; if this is a purpose-built "
-                "flat in a block of 3+ self-contained flats, mandatory licensing does not apply."
+                "flat in a block of 3+ self-contained flats, mandatory licensing does not apply "
+                "(MHCLG / 2018 Order)."
             )
         else:
             extra_note = ""
@@ -287,7 +321,7 @@ def _mandatory_hmo_flag(
                 + extra_note
             ),
             severity="deal_killer",
-            applies="yes" if carve_out is not None else "yes",
+            applies="yes",
             analyse_hooks=_mandatory_hooks(impact="deal_killer", include_fee=True)
             + [hook("blocker.unlicensed_hmo", "blocker", "deal_killer")],
         )

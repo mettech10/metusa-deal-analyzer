@@ -128,3 +128,7 @@ def test_v1_licensing_feature_flag_off(monkeypatch):
     body = res.get_json()
     assert body["error"]["code"] == "feature_disabled"
     assert body["disclaimer"]["version"] == DISCLAIMER_VERSION
+
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.get_json()["status"] == "ok"
