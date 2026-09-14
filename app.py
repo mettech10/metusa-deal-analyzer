@@ -1482,6 +1482,11 @@ CORS(app, resources={
     r"/epc-lookup":                      {"origins": _allowed_origins},
     r"/download-pdf":                    {"origins": _allowed_origins},
     r"/api/*":                           {"origins": _allowed_origins},
+    r"/v1/*": {
+        "origins": _allowed_origins,
+        "allow_headers": ["Content-Type", "Authorization", "Idempotency-Key"],
+        "expose_headers": ["Idempotency-Key"],
+    },
 })
 
 # Security: Rate limiting to prevent abuse
@@ -10572,6 +10577,11 @@ def gdv_calculate():
             'message': 'Auto-GDV failed — please enter sale prices manually',
             'comparablesUsed': 0,
         }), 200
+
+
+# Screener → Analyser handoff (POST /v1/deals) + shared property spine.
+from deals_api import register_deals_routes
+register_deals_routes(app, limiter)
 
 
 if __name__ == '__main__':
