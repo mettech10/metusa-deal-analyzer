@@ -196,6 +196,7 @@ def test_article4_ingest_classifies_oxford_hit():
     assert result.ok
     assert result.coverage == "partial_hit_hmo"
     assert result.hmo_hits[0].hmo_relevant is True
+    assert result.hmo_hits[0].start_date == "2012-02-25"
     assert result.confidence >= 0.8
 
 

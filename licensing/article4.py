@@ -129,19 +129,25 @@ def classify_hmo_relevance(entity: dict[str, Any]) -> tuple[bool, str]:
     return False, "insufficient text to classify as HMO-related"
 
 
+def _blank(value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    return value
+
+
 def _parse_entity(raw: dict[str, Any]) -> Article4Entity:
     relevant, reason = classify_hmo_relevance(raw)
     return Article4Entity(
         entity=raw.get("entity"),
-        name=raw.get("name"),
-        reference=raw.get("reference"),
-        notes=raw.get("notes"),
-        description=raw.get("description"),
-        permitted_development_rights=raw.get("permitted-development-rights"),
-        start_date=raw.get("start-date") or None,
-        end_date=raw.get("end-date") or None,
-        entry_date=raw.get("entry-date") or None,
-        organisation_entity=raw.get("organisation-entity"),
+        name=_blank(raw.get("name")),
+        reference=_blank(raw.get("reference")),
+        notes=_blank(raw.get("notes")),
+        description=_blank(raw.get("description")),
+        permitted_development_rights=_blank(raw.get("permitted-development-rights")),
+        start_date=_blank(raw.get("start-date")),
+        end_date=_blank(raw.get("end-date")),
+        entry_date=_blank(raw.get("entry-date")),
+        organisation_entity=_blank(raw.get("organisation-entity")),
         hmo_relevant=relevant,
         relevance_reason=reason,
     )
@@ -178,18 +184,9 @@ def ingest_article4_for_point(
         "longitude": longitude,
         "dataset": "article-4-direction-area",
         "limit": 50,
-        "field": [
-            "name",
-            "reference",
-            "notes",
-            "description",
-            "permitted-development-rights",
-            "start-date",
-            "end-date",
-            "entry-date",
-            "organisation-entity",
-            "entity",
-        ],
+        # Restricting `field=` blanks start-date / organisation-entity on this API.
+        # Drop bulky geometry only so dates and PD-rights stay populated.
+        "exclude_field": ["geometry", "point"],
     }
     fetch = fetcher or _default_fetch
     coverage_note = (
