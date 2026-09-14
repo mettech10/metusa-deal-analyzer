@@ -36,6 +36,8 @@ services:
         sync: false
       - key: BENCHMARK_CRON_SECRET
         sync: false
+      - key: COMPLIANCE_CRON_SECRET
+        sync: false
       - key: NOTIFICATION_EMAIL
         sync: false
       - key: BRIGHTDATA_USERNAME
@@ -70,6 +72,31 @@ services:
     envVars:
       - key: BACKEND_URL
         value: "https://metusa-deal-analyzer.onrender.com"
+      - key: BENCHMARK_CRON_SECRET
+        sync: false
+
+  # Daily compliance reminder dispatch — marks due T-90..overdue stubs.
+  # Email is currently stubbed (compliance/email_stub.py TODO: Brevo).
+  - type: cron
+    name: compliance-reminder-dispatch
+    runtime: python
+    plan: free
+    schedule: "0 8 * * *"  # 08:00 UTC daily
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import os, sys, requests
+      url = os.environ['BACKEND_URL'].rstrip('/') + '/v1/compliance/reminders/dispatch'
+      secret = os.environ.get('COMPLIANCE_CRON_SECRET') or os.environ['BENCHMARK_CRON_SECRET']
+      r = requests.post(url, headers={'X-Cron-Secret': secret}, timeout=120)
+      print(r.status_code, r.text[:500])
+      sys.exit(0 if r.status_code == 200 else 1)
+      "
+    envVars:
+      - key: BACKEND_URL
+        value: "https://metusa-deal-analyzer.onrender.com"
+      - key: COMPLIANCE_CRON_SECRET
+        sync: false
       - key: BENCHMARK_CRON_SECRET
         sync: false
 
