@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from compliance.email import brevo_configured, send_reminder_email
+from compliance.email import brevo_configured, cockpit_url, send_reminder_email
 from compliance.storage import (
     build_evidence_key,
     key_belongs_to_tenant,
@@ -16,6 +16,7 @@ OBLIGATION = {
     "id": "obl-1",
     "code": "GAS",
     "expiresOn": "2026-09-01",
+    "propertyId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 }
 REMINDER = {
     "id": "rem-1",
@@ -84,6 +85,8 @@ def test_brevo_send_success(monkeypatch):
         assert headers["api-key"] == "test-key"
         assert json["to"][0]["email"] == "landlord@example.com"
         assert "Gas Safety" in json["subject"]
+        assert "/tools/compliance" in json["htmlContent"]
+        assert "propertyId=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" in json["htmlContent"]
         return Resp()
 
     monkeypatch.setattr("compliance.email.requests.post", fake_post)
@@ -151,3 +154,17 @@ def test_evidence_key_is_tenant_prefixed():
     assert not key_belongs_to_tenant(
         user, "22222222-2222-2222-2222-222222222222/x/y.pdf",
     )
+
+
+def test_cockpit_url_points_at_tools_compliance(monkeypatch):
+    monkeypatch.delenv("NEXT_PUBLIC_SITE_URL", raising=False)
+    assert cockpit_url() == "https://metalyzi.co.uk/tools/compliance"
+    assert cockpit_url({"code": "GAS"}) == "https://metalyzi.co.uk/tools/compliance"
+    linked = cockpit_url({"propertyId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"})
+    assert linked == (
+        "https://metalyzi.co.uk/tools/compliance"
+        "?propertyId=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    monkeypatch.setenv("NEXT_PUBLIC_SITE_URL", "https://www.metalyzi.co.uk")
+    assert cockpit_url().endswith("/tools/compliance")
+    assert "/compliance" not in cockpit_url().replace("/tools/compliance", "")

@@ -51,8 +51,10 @@ def test_health_and_catalogue_are_public(client):
 
     cat = client.get("/v1/compliance/catalogue")
     assert cat.status_code == 200
-    codes = {item["code"] for item in cat.get_json()["items"]}
+    payload = cat.get_json()
+    codes = {item["code"] for item in payload["items"]}
     assert codes == {"GAS", "EICR", "EPC", "DEP", "HTR", "LIC_HMO", "LIC_SEL"}
+    assert payload["catalogue"] == payload["items"]
 
 
 def test_protected_routes_require_auth(client):
@@ -345,3 +347,4 @@ def test_health_documents_evidence_prefix_and_channels(client):
     cat = client.get("/v1/compliance/catalogue").get_json()
     assert cat["overdueWeeklyDays"] == 7
     assert "in_app" in cat["channels"]
+    assert cat["catalogue"] == cat["items"]

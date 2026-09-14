@@ -89,9 +89,12 @@ def health():
 
 @bp.get("/catalogue")
 def catalogue():
+    items = list(CATALOGUE.values())
     return jsonify({
         "success": True,
-        "items": list(CATALOGUE.values()),
+        "items": items,
+        # Alias for FE clients that read `catalogue` instead of `items`.
+        "catalogue": items,
         "statuses": ["valid", "due_soon", "overdue"],
         "channels": list(CHANNELS),
         "reminderOffsetsDays": [-90, -60, -30, -14, -7, 0, 1],

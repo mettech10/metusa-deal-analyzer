@@ -25,6 +25,25 @@ Recipient is the Supabase Auth email for the obligation's `userId`. Missing
 key or missing recipient logs a warning, marks the stub `skipped`, and still
 queues the next weekly overdue ping.
 
+Email CTAs open the FE cockpit at `/tools/compliance` (with
+`?propertyId=` when the obligation has one). That is a **frontend** path —
+Flask APIs stay under `/v1/compliance/*` and do not need renaming for
+obligations, dashboard, or reminders.
+
+## API routes (FE)
+
+No route renames. The Next.js page is `/tools/compliance`; the backend is:
+
+| Method | Path |
+|---|---|
+| GET | `/v1/compliance/catalogue` (`items` and `catalogue` are the same list) |
+| GET | `/v1/compliance/dashboard` |
+| GET/POST | `/v1/compliance/obligations` |
+| GET/PATCH/DELETE | `/v1/compliance/obligations/<id>` |
+| GET | `/v1/compliance/properties/<propertyId>/obligations` |
+| GET | `/v1/compliance/reminders` |
+| POST | `/v1/compliance/reminders/dispatch` (cron) |
+
 ## Evidence storage (tenant isolation)
 
 | | |

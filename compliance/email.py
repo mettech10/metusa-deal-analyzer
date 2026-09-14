@@ -15,6 +15,7 @@ import html
 import logging
 import os
 from typing import Optional
+from urllib.parse import urlencode
 
 import requests
 
@@ -25,6 +26,24 @@ logger = logging.getLogger("compliance.email")
 BREVO_SMTP_URL = "https://api.brevo.com/v3/smtp/email"
 DEFAULT_SENDER = "noreply@metalyzi.co.uk"
 DEFAULT_SITE = "https://metalyzi.co.uk"
+# FE cockpit lives under /tools/compliance (not /compliance).
+COCKPIT_PATH = "/tools/compliance"
+
+
+def cockpit_url(obligation: Optional[dict] = None) -> str:
+    """Deep link into the Compliance Cockpit UI.
+
+    Base: ``{NEXT_PUBLIC_SITE_URL}/tools/compliance``
+    With a property: ``...?propertyId=<uuid>``
+    """
+    site = (os.environ.get("NEXT_PUBLIC_SITE_URL") or DEFAULT_SITE).rstrip("/")
+    url = f"{site}{COCKPIT_PATH}"
+    property_id = None
+    if obligation:
+        property_id = obligation.get("propertyId") or obligation.get("property_id")
+    if property_id:
+        url = f"{url}?{urlencode({'propertyId': str(property_id)})}"
+    return url
 
 
 def brevo_configured() -> bool:
@@ -95,8 +114,7 @@ def _reminder_html(obligation: dict, reminder: dict) -> str:
     code = html.escape(str(obligation.get("code") or ""))
     expires = html.escape(str(obligation.get("expiresOn") or obligation.get("expires_on") or "unknown"))
     when = html.escape(_offset_label(reminder))
-    site = os.environ.get("NEXT_PUBLIC_SITE_URL") or DEFAULT_SITE
-    cockpit = html.escape(f"{site.rstrip('/')}/compliance")
+    cockpit = html.escape(cockpit_url(obligation))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:0;background:#0f0f0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
