@@ -5608,6 +5608,22 @@ def health_check():
     """Health check endpoint — kept public for uptime monitoring, returns minimal info only."""
     return jsonify({'status': 'ok'})
 
+
+@app.route('/v1/licensing/check', methods=['POST'])
+@limiter.limit("30 per minute")
+def v1_licensing_check():
+    """Metalyzi Licensing Checker P0–P2: postcode → England HMO / Article 4 / schemes."""
+    from licensing.api import handle_check
+    return handle_check(district_fallback=check_article_4)
+
+
+@app.route('/v1/licensing/schemes', methods=['GET'])
+@limiter.limit("30 per minute")
+def v1_licensing_schemes():
+    """Curator inventory of seeded additional/selective schemes (not a spatial API)."""
+    from licensing.api import handle_seed_inventory
+    return handle_seed_inventory()
+
 @app.route('/api/test-apify')
 @admin_required
 def test_apify():
