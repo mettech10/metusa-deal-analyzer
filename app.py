@@ -1501,6 +1501,12 @@ CORS(app, resources={
     },
 })
 
+# Ltd Co Calculator (landlord MVP) — pure calc, pinned rate pack.
+from ltd_co.flask_api import ltd_co_api_bp, ltd_co_bp
+
+app.register_blueprint(ltd_co_bp)
+app.register_blueprint(ltd_co_api_bp)
+
 # Security: Rate limiting to prevent abuse
 # Use Redis-backed limits when available so they survive restarts and are
 # shared across workers; in-memory only as a local-dev fallback.

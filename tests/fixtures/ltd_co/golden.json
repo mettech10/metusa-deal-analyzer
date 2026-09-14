@@ -1,0 +1,253 @@
+{
+  "packId": "uk-2026-27-illustrative-v1",
+  "fixtures": [
+    {
+      "id": "s24_basic_rate_no_extra_tax",
+      "title": "Sophia-style: finance-costs limb, stays in basic rate — no extra tax vs full deduction",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 52000,
+        "allowableNonFinanceExpenses": 9000,
+        "financeCosts": 20000,
+        "otherNonSavingsIncome": 0
+      },
+      "expect": {
+        "propertyProfit": 43000,
+        "lowerOfThree": {
+          "financeCosts": 20000,
+          "propertyProfits": 43000,
+          "adjustedTotalIncome": 30430,
+          "bindingLimb": "finance_costs"
+        },
+        "actualAmount": 20000,
+        "taxReducer": 4000,
+        "financeCostsCarriedForward": 0,
+        "incomeTax": 2086,
+        "extraTaxVsFullDeduction": 0
+      }
+    },
+    {
+      "id": "s24_higher_rate_partial_drag",
+      "title": "John-style 2026/27: restriction pushes a slice into higher rate — extra tax is NOT 20% of all interest",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 18000,
+        "allowableNonFinanceExpenses": 2000,
+        "financeCosts": 8000,
+        "otherNonSavingsIncome": 35000
+      },
+      "expect": {
+        "propertyProfit": 16000,
+        "lowerOfThree": {
+          "financeCosts": 8000,
+          "propertyProfits": 16000,
+          "adjustedTotalIncome": 38430,
+          "bindingLimb": "finance_costs"
+        },
+        "actualAmount": 8000,
+        "taxReducer": 1600,
+        "financeCostsCarriedForward": 0,
+        "incomeTax": 6232,
+        "incomeTaxIfInterestDeducted": 6086,
+        "extraTaxVsFullDeduction": 146,
+        "folkloreTwentyPercentOfInterest": 1600
+      }
+    },
+    {
+      "id": "s24_profits_limb_carry_forward",
+      "title": "Brian year 1: profits limb binds; unused finance costs carry forward",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 20000,
+        "allowableNonFinanceExpenses": 7000,
+        "financeCosts": 15000,
+        "otherNonSavingsIncome": 36000
+      },
+      "expect": {
+        "propertyProfit": 13000,
+        "lowerOfThree": {
+          "bindingLimb": "property_profits",
+          "financeCosts": 15000,
+          "propertyProfits": 13000,
+          "adjustedTotalIncome": 36430
+        },
+        "actualAmount": 13000,
+        "taxReducer": 2600,
+        "financeCostsCarriedForward": 2000,
+        "incomeTax": 4686
+      }
+    },
+    {
+      "id": "s24_carry_forward_used",
+      "title": "Brian year 2: brought-forward finance costs added to relievable amount",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 24000,
+        "allowableNonFinanceExpenses": 2000,
+        "financeCosts": 15000,
+        "financeCostsBroughtForward": 2000,
+        "otherNonSavingsIncome": 36000
+      },
+      "expect": {
+        "propertyProfit": 22000,
+        "relievableAmount": 17000,
+        "lowerOfThree": {
+          "bindingLimb": "finance_costs",
+          "financeCosts": 17000,
+          "propertyProfits": 22000,
+          "adjustedTotalIncome": 45430
+        },
+        "actualAmount": 17000,
+        "taxReducer": 3400,
+        "financeCostsCarriedForward": 0,
+        "incomeTax": 7232
+      }
+    },
+    {
+      "id": "s24_ati_limb",
+      "title": "ATI limb binds (s274AA(3)); excess finance costs carry forward",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 15000,
+        "allowableNonFinanceExpenses": 5000,
+        "financeCosts": 15000,
+        "otherNonSavingsIncome": 12000
+      },
+      "expect": {
+        "propertyProfit": 10000,
+        "lowerOfThree": {
+          "bindingLimb": "adjusted_total_income",
+          "financeCosts": 15000,
+          "propertyProfits": 10000,
+          "adjustedTotalIncome": 9430
+        },
+        "actualAmount": 9430,
+        "taxReducer": 1886,
+        "financeCostsCarriedForward": 5570,
+        "incomeTax": 0
+      }
+    },
+    {
+      "id": "s24_true_higher_rate_drag",
+      "title": "Employment already in higher rate — extra tax equals 20% of interest (folklore matches here)",
+      "action": "section-24",
+      "input": {
+        "rentalIncome": 24000,
+        "allowableNonFinanceExpenses": 4000,
+        "financeCosts": 12000,
+        "otherNonSavingsIncome": 60000
+      },
+      "expect": {
+        "propertyProfit": 20000,
+        "actualAmount": 12000,
+        "taxReducer": 2400,
+        "extraTaxVsFullDeduction": 2400
+      }
+    },
+    {
+      "id": "ct_small_profits",
+      "action": "corporation-tax",
+      "input": { "taxableProfits": 40000, "associatedCompanies": 0 },
+      "expect": {
+        "band": "small_profits",
+        "divisor": 1,
+        "lowerLimit": 50000,
+        "upperLimit": 250000,
+        "corporationTax": 7600,
+        "marginalRelief": 0
+      }
+    },
+    {
+      "id": "ct_marginal_relief",
+      "action": "corporation-tax",
+      "input": { "taxableProfits": 100000, "associatedCompanies": 0 },
+      "expect": {
+        "band": "marginal_relief",
+        "corporationTax": 22750,
+        "marginalRelief": 2250,
+        "mainRateTax": 25000
+      }
+    },
+    {
+      "id": "ct_main_rate",
+      "action": "corporation-tax",
+      "input": { "taxableProfits": 300000, "associatedCompanies": 0 },
+      "expect": {
+        "band": "main_rate",
+        "corporationTax": 75000,
+        "marginalRelief": 0
+      }
+    },
+    {
+      "id": "ct_two_associated",
+      "title": "Two other associated companies: limits / 3",
+      "action": "corporation-tax",
+      "input": { "taxableProfits": 40000, "associatedCompanies": 2 },
+      "expect": {
+        "band": "marginal_relief",
+        "divisor": 3,
+        "lowerLimit": 16666.67,
+        "upperLimit": 83333.33,
+        "corporationTax": 9350,
+        "marginalRelief": 650
+      }
+    },
+    {
+      "id": "sdlt_personal_ads_250k",
+      "action": "sdlt",
+      "input": { "consideration": 250000, "rentalBusinessRelief": true },
+      "expect": {
+        "personalAdditional": 15000,
+        "company": 15000,
+        "deltaCompanyMinusPersonal": 0
+      }
+    },
+    {
+      "id": "sdlt_company_relief_on_600k",
+      "action": "sdlt",
+      "input": { "consideration": 600000, "rentalBusinessRelief": true },
+      "expect": {
+        "personalAdditional": 50000,
+        "company": 50000,
+        "deltaCompanyMinusPersonal": 0,
+        "companyRegime": "higher_rates_rental_relief"
+      }
+    },
+    {
+      "id": "sdlt_company_relief_off_600k",
+      "action": "sdlt",
+      "input": { "consideration": 600000, "rentalBusinessRelief": false },
+      "expect": {
+        "personalAdditional": 50000,
+        "company": 102000,
+        "deltaCompanyMinusPersonal": 52000,
+        "companyRegime": "corporate_envelope_flat"
+      }
+    },
+    {
+      "id": "sdlt_company_relief_off_at_threshold",
+      "title": "Envelope rate is more than £500,000 — £500,000 exactly stays on higher rates",
+      "action": "sdlt",
+      "input": { "consideration": 500000, "rentalBusinessRelief": false },
+      "expect": {
+        "personalAdditional": 40000,
+        "company": 40000,
+        "companyRegime": "higher_rates"
+      }
+    },
+    {
+      "id": "dividend_higher_rate_extraction",
+      "action": "dividends",
+      "input": {
+        "distributable": 16200,
+        "otherNonSavingsIncome": 50000,
+        "extract": "all"
+      },
+      "expect": {
+        "extracted": 16200,
+        "dividendTax": 5612.75,
+        "netToShareholder": 10587.25
+      }
+    }
+  ]
+}
