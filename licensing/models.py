@@ -63,6 +63,22 @@ SEVERITY_RANK = {
 FEATURE_FLAG = "licensing_checker_v1"
 
 
+def canonical_severity(value: Optional[str], *, category: str = "") -> Severity:
+    """Map high|medium|low onto deal_killer|compliance_cost|soft_warning|info."""
+    raw = (value or "info").strip().lower()
+    if raw in SEVERITY_RANK:
+        return raw  # type: ignore[return-value]
+    if raw == "high":
+        if category in {"planning", "scope", "blocker"}:
+            return "deal_killer"
+        return "compliance_cost"
+    if raw == "medium":
+        return "compliance_cost"
+    if raw == "low":
+        return "info"
+    return "info"
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -217,14 +233,16 @@ class Flag:
     deal_impact: Optional[Severity] = None
 
     def to_dict(self) -> dict[str, Any]:
-        impact = self.deal_impact or self.severity
+        severity = canonical_severity(self.severity, category=self.category)
+        impact = canonical_severity(self.deal_impact or self.severity, category=self.category)
         return {
             "id": self.id,
             "category": self.category,
             "title": self.title,
             "summary": self.summary,
             "detail": self.detail,
-            "severity": self.severity,
+            "severity": severity,
+            "severity_class": severity,
             "deal_impact": impact,
             "applies": self.applies,
             "confidence": round(self.confidence, 3),

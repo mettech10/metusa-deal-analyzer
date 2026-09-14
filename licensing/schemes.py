@@ -425,6 +425,19 @@ def _flag_for_scheme(
     if scheme.fee_range:
         summary += f" Seed fee range (unverified): {scheme.fee_range}."
 
+    freshness = component_freshness(
+        scheme.last_verified_at,
+        stale_after_days=slo,
+        basis="curated_seed",
+        notes=f"{scheme.verification_method or 'curated_seed'}; SLO {slo}d ({scheme.coverage_tier})",
+    )
+    if freshness.stale:
+        summary += (
+            f" Seed last_verified_at is stale against the {slo}-day "
+            f"{scheme.coverage_tier} SLO — treat as a soft warning, not a green light."
+        )
+        severity = "soft_warning"
+
     return Flag(
         id=flag_id,
         category="licensing",
@@ -446,12 +459,7 @@ def _flag_for_scheme(
         ],
         analyse_hooks=hooks,
         last_verified_at=scheme.last_verified_at,
-        freshness=component_freshness(
-            scheme.last_verified_at,
-            stale_after_days=slo,
-            basis="curated_seed",
-            notes=f"{scheme.verification_method or 'curated_seed'}; SLO {slo}d ({scheme.coverage_tier})",
-        ),
+        freshness=freshness,
         spatial_resolution=spatial,
     )
 

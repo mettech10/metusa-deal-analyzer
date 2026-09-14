@@ -264,7 +264,8 @@ def article4_flags(
 
     conversion_from_c3=True is an explicit C3→C4 conversion play (deal_killer on hit).
     conversion_from_c3=False means continued use — the direction exists but is not
-    a conversion blocker. None + intended_use=hmo is treated as conversion-relevant.
+    a conversion blocker. None + intended_use in {hmo, c4, sui_generis} is
+    treated as conversion-relevant.
     """
     from licensing.models import hook
 
@@ -438,7 +439,7 @@ def _is_conversion_play(conversion_from_c3: Optional[bool], intended_use: str) -
         return True
     if conversion_from_c3 is False:
         return False
-    return (intended_use or "").lower() == "hmo"
+    return (intended_use or "").lower() in {"hmo", "c4", "sui_generis"}
 
 
 def _district_fallback_flags(

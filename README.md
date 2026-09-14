@@ -312,7 +312,7 @@ See [docs/licensing.md](docs/licensing.md) for the request/response contract, co
 }
 ```
 
-**Response:** `flags[]` with `severity` (`deal_killer` | `compliance_cost` | `soft_warning` | `info`), structured `deal_impact` / `analyse_hooks`, `disclaimer`, plus first-class `freshness`. Gated by `LICENSING_CHECKER_V1`. UPRN and CON29 are out of scope.
+**Response:** `flags[]` with `severity` / `severity_class` (`deal_killer` | `compliance_cost` | `soft_warning` | `info`), structured `deal_impact` (`verdict`, `killers`, `estimated_licence_fees_gbp`, `analyse_hooks.add_capex_lines` / `add_risk_notes`), versioned `disclaimer`, plus first-class `freshness`. Gated by `LICENSING_CHECKER_V1`. UPRN and CON29 are out of scope.
 
 ---
 

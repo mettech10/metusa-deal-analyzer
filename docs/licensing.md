@@ -43,16 +43,36 @@ Content-Type: application/json
 | `intended_use` | no | `hmo` \| `btl` \| `sa` \| `str` \| `rental` \| `unknown` |
 | `conversion_from_c3` | no | `true` = C3→C4 conversion play (Article 4 is a deal killer on hit). `false` = continued use. |
 | `purpose_built_flat_in_block_of_3_plus` | no | Mandatory HMO carve-out when true. |
-| `purpose_built_flat` + `self_contained_flats_in_block` | no | Alternative carve-out inputs (`flats_in_block >= 3`). |
+| `purpose_built_flat` + `self_contained_flats_in_block` / `flats_in_block` | no | Alternative carve-out (`flats_in_block >= 3`). |
 | `skip_article4` | no | Test hook. Skip planning.data.gov.uk. |
 
 ## Response (shape)
 
 `disclaimer.version` is `licensing-checker-disclaimer-v1`.
 
-`severity` / `deal_impact` taxonomy: `deal_killer` | `compliance_cost` | `soft_warning` | `info`.
+`severity` is kept for FE compatibility. `severity_class` is the same taxonomy
+(`deal_killer` | `compliance_cost` | `soft_warning` | `info`). Legacy
+`high`/`medium`/`low` values are mapped: `high` → `deal_killer` (planning/scope)
+or `compliance_cost` (other); `medium` → `compliance_cost`; `low` → `info`.
+Stale scheme seeds are emitted as `soft_warning` with `freshness.stale=true`.
 
-`analyse_hooks` are objects, not string tags:
+Per-flag `analyse_hooks` are objects, not string tags. Top-level `deal_impact`
+also carries structured Analyse hooks:
+
+```json
+{
+  "level": "deal_killer",
+  "verdict": "deal_killer",
+  "killers": [{"flag_id": "mandatory_hmo_licence", "title": "...", "summary": "...", "applies": "yes"}],
+  "estimated_licence_fees_gbp": {"currency": "GBP", "min": 400, "max": 650, "known": true, "items": []},
+  "analyse_hooks": {
+    "add_capex_lines": [{"id": "cost.selective_licence_fee", "min_gbp": 400, "max_gbp": 650}],
+    "add_risk_notes": [{"id": "blocker.unlicensed_hmo", "deal_impact": "deal_killer"}]
+  }
+}
+```
+
+Per-flag hook example:
 
 ```json
 {
@@ -70,8 +90,6 @@ Content-Type: application/json
   }
 }
 ```
-
-Top-level `deal_impact` rolls up the worst material flag and lists `fee_hooks`.
 
 `applies` is one of `yes` | `no` | `possible` | `conditional`.
 

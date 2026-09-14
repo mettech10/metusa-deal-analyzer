@@ -14,8 +14,8 @@ from licensing.article4 import classify_hmo_relevance, ingest_article4_for_point
 from licensing.engine import run_licensing_check
 from licensing.geo import GeoError, normalise_postcode
 from licensing.mandatory import england_mandatory_and_sui_generis_flags
-from licensing.models import DISCLAIMER_VERSION, SCHEME_STALE_AFTER_DAYS_PRIORITY
-from licensing.schemes import load_priority_schemes, match_schemes, schemes_meta
+from licensing.models import DISCLAIMER_VERSION, SCHEME_STALE_AFTER_DAYS_COVERED, SCHEME_STALE_AFTER_DAYS_PRIORITY
+from licensing.schemes import _flag_for_scheme, load_priority_schemes, match_schemes, schemes_meta
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -187,6 +187,7 @@ def test_purpose_built_flat_block_carve_out():
     )}
     assert flags["mandatory_hmo_licence"].applies == "no"
     assert flags["mandatory_hmo_licence"].severity == "info"
+    assert "mhclg" in flags["mandatory_hmo_licence"].summary.lower()
     assert "purpose-built" in flags["mandatory_hmo_licence"].summary.lower()
 
 
@@ -197,6 +198,16 @@ def test_purpose_built_flat_via_block_count():
         self_contained_flats_in_block=4,
     )}
     assert flags["mandatory_hmo_licence"].applies == "no"
+
+
+def test_purpose_built_flat_miss_when_block_too_small():
+    flags = {f.id: f for f in england_mandatory_and_sui_generis_flags(
+        occupants=5, households=2, sharing_amenities=True, intended_use="hmo",
+        purpose_built_flat=True,
+        self_contained_flats_in_block=2,
+    )}
+    assert flags["mandatory_hmo_licence"].applies == "yes"
+    assert flags["mandatory_hmo_licence"].severity == "deal_killer"
 
 
 def test_sui_generis_applies_at_seven_occupants():
@@ -295,6 +306,24 @@ def test_match_manchester_by_ons_code():
     assert hits[0].stale_after_days() == SCHEME_STALE_AFTER_DAYS_PRIORITY
 
 
+def test_covered_slo_is_90_days_not_365():
+    assert SCHEME_STALE_AFTER_DAYS_PRIORITY == 30
+    assert SCHEME_STALE_AFTER_DAYS_COVERED == 90
+
+
+def test_stale_priority_scheme_is_soft_warning():
+    from dataclasses import replace
+
+    hits = match_schemes(la_code="E08000012", la_name="Liverpool")
+    assert hits
+    scheme = replace(hits[0], last_verified_at="2020-01-01T00:00:00Z")
+    flag = _flag_for_scheme(scheme, occupants=3, rentalish=True, admin_ward=None)
+    assert flag.freshness and flag.freshness.stale is True
+    assert flag.freshness.stale_after_days == SCHEME_STALE_AFTER_DAYS_PRIORITY
+    assert flag.severity == "soft_warning"
+    assert flag.to_dict()["severity_class"] == "soft_warning"
+
+
 def test_liverpool_citywide_selective():
     hits = match_schemes(la_code="E08000012", la_name="Liverpool")
     assert len(hits) == 1
@@ -336,6 +365,33 @@ def test_engine_manchester_hmo_flags_include_hooks_and_freshness():
     assert additional["freshness"]["stale_after_days"] == 30
     sel_fee = next(h for h in additional["analyse_hooks"] if h["id"] == "cost.hmo_licence_fee")
     assert sel_fee["fee"]["range_text"]
+    assert "severity_class" in mandatory
+    impact = result["deal_impact"]
+    assert impact["verdict"] == impact["level"]
+    assert isinstance(impact["killers"], list)
+    assert any(k["flag_id"] == "mandatory_hmo_licence" for k in impact["killers"])
+    assert "add_capex_lines" in impact["analyse_hooks"]
+    assert "add_risk_notes" in impact["analyse_hooks"]
+    assert isinstance(impact["estimated_licence_fees_gbp"], dict)
+
+
+def test_engine_flats_in_block_alias_carve_out():
+    result = run_licensing_check(
+        {
+            "postcode": "M14 6LT",
+            "occupants": 5,
+            "households": 2,
+            "intended_use": "hmo",
+            "purpose_built_flat": True,
+            "flats_in_block": 8,
+        },
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+    )
+    mandatory = next(f for f in result["flags"] if f["id"] == "mandatory_hmo_licence")
+    assert mandatory["applies"] == "no"
+    assert result["inputs"]["flats_in_block"] == 8
+    assert result["inputs"]["self_contained_flats_in_block"] == 8
 
 
 def test_engine_conversion_from_c3_makes_article4_deal_killer():
@@ -453,6 +509,16 @@ def test_engine_district_fallback_does_not_invent_polygons():
     district = next(f for f in result["flags"] if f["id"] == "article4_hmo_district_index")
     assert district["spatial_resolution"] == "postcode_district"
     assert district["applies"] == "possible"
+
+
+def test_canonical_severity_maps_legacy_high_medium_low():
+    from licensing.models import canonical_severity
+
+    assert canonical_severity("high", category="planning") == "deal_killer"
+    assert canonical_severity("high", category="licensing") == "compliance_cost"
+    assert canonical_severity("medium") == "compliance_cost"
+    assert canonical_severity("low") == "info"
+    assert canonical_severity("deal_killer") == "deal_killer"
 
 
 def test_engine_rejects_missing_postcode():

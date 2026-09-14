@@ -81,9 +81,15 @@ def test_v1_licensing_check_ok(client):
     assert body["deal_impact"]["level"] in {"deal_killer", "compliance_cost", "soft_warning", "info"}
     for flag in body["flags"]:
         assert flag["severity"] in {"deal_killer", "compliance_cost", "soft_warning", "info"}
+        assert flag["severity_class"] in {"deal_killer", "compliance_cost", "soft_warning", "info"}
         assert isinstance(flag["analyse_hooks"], list)
         for h in flag["analyse_hooks"]:
             assert "id" in h and "kind" in h and "deal_impact" in h
+    impact = body["deal_impact"]
+    assert impact["verdict"] == impact["level"]
+    assert "killers" in impact
+    assert "add_capex_lines" in impact["analyse_hooks"]
+    assert "add_risk_notes" in impact["analyse_hooks"]
 
 
 def test_v1_licensing_check_requires_json(client):

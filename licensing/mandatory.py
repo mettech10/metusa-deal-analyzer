@@ -202,10 +202,11 @@ def _mandatory_hmo_flag(
             category="licensing",
             title="Mandatory HMO licence carved out (purpose-built flat in 3+ block)",
             summary=(
-                "A purpose-built flat in a block of 3 or more self-contained flats is "
-                "excluded from England mandatory HMO licensing (2018 prescribed-description "
-                "order). Additional HMO licensing or selective licensing may still apply. "
-                "Converted blocks (Housing Act s257) are not in this carve-out."
+                "MHCLG carve-out: a purpose-built flat in a block of 3 or more "
+                "self-contained flats is excluded from England mandatory HMO licensing "
+                "(Licensing of Houses in Multiple Occupation (Prescribed Description) "
+                "(England) Order 2018). Additional HMO licensing or selective licensing "
+                "may still apply. Converted blocks (Housing Act s257) are not in this carve-out."
             ),
             severity="info",
             applies="no",

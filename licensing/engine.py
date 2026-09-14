@@ -58,14 +58,16 @@ def run_licensing_check(
         field="purpose_built_flat_in_block_of_3_plus",
     )
     purpose_built_flat = _optional_bool(payload.get("purpose_built_flat"), field="purpose_built_flat")
-    flats_in_block = _optional_int(
-        payload.get("self_contained_flats_in_block"),
-        field="self_contained_flats_in_block",
-        max_value=500,
-    )
+    flats_raw = payload.get("self_contained_flats_in_block")
+    if flats_raw is None or flats_raw == "":
+        flats_raw = payload.get("flats_in_block")
+        flats_field = "flats_in_block"
+    else:
+        flats_field = "self_contained_flats_in_block"
+    flats_in_block = _optional_int(flats_raw, field=flats_field, max_value=500)
 
     intended_use = str(payload.get("intended_use") or "unknown").lower()
-    if intended_use not in {"hmo", "btl", "sa", "str", "rental", "unknown"}:
+    if intended_use not in {"hmo", "btl", "sa", "str", "rental", "c3", "c4", "sui_generis", "unknown"}:
         intended_use = "unknown"
 
     skip_article4 = bool(payload.get("skip_article4") or skip_article4)
@@ -181,6 +183,7 @@ def run_licensing_check(
             "purpose_built_flat_in_block_of_3_plus": purpose_built_flat_in_block_of_3_plus,
             "purpose_built_flat": purpose_built_flat,
             "self_contained_flats_in_block": flats_in_block,
+            "flats_in_block": flats_in_block,
         },
         "deal_impact": deal_impact,
         "freshness": freshness,
@@ -242,6 +245,7 @@ def _roll_up_deal_impact(flags: list[Flag]) -> dict[str, Any]:
         {
             "flag_id": f.id,
             "severity": f.severity,
+            "severity_class": f.severity,
             "deal_impact": f.deal_impact or f.severity,
             "applies": f.applies,
         }
@@ -249,15 +253,87 @@ def _roll_up_deal_impact(flags: list[Flag]) -> dict[str, Any]:
         if SEVERITY_RANK.get(f.deal_impact or f.severity, 0) >= SEVERITY_RANK[level]
         and (f.deal_impact or f.severity) == level
     ]
+    killers = [
+        {
+            "flag_id": f.id,
+            "title": f.title,
+            "summary": f.summary,
+            "applies": f.applies,
+        }
+        for f in material
+        if (f.deal_impact or f.severity) == "deal_killer"
+    ]
+
     fee_hooks = []
+    capex_lines: list[dict[str, Any]] = []
+    risk_notes: list[dict[str, Any]] = []
+    seen_fees: set[tuple[str, str]] = set()
+    seen_notes: set[tuple[str, str]] = set()
+    min_total = 0
+    max_total = 0
+    any_known_fee = False
+
     for f in flags:
         for h in f.analyse_hooks:
+            payload = h.to_dict()
+            note_key = (f.id, h.id)
+            if h.kind in {"blocker", "planning", "licence", "cost", "verify", "scope"} and h.deal_impact in {
+                "deal_killer",
+                "compliance_cost",
+                "soft_warning",
+            }:
+                if note_key not in seen_notes:
+                    seen_notes.add(note_key)
+                    risk_notes.append({
+                        "id": h.id,
+                        "flag_id": f.id,
+                        "kind": h.kind,
+                        "deal_impact": h.deal_impact,
+                        "summary": h.summary or f.summary,
+                    })
             if h.fee and h.fee.include_in_cashflow:
-                fee_hooks.append({"flag_id": f.id, **h.to_dict()})
+                fee_hooks.append({"flag_id": f.id, **payload})
+                fee_key = (f.id, h.fee.kind)
+                if fee_key in seen_fees:
+                    continue
+                seen_fees.add(fee_key)
+                line = {
+                    "id": h.id,
+                    "flag_id": f.id,
+                    "kind": h.fee.kind,
+                    "label": h.summary or f.title,
+                    "min_gbp": h.fee.min_gbp,
+                    "max_gbp": h.fee.max_gbp,
+                    "range_text": h.fee.range_text,
+                    "term_years": h.fee.term_years,
+                    "known": h.fee.known,
+                    "currency": h.fee.currency,
+                }
+                capex_lines.append(line)
+                if h.fee.min_gbp is not None:
+                    min_total += h.fee.min_gbp
+                    any_known_fee = True
+                if h.fee.max_gbp is not None:
+                    max_total += h.fee.max_gbp
+                    any_known_fee = True
+
     return {
         "level": level,
+        "verdict": level,
+        "killers": killers,
         "drivers": drivers,
         "fee_hooks": fee_hooks,
+        "estimated_licence_fees_gbp": {
+            "currency": "GBP",
+            "min": min_total if any_known_fee else None,
+            "max": max_total if any_known_fee else None,
+            "known": any_known_fee,
+            "items": capex_lines,
+        },
+        "analyse_hooks": {
+            "add_capex_lines": capex_lines,
+            "add_risk_notes": risk_notes,
+        },
     }
 
 
