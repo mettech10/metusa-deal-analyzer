@@ -29,6 +29,7 @@ PROPERTY_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 def client():
     reset_memory_store()
     reset_memory_blobs()
+    os.environ.pop("BREVO_API_KEY", None)
     app = Flask(__name__)
     app.config["TESTING"] = True
     register_compliance(app)
@@ -184,7 +185,8 @@ def test_evidence_upload_and_download(client):
     assert up.status_code == 201, up.get_json()
     evidence = up.get_json()["evidence"]
     assert evidence["filename"] == "gas-cp12.pdf"
-    assert evidence["storageKey"]
+    assert evidence["storageKey"].startswith(f"{USER_A}/")
+    assert f"/{oid}/" in evidence["storageKey"]
 
     listed = client.get(
         f"/v1/compliance/obligations/{oid}/evidence", headers=auth(),
@@ -243,7 +245,7 @@ def test_reminder_dispatch_requires_cron_secret(client):
     assert bad.status_code == 401
 
 
-def test_reminder_dispatch_stubs_email(client):
+def test_reminder_dispatch_skips_email_without_brevo_and_queues_weekly(client):
     client.post("/v1/compliance/obligations", headers=auth(), json={
         "propertyId": PROPERTY_ID,
         "code": "GAS",
@@ -256,14 +258,31 @@ def test_reminder_dispatch_stubs_email(client):
     assert resp.status_code == 200, resp.get_json()
     body = resp.get_json()
     assert body["due"] >= 1
-    assert body["dispatched"][0]["stubbed"] is True
-    assert body["dispatched"][0]["status"] == "sent"
-    assert "TODO" in body["note"]
+    assert body["dispatched"][0]["skipped"] is True
+    assert body["dispatched"][0]["delivered"] is False
+    assert body["dispatched"][0]["status"] == "skipped"
+    assert body["email"]["configured"] is False
+    assert "BREVO_API_KEY" in body["note"]
+    assert body["queuedWeekly"]
+    assert body["queuedWeekly"][0]["offsetCode"] == "overdue_weekly"
+    assert body["queuedWeekly"][0]["scheduledFor"] == "2026-09-16"
 
-    listed = client.get(
-        "/v1/compliance/reminders?status=sent", headers=auth(),
+    skipped = client.get(
+        "/v1/compliance/reminders?status=skipped", headers=auth(),
     )
-    assert listed.get_json()["count"] >= 1
+    assert skipped.get_json()["count"] >= 1
+    weekly = client.get(
+        "/v1/compliance/reminders?status=pending", headers=auth(),
+    )
+    codes = {r["offsetCode"] for r in weekly.get_json()["reminders"]}
+    assert "overdue_weekly" in codes
+
+    # Re-run the same day does not duplicate the weekly stub
+    again = client.post(
+        "/v1/compliance/reminders/dispatch?asOf=2026-09-14",
+        headers={"X-Cron-Secret": "test-cron-secret"},
+    )
+    assert again.get_json()["queuedWeekly"] == []
 
 
 def test_delete_obligation(client):
@@ -288,3 +307,41 @@ def test_main_flask_app_exposes_compliance_routes():
     assert {i["code"] for i in cat.get_json()["items"]} >= {"GAS", "LIC_HMO"}
     unauth = rc.get("/v1/compliance/dashboard")
     assert unauth.status_code == 401
+
+
+def test_in_app_channel_is_not_emailed_by_dispatch(client):
+    created = client.post("/v1/compliance/obligations", headers=auth(), json={
+        "propertyId": PROPERTY_ID, "code": "GAS", "issuedOn": "2026-01-01",
+    }).get_json()["obligation"]
+    from compliance.store import add_reminder_stub
+    add_reminder_stub(created, {
+        "offsetCode": "overdue",
+        "offsetDays": 1,
+        "scheduledFor": "2026-09-01",
+        "status": "pending",
+        "channel": "in_app",
+    })
+    listed = client.get(
+        "/v1/compliance/reminders?channel=in_app", headers=auth(),
+    )
+    assert listed.get_json()["count"] == 1
+    assert listed.get_json()["reminders"][0]["channel"] == "in_app"
+
+    client.post(
+        "/v1/compliance/reminders/dispatch?asOf=2026-09-14",
+        headers={"X-Cron-Secret": "test-cron-secret"},
+    )
+    still = client.get(
+        "/v1/compliance/reminders?channel=in_app&status=pending", headers=auth(),
+    )
+    assert still.get_json()["count"] == 1
+
+
+def test_health_documents_evidence_prefix_and_channels(client):
+    health = client.get("/v1/compliance/health").get_json()
+    assert health["evidence"]["bucket"] == "compliance-evidence"
+    assert "{userId}" in health["evidence"]["keyPrefix"]
+    assert "in_app" in health["channels"]
+    cat = client.get("/v1/compliance/catalogue").get_json()
+    assert cat["overdueWeeklyDays"] == 7
+    assert "in_app" in cat["channels"]

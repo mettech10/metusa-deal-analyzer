@@ -29,13 +29,18 @@ from io import BytesIO
 
 from compliance.auth import require_cron, require_user
 from compliance.catalogue import CATALOGUE, CATALOGUE_CODES
-from compliance.email_stub import send_reminder_email
+from compliance.email import provider_status, send_reminder_email
+from compliance.reminders import CHANNELS, OVERDUE_WEEKLY_DAYS, is_overdue_ping
 from compliance import store
 from compliance import storage as blob_store
 from compliance.storage import (
     ALLOWED_CONTENT_TYPES,
+    BUCKET,
+    KEY_PREFIX_PATTERN,
     MAX_EVIDENCE_BYTES,
+    build_evidence_key,
     content_type_allowed,
+    key_belongs_to_tenant,
     sanitize_filename,
 )
 
@@ -71,6 +76,13 @@ def health():
         "service": "compliance",
         "store": "supabase" if store.supabase_configured() else "memory",
         "blobStore": blob_store.storage_backend(),
+        "evidence": {
+            "bucket": BUCKET,
+            "keyPrefix": KEY_PREFIX_PATTERN,
+            "tenantIsolation": "first path segment is userId (RLS foldername[1] = auth.uid())",
+        },
+        "email": provider_status(),
+        "channels": list(CHANNELS),
         "catalogueCodes": sorted(CATALOGUE_CODES),
     })
 
@@ -81,7 +93,13 @@ def catalogue():
         "success": True,
         "items": list(CATALOGUE.values()),
         "statuses": ["valid", "due_soon", "overdue"],
+        "channels": list(CHANNELS),
         "reminderOffsetsDays": [-90, -60, -30, -14, -7, 0, 1],
+        "overdueWeeklyDays": OVERDUE_WEEKLY_DAYS,
+        "note": (
+            "Backend seeds channel=email. channel=in_app is accepted on stubs "
+            "for the frontend; dispatch does not email in_app rows."
+        ),
     })
 
 
@@ -257,8 +275,8 @@ def upload_evidence(obligation_id):
         )
 
     evidence_id = str(uuid.uuid4())
-    storage_key = f"{user_id}/{obligation_id}/{evidence_id}_{filename}"
-    stored = blob_store.put_bytes(storage_key, data, content_type)
+    storage_key = build_evidence_key(user_id, obligation_id, evidence_id, filename)
+    stored = blob_store.put_bytes(storage_key, data, content_type, user_id=user_id)
     evidence = store.add_evidence(
         user_id,
         obligation_id,
@@ -290,6 +308,8 @@ def download_evidence(obligation_id, evidence_id):
     item = store.get_evidence(request.compliance_user_id, obligation_id, evidence_id)
     if not item:
         return jsonify({"success": False, "message": "Evidence not found"}), 404
+    if not key_belongs_to_tenant(request.compliance_user_id, item["storageKey"]):
+        return jsonify({"success": False, "message": "Evidence not found"}), 404
     data = blob_store.get_bytes(item["storageKey"])
     if data is None:
         signed = blob_store.sign_url(item["storageKey"])
@@ -311,6 +331,7 @@ def list_reminders():
         request.compliance_user_id,
         obligation_id=request.args.get("obligationId") or request.args.get("obligation_id"),
         status=request.args.get("status"),
+        channel=request.args.get("channel"),
     )
     return jsonify({"success": True, "reminders": items, "count": len(items)})
 
@@ -318,10 +339,12 @@ def list_reminders():
 @bp.post("/reminders/dispatch")
 @require_cron
 def dispatch_reminders():
-    """Process pending stubs whose scheduledFor is today or earlier.
+    """Process pending email stubs whose scheduledFor is today or earlier.
 
-    Email is stubbed (see compliance/email_stub.py). Call from Render cron
-    with X-Cron-Secret, same pattern as /api/benchmarks/update.
+    Email goes through the Brevo adapter (compliance/email.py) using the same
+    BREVO_* secrets as lib/brevo-email.ts. Missing keys skip send fail-soft.
+    in_app stubs are not dispatched here. After an overdue ping, a weekly
+    follow-up stub is queued while the obligation remains overdue.
     """
     body = _json() if request.is_json else {}
     as_of = _as_of_from_request()
@@ -331,8 +354,9 @@ def dispatch_reminders():
         except ValueError:
             return _bad_request("asOf must be YYYY-MM-DD")
 
-    due = store.due_reminders(as_of=as_of)
+    due = store.due_reminders(as_of=as_of, channel="email")
     dispatched = []
+    queued_weekly = []
     for rem in due:
         obligation = rem.get("obligation") or {}
         result = send_reminder_email(
@@ -340,29 +364,59 @@ def dispatch_reminders():
             obligation=obligation,
             reminder=rem,
         )
-        new_status = "sent" if result.get("ok") else "failed"
+        if result.get("delivered"):
+            new_status = "sent"
+        elif result.get("skipped") or result.get("stubbed"):
+            new_status = "skipped"
+        else:
+            new_status = "failed"
+        last_error = result.get("message") if new_status in ("failed", "skipped") else None
         updated = store.mark_reminder(
             rem["id"],
             status=new_status,
-            last_error=None if result.get("ok") else result.get("message"),
+            last_error=last_error,
         )
+        weekly = None
+        if is_overdue_ping(rem) and obligation.get("status") == "overdue":
+            weekly = store.enqueue_weekly_overdue(
+                obligation,
+                rem.get("scheduledFor"),
+                as_of=as_of,
+                channel=rem.get("channel") or "email",
+            )
+            if weekly:
+                queued_weekly.append(weekly)
         dispatched.append({
             "id": rem["id"],
             "status": new_status,
+            "delivered": bool(result.get("delivered")),
+            "skipped": bool(result.get("skipped") or result.get("stubbed")),
             "stubbed": bool(result.get("stubbed")),
+            "provider": result.get("provider"),
             "offsetCode": rem.get("offsetCode"),
             "obligationId": rem.get("obligationId"),
             "email": updated,
+            "nextWeekly": weekly,
+            "message": result.get("message"),
         })
+    email_meta = provider_status()
+    note = (
+        "Brevo send enabled."
+        if email_meta["configured"]
+        else (
+            "Email skipped — set BREVO_API_KEY, BREVO_SENDER_EMAIL, "
+            "BREVO_REPLY_TO_EMAIL on the Flask service (same secrets as "
+            "lib/brevo-email.ts). Dispatch still advances stubs fail-soft."
+        )
+    )
     return jsonify({
         "success": True,
         "asOf": (as_of or date.today()).isoformat(),
         "due": len(due),
         "dispatched": dispatched,
-        "note": (
-            "Email delivery is stubbed. TODO: wire Brevo in "
-            "compliance/email_stub.py before enabling tenant-facing reminders."
-        ),
+        "queuedWeekly": queued_weekly,
+        "email": email_meta,
+        "note": note,
     })
 
 

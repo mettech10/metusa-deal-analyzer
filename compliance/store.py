@@ -17,7 +17,12 @@ from typing import Optional
 import requests
 
 from compliance.catalogue import CATALOGUE_CODES, default_expires_on
-from compliance.reminders import build_reminder_stubs
+from compliance.reminders import (
+    DEFAULT_CHANNEL,
+    OVERDUE_WEEKLY_CODE,
+    build_reminder_stubs,
+    build_weekly_overdue_stub,
+)
 from compliance.status import compute_status
 
 logger = logging.getLogger("compliance.store")
@@ -418,29 +423,40 @@ def list_reminders(
     *,
     obligation_id: Optional[str] = None,
     status: Optional[str] = None,
+    channel: Optional[str] = None,
 ) -> list[dict]:
     if supabase_configured():
-        return _sb_list_reminders(user_id, obligation_id=obligation_id, status=status)
+        return _sb_list_reminders(
+            user_id, obligation_id=obligation_id, status=status, channel=channel,
+        )
     with _lock:
         rows = [r for r in _REMINDERS.values() if r["user_id"] == user_id]
         if obligation_id:
             rows = [r for r in rows if r["obligation_id"] == obligation_id]
         if status:
             rows = [r for r in rows if r["status"] == status]
+        if channel:
+            rows = [r for r in rows if r["channel"] == channel]
         rows.sort(key=lambda r: (r["scheduled_for"], r["offset_days"]))
         return [_public_reminder(r) for r in rows]
 
 
-def due_reminders(as_of=None, status: str = "pending") -> list[dict]:
-    """All-users due reminders for the cron dispatcher."""
+def due_reminders(as_of=None, status: str = "pending", channel: Optional[str] = "email") -> list[dict]:
+    """All-users due reminders for the cron dispatcher.
+
+    Defaults to channel=email so in_app stubs stay for the frontend.
+    Pass channel=None to include every channel.
+    """
     today = _as_of(as_of).isoformat()
     if supabase_configured():
-        return _sb_due_reminders(today, status=status)
+        return _sb_due_reminders(today, status=status, channel=channel)
     with _lock:
         rows = [
             r for r in _REMINDERS.values()
             if r["status"] == status and r["scheduled_for"] <= today
         ]
+        if channel:
+            rows = [r for r in rows if r.get("channel") == channel]
         rows.sort(key=lambda r: (r["scheduled_for"], r["offset_days"]))
         out = []
         for r in rows:
@@ -453,7 +469,7 @@ def due_reminders(as_of=None, status: str = "pending") -> list[dict]:
 
 
 def mark_reminder(reminder_id: str, *, status: str, last_error: Optional[str] = None) -> Optional[dict]:
-    sent_at = _now_iso() if status == "sent" else None
+    sent_at = _now_iso() if status in ("sent", "skipped") else None
     if supabase_configured():
         return _sb_mark_reminder(reminder_id, status=status, sent_at=sent_at, last_error=last_error)
     with _lock:
@@ -463,6 +479,80 @@ def mark_reminder(reminder_id: str, *, status: str, last_error: Optional[str] = 
         row["status"] = status
         row["sent_at"] = sent_at
         row["last_error"] = last_error
+        return _public_reminder(row)
+
+
+def _reminder_row_from_stub(obligation: dict, stub: dict) -> dict:
+    user_id = obligation.get("user_id") or obligation.get("userId")
+    obl_id = obligation.get("id") or obligation.get("obligationId")
+    return {
+        "id": str(uuid.uuid4()),
+        "obligation_id": obl_id,
+        "user_id": user_id,
+        "offset_code": stub["offsetCode"],
+        "offset_days": stub["offsetDays"],
+        "scheduled_for": stub["scheduledFor"],
+        "status": stub.get("status") or "pending",
+        "channel": stub.get("channel") or DEFAULT_CHANNEL,
+        "sent_at": None,
+        "last_error": None,
+        "created_at": _now_iso(),
+    }
+
+
+def add_reminder_stub(obligation: dict, stub: dict) -> dict:
+    """Persist a single stub (weekly overdue / future in_app)."""
+    row = _reminder_row_from_stub(obligation, stub)
+    if supabase_configured():
+        return _sb_insert_reminders([row])[0]
+    with _lock:
+        _REMINDERS[row["id"]] = row
+        return _public_reminder(row)
+
+
+def enqueue_weekly_overdue(
+    obligation: dict,
+    last_scheduled,
+    *,
+    as_of=None,
+    channel: str = DEFAULT_CHANNEL,
+) -> Optional[dict]:
+    """If the obligation is still overdue, queue the next weekly email stub.
+
+    Skips when a pending weekly stub already exists so cron re-runs don't
+    duplicate. Does not catch up missed weeks (no email storm).
+    """
+    if not obligation or obligation.get("status") != "overdue":
+        return None
+    expires = _parse_date(obligation.get("expiresOn") or obligation.get("expires_on"))
+    if expires is None:
+        return None
+    last = _parse_date(last_scheduled) or _as_of(as_of)
+    obl_id = obligation.get("id")
+    channel = (channel or DEFAULT_CHANNEL).lower()
+
+    if supabase_configured():
+        return _sb_enqueue_weekly(obligation, expires, last, as_of=as_of, channel=channel)
+
+    with _lock:
+        pending = [
+            r for r in _REMINDERS.values()
+            if r["obligation_id"] == obl_id
+            and r["status"] == "pending"
+            and r["offset_code"] == OVERDUE_WEEKLY_CODE
+            and r.get("channel") == channel
+        ]
+        if pending:
+            return None
+        stub = build_weekly_overdue_stub(expires, last, as_of=_as_of(as_of), channel=channel)
+        row = _reminder_row_from_stub(
+            {
+                "id": obl_id,
+                "user_id": obligation.get("userId") or obligation.get("user_id"),
+            },
+            stub,
+        )
+        _REMINDERS[row["id"]] = row
         return _public_reminder(row)
 
 
@@ -668,30 +758,30 @@ def _sb_add_evidence(user_id, obligation_id, filename, content_type, size_bytes,
     return _public_evidence(data)
 
 
-def _sb_list_reminders(user_id, obligation_id=None, status=None):
+def _sb_list_reminders(user_id, obligation_id=None, status=None, channel=None):
     params = {"user_id": f"eq.{user_id}", "order": "scheduled_for.asc"}
     if obligation_id:
         params["obligation_id"] = f"eq.{obligation_id}"
     if status:
         params["status"] = f"eq.{status}"
+    if channel:
+        params["channel"] = f"eq.{channel}"
     resp = _sb("GET", "compliance_reminders", params=params, headers=_sb_headers())
     if resp.status_code != 200:
         raise RuntimeError(f"Failed to list reminders: {resp.status_code}")
     return [_public_reminder(r) for r in resp.json()]
 
 
-def _sb_due_reminders(today: str, status: str = "pending"):
-    resp = _sb(
-        "GET",
-        "compliance_reminders",
-        params={
-            "status": f"eq.{status}",
-            "scheduled_for": f"lte.{today}",
-            "select": "*,compliance_obligations(*)",
-            "order": "scheduled_for.asc",
-        },
-        headers=_sb_headers(),
-    )
+def _sb_due_reminders(today: str, status: str = "pending", channel: Optional[str] = "email"):
+    params = {
+        "status": f"eq.{status}",
+        "scheduled_for": f"lte.{today}",
+        "select": "*,compliance_obligations(*)",
+        "order": "scheduled_for.asc",
+    }
+    if channel:
+        params["channel"] = f"eq.{channel}"
+    resp = _sb("GET", "compliance_reminders", params=params, headers=_sb_headers())
     if resp.status_code != 200:
         raise RuntimeError(f"Failed to list due reminders: {resp.status_code}")
     out = []
@@ -702,6 +792,54 @@ def _sb_due_reminders(today: str, status: str = "pending"):
         item["obligation"] = _public_obligation(_row_from_sb(obl), [], []) if obl else None
         out.append(item)
     return out
+
+
+def _sb_insert_reminders(rows: list[dict]) -> list[dict]:
+    payload = [{
+        "id": r["id"],
+        "obligation_id": r["obligation_id"],
+        "user_id": r["user_id"],
+        "offset_code": r["offset_code"],
+        "offset_days": r["offset_days"],
+        "scheduled_for": r["scheduled_for"],
+        "status": r["status"],
+        "channel": r["channel"],
+    } for r in rows]
+    resp = _sb(
+        "POST",
+        "compliance_reminders",
+        json=payload,
+        headers=_sb_headers("return=representation"),
+    )
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Failed to insert reminders: {resp.status_code} {resp.text[:200]}")
+    data = resp.json()
+    if not isinstance(data, list):
+        data = [data]
+    return [_public_reminder(r) for r in data]
+
+
+def _sb_enqueue_weekly(obligation, expires, last, *, as_of, channel):
+    obl_id = obligation.get("id")
+    user_id = obligation.get("userId") or obligation.get("user_id")
+    resp = _sb(
+        "GET",
+        "compliance_reminders",
+        params={
+            "obligation_id": f"eq.{obl_id}",
+            "status": "eq.pending",
+            "offset_code": f"eq.{OVERDUE_WEEKLY_CODE}",
+            "channel": f"eq.{channel}",
+            "select": "id",
+        },
+        headers=_sb_headers(),
+    )
+    if resp.status_code == 200 and resp.json():
+        return None
+    stub = build_weekly_overdue_stub(expires, last, as_of=_as_of(as_of), channel=channel)
+    row = _reminder_row_from_stub({"id": obl_id, "user_id": user_id}, stub)
+    inserted = _sb_insert_reminders([row])
+    return inserted[0] if inserted else None
 
 
 def _sb_mark_reminder(reminder_id, *, status, sent_at, last_error):

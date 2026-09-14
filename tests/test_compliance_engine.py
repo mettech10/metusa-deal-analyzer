@@ -8,7 +8,12 @@ from compliance.catalogue import (
     default_expires_on,
     get_catalogue_item,
 )
-from compliance.reminders import build_reminder_stubs, due_stub_filter
+from compliance.reminders import (
+    build_reminder_stubs,
+    build_weekly_overdue_stub,
+    due_stub_filter,
+    next_weekly_overdue_date,
+)
 from compliance.status import compute_status
 
 
@@ -109,3 +114,27 @@ def test_already_overdue_keeps_overdue_stub_pending():
 
 def test_no_reminders_without_expiry():
     assert build_reminder_stubs(None, "DEP", as_of=date(2026, 9, 14)) == []
+
+
+def test_weekly_overdue_skips_missed_weeks():
+    # last ping 2 Sep, as_of 14 Sep → 9 Sep is in the past, next is 16 Sep
+    assert next_weekly_overdue_date(date(2026, 9, 2), date(2026, 9, 14)) == date(2026, 9, 16)
+
+
+def test_weekly_overdue_stub_shape():
+    stub = build_weekly_overdue_stub(
+        date(2026, 9, 1), date(2026, 9, 2), as_of=date(2026, 9, 2),
+    )
+    assert stub["offsetCode"] == "overdue_weekly"
+    assert stub["channel"] == "email"
+    assert stub["status"] == "pending"
+    assert stub["scheduledFor"] == "2026-09-09"
+    assert stub["offsetDays"] == 8
+
+
+def test_in_app_channel_can_be_seeded_without_email():
+    stubs = build_reminder_stubs(
+        date(2026, 12, 31), "GAS", as_of=date(2026, 1, 1), channel="in_app",
+    )
+    assert stubs
+    assert all(s["channel"] == "in_app" for s in stubs)

@@ -48,6 +48,12 @@ services:
         sync: false
       - key: AIRROI_API_KEY
         sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_REPLY_TO_EMAIL
+        sync: false
 
   # Monthly benchmark refresh — pulls fresh Land Registry sold prices
   # and VOA rental data, recomputes yield/cashflow/growth medians, and
@@ -75,8 +81,8 @@ services:
       - key: BENCHMARK_CRON_SECRET
         sync: false
 
-  # Daily compliance reminder dispatch — marks due T-90..overdue stubs.
-  # Email is currently stubbed (compliance/email_stub.py TODO: Brevo).
+  # Daily compliance reminder dispatch — T-90..overdue plus weekly overdue
+  # re-queue. Email via Brevo when BREVO_API_KEY is set on the web service.
   - type: cron
     name: compliance-reminder-dispatch
     runtime: python

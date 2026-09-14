@@ -31,7 +31,8 @@ create table if not exists public.compliance_reminders (
   scheduled_for  date not null,
   status         text not null default 'pending'
                    check (status in ('pending','sent','skipped','failed')),
-  channel        text not null default 'email',
+  channel        text not null default 'email'
+                   check (channel in ('email','in_app')),
   sent_at        timestamptz,
   last_error     text,
   created_at     timestamptz not null default now()
@@ -106,8 +107,12 @@ create policy "Users can delete own compliance evidence"
   on public.compliance_evidence for delete
   using (auth.uid() = user_id);
 
--- Private evidence bucket. Flask uses the service role so it bypasses RLS;
--- authenticated users can read/write only their own prefix.
+-- Private evidence bucket. Tenant isolation:
+--   bucket  = compliance-evidence (not public)
+--   prefix  = {auth.uid()}/{obligationId}/{filename}
+-- Flask uploads with the service role (bypasses RLS) but still writes under
+-- that prefix; object policies below match auth.uid() to foldername[1], the
+-- same first-path-segment pattern used for user-owned rows elsewhere.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
   'compliance-evidence',

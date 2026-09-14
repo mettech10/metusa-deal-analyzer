@@ -16,6 +16,10 @@ import requests
 logger = logging.getLogger("compliance.storage")
 
 BUCKET = "compliance-evidence"
+# Tenant isolation: every object key is `{userId}/{obligationId}/{file}`.
+# Same pattern as storage.objects RLS: first folder == auth.uid().
+# Flask uses the service role (bypasses RLS) so this prefix is enforced in code too.
+KEY_PREFIX_PATTERN = "{userId}/{obligationId}/{evidenceId}_{filename}"
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = frozenset({
     "application/pdf",
@@ -54,6 +58,24 @@ def sanitize_filename(name: str) -> str:
     return (cleaned or "evidence")[:180]
 
 
+def tenant_prefix(user_id: str) -> str:
+    return f"{(user_id or '').strip()}/"
+
+
+def build_evidence_key(user_id: str, obligation_id: str, evidence_id: str, filename: str) -> str:
+    return f"{user_id}/{obligation_id}/{evidence_id}_{sanitize_filename(filename)}"
+
+
+def key_belongs_to_tenant(user_id: str, storage_key: str) -> bool:
+    """True iff the key stays under the caller's prefix (no path traversal)."""
+    if not user_id or not storage_key:
+        return False
+    normalised = str(storage_key).replace("\\", "/").lstrip("/")
+    if ".." in normalised.split("/"):
+        return False
+    return normalised.startswith(tenant_prefix(user_id))
+
+
 def content_type_allowed(content_type: str) -> bool:
     ct = (content_type or "").split(";")[0].strip().lower()
     return ct in ALLOWED_CONTENT_TYPES
@@ -67,8 +89,10 @@ def storage_backend() -> str:
     return "supabase" if _sb_configured() else "local"
 
 
-def put_bytes(storage_key: str, data: bytes, content_type: str) -> dict:
+def put_bytes(storage_key: str, data: bytes, content_type: str, *, user_id: Optional[str] = None) -> dict:
     """Persist evidence bytes. Returns {backend, storageKey, url?}."""
+    if user_id and not key_belongs_to_tenant(user_id, storage_key):
+        raise ValueError("storage key is outside the tenant prefix")
     if _sb_configured():
         url = f"{_SUPABASE_URL}/storage/v1/object/{BUCKET}/{storage_key}"
         try:
