@@ -4,7 +4,12 @@ Screener → Analyser handoff (POST /v1/deals) + shared property spine.
 This is intentionally a thin scaffold: it persists a schemaVersion-1 listing
 (photos stripped), resolves or creates a canonical propertyId from
 address/postcode, and returns a metalyzi.co.uk deep link. It does NOT run
-screening, MTD, compliance, ltd-co, or licensing.
+analysis, screening, MTD, compliance, ltd-co, or licensing — calc still
+happens when the frontend opens deepLinkPath (/analyse).
+
+strategyHint may be omitted (or Screener OTHER); both default to btl.
+listingUrl aliases: sourceUrl / url. bedrooms aliases: beds. bathrooms
+aliases: baths. epcRating / epc is kept on the canonical listing when present.
 
 Curl (production):
 
@@ -77,6 +82,8 @@ _STRATEGY_ALIASES = {
     "shortlet": "sa",
     "development": "development",
     "dev": "development",
+    # Screener OTHER is an explicit omit — Analyser defaults to BTL.
+    "other": "btl",
 }
 
 PHOTO_KEYS = frozenset({
@@ -157,8 +164,9 @@ def strip_photos(value: Any) -> Any:
 
 
 def map_strategy_hint(raw: Any) -> str:
+    """Map a strategy hint to a lowercase enum. Missing/empty/OTHER → btl."""
     if raw is None or str(raw).strip() == "":
-        raise DealValidationError("strategyHint is required", ["strategyHint"])
+        return "btl"
     token = str(raw).strip().lower().replace("_", "-")
     token = re.sub(r"\s+", "-", token)
     mapped = _STRATEGY_ALIASES.get(token) or _STRATEGY_ALIASES.get(token.replace("-", ""))
@@ -256,7 +264,11 @@ def normalise_listing(raw_listing: dict, extra: dict | None = None) -> dict:
         raise DealValidationError("listing must be an object", ["listing"])
 
     listing_url = _as_str(_first(
-        merged.get("listingUrl"), merged.get("url"), merged.get("listing_url"),
+        merged.get("listingUrl"),
+        merged.get("sourceUrl"),
+        merged.get("url"),
+        merged.get("listing_url"),
+        merged.get("source_url"),
     ))
     source_listing_id = _as_str(_first(
         merged.get("sourceListingId"),
@@ -287,17 +299,23 @@ def normalise_listing(raw_listing: dict, extra: dict | None = None) -> dict:
         "postcode": postcode,
         "priceGbp": int(price) if price is not None else None,
         "rentPcmGbp": rent,
-        "bedrooms": _as_int(merged.get("bedrooms")),
-        "bathrooms": _as_int(merged.get("bathrooms")),
+        "bedrooms": _as_int(_first(merged.get("bedrooms"), merged.get("beds"))),
+        "bathrooms": _as_int(_first(merged.get("bathrooms"), merged.get("baths"))),
         "propertyType": _as_str(_first(merged.get("propertyType"), merged.get("property_type"))),
         "tenure": _as_str(merged.get("tenure")),
         "description": _as_str(merged.get("description")),
     }
+    epc_rating = _as_str(_first(merged.get("epcRating"), merged.get("epc"), merged.get("epc_rating")))
+    if epc_rating:
+        canonical["epcRating"] = epc_rating
 
     reserved = set(canonical) | {
-        "url", "listing_url", "listingId", "listing_id", "displayAddress",
+        "url", "listing_url", "sourceUrl", "source_url",
+        "listingId", "listing_id", "displayAddress",
         "price", "purchasePrice", "monthlyRent", "rent", "property_type",
         "listingSource", "portal", "listing_source",
+        "beds", "baths", "epc", "epc_rating", "epcRating",
+        "strategyHint",
     }
     for key, value in merged.items():
         if key in reserved or key in canonical:
@@ -343,7 +361,10 @@ def validate_screener_payload(body: dict) -> tuple[str, dict, Optional[str]]:
         "sourceListingId": body.get("sourceListingId"),
     }
     listing = normalise_listing(listing_raw, extra)
-    strategy = map_strategy_hint(_first(body.get("strategyHint"), listing_raw.get("strategyHint")))
+    # Missing / empty / Screener OTHER → btl. Calc still happens on /analyse.
+    strategy = map_strategy_hint(_first(
+        body.get("strategyHint"), listing_raw.get("strategyHint"),
+    ))
 
     rent = listing.get("rentPcmGbp")
     if rent is None:

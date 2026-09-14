@@ -138,6 +138,9 @@ def test_property_key_stable_and_shared_with_discovery_algorithm():
     ("R2SA", "sa"),
     ("development", "development"),
     ("DEV", "development"),
+    (None, "btl"),
+    ("", "btl"),
+    ("OTHER", "btl"),
 ])
 def test_strategy_hint_maps_to_lowercase_enums(raw, expected):
     assert map_strategy_hint(raw) == expected
@@ -300,3 +303,70 @@ def test_uppercase_strategy_stored_lowercase(client):
     body = {**SCREENER_BODY, "strategyHint": "BRRRR"}
     data = _post(client, body, idem="screener:rightmove:brrrr-1").get_json()
     assert "strategy=brrrr" in data["deepLinkPath"]
+
+
+def test_omitted_strategy_hint_defaults_to_btl(client, store):
+    body = {k: v for k, v in SCREENER_BODY.items() if k != "strategyHint"}
+    body["listing"] = {**SCREENER_BODY["listing"], "sourceListingId": "omit-hint"}
+    res = _post(client, body, idem="screener:rightmove:omit-hint")
+    data = res.get_json()
+    assert res.status_code == 201
+    assert "strategy=btl" in data["deepLinkPath"]
+    assert store.deals[data["dealId"]]["strategy"] == "btl"
+
+
+def test_empty_and_other_strategy_hint_default_to_btl():
+    body = {
+        "source": "screener",
+        "schemaVersion": 1,
+        "listing": {
+            "address": "1 High St",
+            "postcode": "M1 1AA",
+            "sourceListingId": "x",
+            "rentPcmGbp": 800,
+        },
+    }
+    strategy, _, _ = validate_screener_payload(body)
+    assert strategy == "btl"
+    strategy_other, _, _ = validate_screener_payload({**body, "strategyHint": "OTHER"})
+    assert strategy_other == "btl"
+    strategy_empty, _, _ = validate_screener_payload({**body, "strategyHint": ""})
+    assert strategy_empty == "btl"
+
+
+def test_source_url_alias_maps_to_listing_url(client, store):
+    listing = {
+        k: v for k, v in SCREENER_BODY["listing"].items()
+        if k not in ("listingUrl", "photos", "images", "floorplans")
+    }
+    listing["sourceUrl"] = "https://www.rightmove.co.uk/properties/888888"
+    listing["sourceListingId"] = "888888"
+    body = {**SCREENER_BODY, "listing": listing}
+    res = _post(client, body, idem="screener:rightmove:888888")
+    data = res.get_json()
+    assert res.status_code == 201
+    stored = store.deals[data["dealId"]]["listing"]
+    assert stored["listingUrl"] == "https://www.rightmove.co.uk/properties/888888"
+    assert "sourceUrl" not in stored
+    assert "url=" in data["deepLinkPath"]
+
+
+def test_beds_and_baths_aliases_and_epc(client, store):
+    listing = {
+        k: v for k, v in SCREENER_BODY["listing"].items()
+        if k not in ("bedrooms", "photos", "images", "floorplans")
+    }
+    listing["beds"] = 4
+    listing["baths"] = 2
+    listing["epc"] = "C"
+    listing["sourceListingId"] = "beds-alias"
+    body = {**SCREENER_BODY, "listing": listing}
+    res = _post(client, body, idem="screener:rightmove:beds-alias")
+    assert res.status_code == 201
+    stored = store.deals[res.get_json()["dealId"]]["listing"]
+    assert stored["bedrooms"] == 4
+    assert stored["bathrooms"] == 2
+    assert stored["epcRating"] == "C"
+    assert "beds" not in stored
+    assert "baths" not in stored
+    assert "epc" not in stored
