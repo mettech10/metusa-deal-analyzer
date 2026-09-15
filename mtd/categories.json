@@ -1,0 +1,163 @@
+{
+  "version": "1.0.0",
+  "alignment": "SA105 UK property (self assessment) + HMRC MTD ITSA UK Property period summary",
+  "notes": [
+    "Residential finance costs are a tax reducer, not a deductible expense against property profit. They MUST NOT be posted to non-residential finance (SA105 box 26 / HMRC financialCosts).",
+    "MTD Pack v1 records and snapshots only. It does not submit to HMRC."
+  ],
+  "categories": [
+    {
+      "code": "uk_rent_income",
+      "name": "Rents and other income from UK property",
+      "kind": "income",
+      "sa105Box": "20",
+      "hmrcField": "income.periodAmount",
+      "isResidentialFinance": false,
+      "aliases": ["rent", "rents", "rental income", "uk rent", "periodamount", "box 20", "box20"]
+    },
+    {
+      "code": "tax_taken_off",
+      "name": "Tax taken off any income",
+      "kind": "income_adjustment",
+      "sa105Box": "21",
+      "hmrcField": "income.taxDeducted",
+      "isResidentialFinance": false,
+      "aliases": ["tax deducted", "tax taken off", "taxdeducted", "box 21", "box21"]
+    },
+    {
+      "code": "lease_premiums",
+      "name": "Premiums for the grant of a lease",
+      "kind": "income",
+      "sa105Box": "22",
+      "hmrcField": "income.premiumsOfLeaseGrant",
+      "isResidentialFinance": false,
+      "aliases": ["lease premium", "premiums of lease grant", "premiumsofleasegrant", "box 22", "box22"]
+    },
+    {
+      "code": "reverse_premiums",
+      "name": "Reverse premiums and inducements",
+      "kind": "income",
+      "sa105Box": "23",
+      "hmrcField": "income.reversePremiums",
+      "isResidentialFinance": false,
+      "aliases": ["reverse premium", "inducement", "reversepremiums", "box 23", "box23"]
+    },
+    {
+      "code": "other_property_income",
+      "name": "Other property income",
+      "kind": "income",
+      "sa105Box": "20",
+      "hmrcField": "income.otherIncome",
+      "isResidentialFinance": false,
+      "aliases": ["other income", "otherincome", "service charge income"]
+    },
+    {
+      "code": "rent_a_room",
+      "name": "Rent a Room receipts",
+      "kind": "income",
+      "sa105Box": "38",
+      "hmrcField": "income.rentARoom.rentsReceived",
+      "isResidentialFinance": false,
+      "aliases": ["rent a room", "rentaroom", "rents received"]
+    },
+    {
+      "code": "premises_running_costs",
+      "name": "Rent, rates, insurance and ground rents",
+      "kind": "expense",
+      "sa105Box": "24",
+      "hmrcField": "expenses.premisesRunningCosts",
+      "isResidentialFinance": false,
+      "aliases": ["insurance", "ground rent", "rates", "council tax", "premises", "premisesrunningcosts", "box 24", "box24"]
+    },
+    {
+      "code": "repairs_and_maintenance",
+      "name": "Property repairs and maintenance",
+      "kind": "expense",
+      "sa105Box": "25",
+      "hmrcField": "expenses.repairsAndMaintenance",
+      "isResidentialFinance": false,
+      "aliases": ["repairs", "maintenance", "repairsandmaintenance", "box 25", "box25"]
+    },
+    {
+      "code": "non_residential_finance_costs",
+      "name": "Loan interest and other financial costs (non-residential)",
+      "kind": "expense",
+      "sa105Box": "26",
+      "hmrcField": "expenses.financialCosts",
+      "isResidentialFinance": false,
+      "aliases": ["commercial finance", "non-residential finance", "non residential finance", "financialcosts", "box 26", "box26"]
+    },
+    {
+      "code": "professional_fees",
+      "name": "Legal, management and other professional fees",
+      "kind": "expense",
+      "sa105Box": "27",
+      "hmrcField": "expenses.professionalFees",
+      "isResidentialFinance": false,
+      "aliases": ["legal", "management fees", "accountancy", "professional fees", "professionalfees", "agent fees", "box 27", "box27"]
+    },
+    {
+      "code": "cost_of_services",
+      "name": "Costs of services provided, including wages",
+      "kind": "expense",
+      "sa105Box": "28",
+      "hmrcField": "expenses.costOfServices",
+      "isResidentialFinance": false,
+      "aliases": ["wages", "services", "costofservices", "utilities recharge", "box 28", "box28"]
+    },
+    {
+      "code": "travel_costs",
+      "name": "Travel costs",
+      "kind": "expense",
+      "sa105Box": "29",
+      "hmrcField": "expenses.travelCosts",
+      "isResidentialFinance": false,
+      "aliases": ["travel", "mileage", "travelcosts"]
+    },
+    {
+      "code": "other_allowable_expenses",
+      "name": "Other allowable property expenses",
+      "kind": "expense",
+      "sa105Box": "29",
+      "hmrcField": "expenses.other",
+      "isResidentialFinance": false,
+      "aliases": ["other", "other expenses", "sundry", "box 29", "box29"]
+    },
+    {
+      "code": "replacing_domestic_items",
+      "name": "Costs of replacing domestic items",
+      "kind": "expense",
+      "sa105Box": "37",
+      "hmrcField": "expenses.other",
+      "isResidentialFinance": false,
+      "aliases": ["domestic items", "replacement furniture", "white goods", "box 37", "box37"]
+    },
+    {
+      "code": "residential_finance_costs",
+      "name": "Residential finance costs",
+      "kind": "residential_finance",
+      "sa105Box": "44",
+      "hmrcField": "expenses.residentialFinancialCost",
+      "isResidentialFinance": true,
+      "aliases": ["mortgage interest", "residential finance", "residential interest", "residentialfinancialcost", "finance costs", "box 44", "box44"]
+    },
+    {
+      "code": "residential_finance_costs_bf",
+      "name": "Unused residential finance costs brought forward",
+      "kind": "residential_finance",
+      "sa105Box": "45",
+      "hmrcField": "expenses.residentialFinancialCostsCarriedForward",
+      "isResidentialFinance": true,
+      "aliases": ["finance brought forward", "residential finance bf", "residentialfinancialcostscarriedforward", "box 45", "box45"]
+    },
+    {
+      "code": "private_use_adjustment",
+      "name": "Private use adjustment",
+      "kind": "adjustment",
+      "sa105Box": "30",
+      "hmrcField": null,
+      "isResidentialFinance": false,
+      "aliases": ["private use", "box 30", "box30"]
+    }
+  ]
+}

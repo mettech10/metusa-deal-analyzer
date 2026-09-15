@@ -1491,6 +1491,10 @@ CORS(app, resources={
             "Idempotency-Key",
             "X-User-Id",
             "X-Cron-Secret",
+            "X-Org-Id",
+            "X-Mtd-Org-Id",
+            "X-Mtd-User-Id",
+            "X-Mtd-User-Email",
         ],
         "expose_headers": ["Idempotency-Key"],
         "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
@@ -1518,6 +1522,15 @@ try:
     register_compliance(app, limiter=limiter)
 except Exception as _compliance_exc:
     print(f"[WARN] compliance blueprint not registered: {_compliance_exc}")
+
+# Metalyzi MTD Pack v1 (/v1/mtd/*) — records, CSV import, quarter packs.
+# No HMRC submit. Optional so the deal analyser still boots without mtd/.
+try:
+    from mtd.blueprint import configure_mtd, mtd_bp
+    configure_mtd(app)
+    app.register_blueprint(mtd_bp)
+except Exception as _mtd_exc:  # pragma: no cover - keep deal analyser booting
+    print(f"[WARN] MTD Pack v1 not loaded: {_mtd_exc}")
 
 # Security: Add hardening headers to every response
 @app.after_request
