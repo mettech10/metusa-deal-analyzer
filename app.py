@@ -1420,8 +1420,9 @@ def _record_visit(path, method, status_code=200, is_error=False, error_detail=No
         _analytics['daily_visits'][date_str] += 1
         _analytics['hourly_visits'][hour_str] += 1
 
-        if path.startswith('/api/') or path in ('/analyze', '/ai-analyze', '/extract-url',
-                                                  '/epc-lookup', '/download-pdf'):
+        if (path.startswith('/api/') or path.startswith('/v1/')
+                or path in ('/analyze', '/ai-analyze', '/extract-url',
+                            '/epc-lookup', '/download-pdf')):
             _analytics['api_counts'][path] += 1
         else:
             _analytics['page_counts'][path] += 1
@@ -1484,8 +1485,15 @@ CORS(app, resources={
     r"/api/*":                           {"origins": _allowed_origins},
     r"/v1/*": {
         "origins": _allowed_origins,
-        "allow_headers": ["Content-Type", "Authorization", "Idempotency-Key"],
+        "allow_headers": [
+            "Content-Type",
+            "Authorization",
+            "Idempotency-Key",
+            "X-User-Id",
+            "X-Cron-Secret",
+        ],
         "expose_headers": ["Idempotency-Key"],
+        "methods": ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     },
 })
 
@@ -1501,6 +1509,15 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"],
     storage_uri=_limiter_storage,
 )
+
+# Compliance Cockpit MVP (/v1/compliance/*) — catalogue, status engine,
+# reminder stubs, evidence upload. Kept as a package so app.py stays the
+# analysis monolith rather than growing another few hundred lines here.
+try:
+    from compliance.blueprint import register_compliance
+    register_compliance(app, limiter=limiter)
+except Exception as _compliance_exc:
+    print(f"[WARN] compliance blueprint not registered: {_compliance_exc}")
 
 # Security: Add hardening headers to every response
 @app.after_request
