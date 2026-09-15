@@ -296,6 +296,24 @@ Generate and download PDF report.
 
 **Response:** PDF file download
 
+### POST /v1/licensing/check
+England licensing checker (P0–P2): postcode → local authority, mandatory HMO / sui generis rules, Article 4 ingest from planning.data.gov.uk, and curated additional/selective schemes for ~25 priority LAs.
+
+See [docs/licensing.md](docs/licensing.md) for the request/response contract, confidence model, and curator seed format.
+
+**Request:**
+```json
+{
+  "postcode": "M14 6LT",
+  "occupants": 5,
+  "households": 2,
+  "intended_use": "hmo",
+  "conversion_from_c3": true
+}
+```
+
+**Response:** `flags[]` with `severity` / `severity_class` (`deal_killer` | `compliance_cost` | `soft_warning` | `info`), structured `deal_impact` (`verdict`, `killers`, `estimated_licence_fees_gbp`, `analyse_hooks.add_capex_lines` / `add_risk_notes`), versioned `disclaimer`, plus first-class `freshness`. Gated by `LICENSING_CHECKER_V1`. UPRN and CON29 are out of scope.
+
 ---
 
 ## 🐛 Troubleshooting

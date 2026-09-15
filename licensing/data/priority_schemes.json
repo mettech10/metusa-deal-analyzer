@@ -1,0 +1,1000 @@
+{
+  "meta": {
+    "version": 2,
+    "nation": "England",
+    "updated_at": "2026-09-14",
+    "purpose": "Curator-edited additional and selective licensing schemes for 25 priority English LAs.",
+    "spatial_policy": "Do not invent boundaries. citywide means the published designation is LA-wide. designated_areas lists named wards/neighbourhoods as text only. boundary_geojson is always null until an official geometry is attached.",
+    "confidence_policy": "Seeds are not live scrapes. Confidence is capped. A miss in this file is not evidence of no scheme.",
+    "verification_method": "Existing rows seeded from in-repo notes (not HMO_LICENSING_LOOKUP at runtime). New priority LAs are unknown placeholders.",
+    "stale_slo_days": {
+      "priority": 30,
+      "covered": 90
+    },
+    "out_of_scope": [
+      "UPRN",
+      "CON29",
+      "Wales",
+      "Scotland",
+      "Northern Ireland",
+      "invented polygons",
+      "HMO_LICENSING_LOOKUP"
+    ],
+    "swaps": {
+      "removed": [
+        "Kingston upon Hull (E06000010)",
+        "York (E06000014)",
+        "Reading (E06000038)",
+        "Brighton and Hove (E06000043)",
+        "Cambridge (E07000008)",
+        "Oxford (E07000178)",
+        "Enfield (E09000010)"
+      ],
+      "added": [
+        "Salford (E08000006)",
+        "Leicester (E06000016)",
+        "Croydon (E09000008)",
+        "Ealing (E09000009)",
+        "Westminster (E09000033)",
+        "Camden (E09000007)",
+        "Islington (E09000019)"
+      ],
+      "note": "Priority set aligned to Birmingham, Manchester, Salford, Leeds, Nottingham, Liverpool, Sheffield, Bristol, Newcastle, Leicester, Coventry, Bradford + listed London boroughs. Curator to fill unknown placeholders."
+    },
+    "priority_las": [
+      {
+        "la_code": "E08000025",
+        "la_name": "Birmingham"
+      },
+      {
+        "la_code": "E08000003",
+        "la_name": "Manchester"
+      },
+      {
+        "la_code": "E08000006",
+        "la_name": "Salford"
+      },
+      {
+        "la_code": "E08000035",
+        "la_name": "Leeds"
+      },
+      {
+        "la_code": "E06000018",
+        "la_name": "Nottingham"
+      },
+      {
+        "la_code": "E08000012",
+        "la_name": "Liverpool"
+      },
+      {
+        "la_code": "E08000019",
+        "la_name": "Sheffield"
+      },
+      {
+        "la_code": "E06000023",
+        "la_name": "Bristol, City of"
+      },
+      {
+        "la_code": "E08000021",
+        "la_name": "Newcastle upon Tyne"
+      },
+      {
+        "la_code": "E06000016",
+        "la_name": "Leicester"
+      },
+      {
+        "la_code": "E08000026",
+        "la_name": "Coventry"
+      },
+      {
+        "la_code": "E08000032",
+        "la_name": "Bradford"
+      },
+      {
+        "la_code": "E09000025",
+        "la_name": "Newham"
+      },
+      {
+        "la_code": "E09000005",
+        "la_name": "Brent"
+      },
+      {
+        "la_code": "E09000031",
+        "la_name": "Waltham Forest"
+      },
+      {
+        "la_code": "E09000014",
+        "la_name": "Haringey"
+      },
+      {
+        "la_code": "E09000012",
+        "la_name": "Hackney"
+      },
+      {
+        "la_code": "E09000030",
+        "la_name": "Tower Hamlets"
+      },
+      {
+        "la_code": "E09000008",
+        "la_name": "Croydon"
+      },
+      {
+        "la_code": "E09000009",
+        "la_name": "Ealing"
+      },
+      {
+        "la_code": "E09000028",
+        "la_name": "Southwark"
+      },
+      {
+        "la_code": "E09000022",
+        "la_name": "Lambeth"
+      },
+      {
+        "la_code": "E09000033",
+        "la_name": "Westminster"
+      },
+      {
+        "la_code": "E09000007",
+        "la_name": "Camden"
+      },
+      {
+        "la_code": "E09000019",
+        "la_name": "Islington"
+      }
+    ]
+  },
+  "schemes": [
+    {
+      "la_code": "E08000003",
+      "la_name": "Manchester",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Fallowfield",
+          "Rusholme",
+          "Withington",
+          "Levenshulme",
+          "Hulme",
+          "Longsight",
+          "Cheetham",
+          "parts of Old Trafford/Whalley Range"
+        ],
+        "notes": "Named areas copied from the in-repo lookup. Not a ward polygon set. Address-level membership is unresolved."
+      },
+      "occupants_threshold": "3-4 occupants in 2+ households (small HMO)",
+      "term_years": 5,
+      "fee_range": "\u00a3700-\u00a31,300",
+      "confidence": 0.58,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Confirm current designation order and maps on Manchester City Council licensing pages before treating a given street as in/out.",
+      "sources": [
+        {
+          "name": "Manchester City Council",
+          "kind": "curated_seed",
+          "url": "https://www.manchester.gov.uk/",
+          "note": "Landing URL only \u2014 curator should replace with the live licensing designation page."
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000003",
+      "la_name": "Manchester",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "parts of Crumpsall",
+          "Harpurhey",
+          "Moss Side"
+        ],
+        "notes": "Named areas copied from the in-repo lookup. No polygons."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3700-\u00a31,300",
+      "confidence": 0.55,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Selective licensing of private rented homes in named areas only.",
+      "sources": [
+        {
+          "name": "Manchester City Council",
+          "kind": "curated_seed",
+          "url": "https://www.manchester.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000012",
+      "la_name": "Liverpool",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup describes a citywide selective scheme. Still confirm the current designation order."
+      },
+      "term_years": 5,
+      "start_date": "2022-04-01",
+      "end_date": "2027-04-01",
+      "fee_range": "\u00a3400-\u00a3800",
+      "confidence": 0.62,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Lookup: citywide selective licensing renewed Apr 2022, runs to Apr 2027. Dates are from that note, not the sealed order.",
+      "sources": [
+        {
+          "name": "Liverpool City Council",
+          "kind": "curated_seed",
+          "url": "https://www.liverpool.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000035",
+      "la_name": "Leeds",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Beeston Hill / Cross Flatts",
+          "Burley / Hyde Park / Woodhouse / Headingley",
+          "Harehills",
+          "parts of LS2 and LS3"
+        ],
+        "notes": "LS2/LS3 are postcode districts, not legal boundaries. Do not treat district membership as scheme membership."
+      },
+      "occupants_threshold": "small HMOs in designated areas",
+      "term_years": 5,
+      "fee_range": "\u00a3825-\u00a31,100",
+      "confidence": 0.55,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Four designated additional-licensing areas per in-repo note (last_renewed 2022).",
+      "sources": [
+        {
+          "name": "Leeds City Council",
+          "kind": "curated_seed",
+          "url": "https://www.leeds.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000021",
+      "la_name": "Newcastle upon Tyne",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Heaton",
+          "Sandyford",
+          "Jesmond",
+          "Spital Tongues",
+          "parts of Fenham"
+        ],
+        "notes": "Named neighbourhoods only. No polygons."
+      },
+      "occupants_threshold": "3+ unrelated occupants",
+      "term_years": 5,
+      "fee_range": "\u00a3775-\u00a31,050",
+      "confidence": 0.55,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "Newcastle City Council",
+          "kind": "curated_seed",
+          "url": "https://www.newcastle.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000019",
+      "la_name": "Sheffield",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Crookesmoor",
+          "Walkley",
+          "Broomhill",
+          "parts of Sharrow"
+        ],
+        "notes": "In-repo note says 'city wards including' these names \u2014 list is not exhaustive."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3550-\u00a3900",
+      "confidence": 0.52,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "Sheffield City Council",
+          "kind": "curated_seed",
+          "url": "https://www.sheffield.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E06000018",
+      "la_name": "Nottingham",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: citywide selective licensing renewed Dec 2023."
+      },
+      "term_years": 5,
+      "start_date": "2023-12-01",
+      "fee_range": "\u00a3640-\u00a3890",
+      "confidence": 0.62,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Start date month is from the in-repo 'Dec 2023' note, not the sealed order day.",
+      "sources": [
+        {
+          "name": "Nottingham City Council",
+          "kind": "curated_seed",
+          "url": "https://www.nottinghamcity.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000025",
+      "la_name": "Birmingham",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Selly Oak",
+          "Edgbaston",
+          "Bordesley Green",
+          "Aston",
+          "Sparkbrook"
+        ],
+        "notes": "In-repo note: additional licensing in 25 wards including these. Full ward list not stored; do not infer the other 20."
+      },
+      "occupants_threshold": "3-4 occupants",
+      "term_years": 5,
+      "fee_range": "\u00a31,025-\u00a31,575",
+      "confidence": 0.52,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "Birmingham City Council",
+          "kind": "curated_seed",
+          "url": "https://www.birmingham.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E06000023",
+      "la_name": "Bristol, City of",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Bedminster",
+          "Easton",
+          "St George"
+        ],
+        "notes": "Named areas from in-repo lookup. ONS name is 'Bristol, City of'."
+      },
+      "occupants_threshold": "3+ unrelated occupants",
+      "term_years": 5,
+      "fee_range": "\u00a3750-\u00a31,200",
+      "confidence": 0.55,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "Bristol City Council",
+          "kind": "curated_seed",
+          "url": "https://www.bristol.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000026",
+      "la_name": "Coventry",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [],
+        "notes": "In-repo note: additional licensing in 18 wards including the student belt around Coventry University. Ward names not stored \u2014 do not invent them."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3675-\u00a3950",
+      "confidence": 0.48,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "named_areas left empty because the lookup did not list the 18 wards. Coverage kind is designated_areas, not citywide.",
+      "sources": [
+        {
+          "name": "Coventry City Council",
+          "kind": "curated_seed",
+          "url": "https://www.coventry.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000032",
+      "la_name": "Bradford",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Manningham",
+          "Heaton",
+          "Toller",
+          "Bradford Moor"
+        ],
+        "notes": "Named areas from in-repo lookup. No polygons."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3500-\u00a3750",
+      "confidence": 0.55,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "City of Bradford Metropolitan District Council",
+          "kind": "curated_seed",
+          "url": "https://www.bradford.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000022",
+      "la_name": "Lambeth",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "In-repo lookup says additional HMO + selective across the borough AND rented houses in designated areas. Coverage is not unambiguous, so kind=unknown rather than inventing citywide."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3900-\u00a31,500",
+      "confidence": 0.45,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "curator_notes": "Split additional vs selective maps need a human pass against the designation orders.",
+      "sources": [
+        {
+          "name": "London Borough of Lambeth",
+          "kind": "curated_seed",
+          "url": "https://www.lambeth.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000022",
+      "la_name": "Lambeth",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [],
+        "notes": "In-repo note refers to designated areas for all rented houses. Area names not stored."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3900-\u00a31,500",
+      "confidence": 0.45,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Lambeth",
+          "kind": "curated_seed",
+          "url": "https://www.lambeth.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000025",
+      "la_name": "Newham",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: borough-wide additional licensing for HMOs of 3+ occupants."
+      },
+      "occupants_threshold": "3+ occupants",
+      "term_years": 5,
+      "fee_range": "\u00a3950-\u00a31,400",
+      "confidence": 0.62,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Newham",
+          "kind": "curated_seed",
+          "url": "https://www.newham.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000025",
+      "la_name": "Newham",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: selective licensing across the borough."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3950-\u00a31,400",
+      "confidence": 0.62,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Newham",
+          "kind": "curated_seed",
+          "url": "https://www.newham.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000031",
+      "la_name": "Waltham Forest",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: borough-wide selective licensing of all private rented properties."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3725-\u00a31,000",
+      "confidence": 0.62,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Waltham Forest",
+          "kind": "curated_seed",
+          "url": "https://www.walthamforest.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000005",
+      "la_name": "Brent",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: additional HMO licensing borough-wide."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,100-\u00a31,600",
+      "confidence": 0.6,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Brent",
+          "kind": "curated_seed",
+          "url": "https://www.brent.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000005",
+      "la_name": "Brent",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Harlesden",
+          "Wembley Central"
+        ],
+        "notes": "In-repo note: selective licensing in 12 wards including these. Full ward list not stored."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,100-\u00a31,600",
+      "confidence": 0.5,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Brent",
+          "kind": "curated_seed",
+          "url": "https://www.brent.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000014",
+      "la_name": "Haringey",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Tottenham",
+          "Wood Green",
+          "Northumberland Park"
+        ],
+        "notes": "In-repo lookup groups additional + selective in designated wards. Split is not independently confirmed."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3900-\u00a31,400",
+      "confidence": 0.5,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Haringey",
+          "kind": "curated_seed",
+          "url": "https://www.haringey.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000014",
+      "la_name": "Haringey",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Tottenham",
+          "Wood Green",
+          "Northumberland Park"
+        ],
+        "notes": "Same named areas as additional until a curator splits the maps."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3900-\u00a31,400",
+      "confidence": 0.5,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Haringey",
+          "kind": "curated_seed",
+          "url": "https://www.haringey.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000012",
+      "la_name": "Hackney",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: additional HMO licensing borough-wide for small HMOs."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3950-\u00a31,400",
+      "confidence": 0.6,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Hackney",
+          "kind": "curated_seed",
+          "url": "https://www.hackney.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000030",
+      "la_name": "Tower Hamlets",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Whitechapel",
+          "Spitalfields",
+          "Weavers",
+          "parts of Bow"
+        ],
+        "notes": "In-repo lookup groups additional + selective in these named areas."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,000-\u00a31,500",
+      "confidence": 0.5,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Tower Hamlets",
+          "kind": "curated_seed",
+          "url": "https://www.towerhamlets.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000030",
+      "la_name": "Tower Hamlets",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Whitechapel",
+          "Spitalfields",
+          "Weavers",
+          "parts of Bow"
+        ],
+        "notes": "Same named areas as additional until a curator splits the maps."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,000-\u00a31,500",
+      "confidence": 0.5,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Tower Hamlets",
+          "kind": "curated_seed",
+          "url": "https://www.towerhamlets.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E09000028",
+      "la_name": "Southwark",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "In-repo lookup: additional HMO licensing borough-wide for small HMOs of 3+ occupants."
+      },
+      "occupants_threshold": "3+ occupants",
+      "term_years": 5,
+      "fee_range": "\u00a3950-\u00a31,400",
+      "confidence": 0.6,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "seeded_from_in_repo_lookup",
+      "sources": [
+        {
+          "name": "London Borough of Southwark",
+          "kind": "curated_seed",
+          "url": "https://www.southwark.gov.uk/"
+        }
+      ],
+      "coverage_tier": "priority"
+    },
+    {
+      "la_code": "E08000006",
+      "la_name": "Salford",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Salford Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E06000016",
+      "la_name": "Leicester",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Leicester Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E09000008",
+      "la_name": "Croydon",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Croydon Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E09000009",
+      "la_name": "Ealing",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Ealing Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E09000033",
+      "la_name": "Westminster",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Westminster Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E09000007",
+      "la_name": "Camden",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Camden Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    },
+    {
+      "la_code": "E09000019",
+      "la_name": "Islington",
+      "scheme_type": "unknown",
+      "status": "unknown",
+      "coverage_tier": "priority",
+      "coverage": {
+        "kind": "unknown",
+        "spatial_resolution": "none",
+        "named_areas": [],
+        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+      },
+      "confidence": 0.3,
+      "last_verified_at": "2026-09-14T00:00:00Z",
+      "verification_method": "priority_placeholder",
+      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "sources": [
+        {
+          "name": "Islington Council",
+          "kind": "curated_seed",
+          "note": "Placeholder only \u2014 no scheme asserted."
+        }
+      ]
+    }
+  ]
+}
