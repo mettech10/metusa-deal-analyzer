@@ -23,6 +23,7 @@ import base64
 import binascii
 import uuid
 from datetime import date
+from functools import wraps
 
 from flask import Blueprint, jsonify, request, send_file
 from io import BytesIO
@@ -68,13 +69,29 @@ def _bad_request(message: str, extra: dict | None = None):
     return jsonify(body), 400
 
 
+def _store_errors(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except store.ComplianceStoreError as exc:
+            return jsonify({
+                "success": False,
+                "error": "compliance_store_unavailable",
+                "message": str(exc),
+            }), exc.status_code
+    return wrapped
+
+
 @bp.get("/health")
 def health():
+    probe = store.probe_store()
     return jsonify({
         "success": True,
-        "status": "ok",
+        "status": "ok" if probe.get("ready") else "degraded",
         "service": "compliance",
-        "store": "supabase" if store.supabase_configured() else "memory",
+        "store": probe.get("backend"),
+        "storeProbe": probe,
         "blobStore": blob_store.storage_backend(),
         "evidence": {
             "bucket": BUCKET,
@@ -108,6 +125,7 @@ def catalogue():
 
 @bp.get("/dashboard")
 @require_user
+@_store_errors
 def dashboard():
     as_of = _as_of_from_request()
     property_id = request.args.get("propertyId") or request.args.get("property_id")
@@ -136,6 +154,7 @@ def dashboard():
 
 @bp.get("/obligations")
 @require_user
+@_store_errors
 def list_obligations():
     as_of = _as_of_from_request()
     items = store.list_obligations(
@@ -150,6 +169,7 @@ def list_obligations():
 
 @bp.post("/obligations")
 @require_user
+@_store_errors
 def create_obligation():
     body = _json()
     property_id = body.get("propertyId") or body.get("property_id")
@@ -168,6 +188,8 @@ def create_obligation():
             notes=body.get("notes") or "",
             as_of=_as_of_from_request(),
         )
+    except store.ComplianceStoreError:
+        raise
     except ValueError as exc:
         return _bad_request(str(exc), {"allowed": sorted(CATALOGUE_CODES)})
     except Exception as exc:
@@ -177,6 +199,7 @@ def create_obligation():
 
 @bp.get("/obligations/<obligation_id>")
 @require_user
+@_store_errors
 def get_obligation(obligation_id):
     item = store.get_obligation(
         request.compliance_user_id, obligation_id, as_of=_as_of_from_request(),
@@ -188,6 +211,7 @@ def get_obligation(obligation_id):
 
 @bp.patch("/obligations/<obligation_id>")
 @require_user
+@_store_errors
 def patch_obligation(obligation_id):
     body = _json()
     try:
@@ -203,6 +227,7 @@ def patch_obligation(obligation_id):
 
 @bp.delete("/obligations/<obligation_id>")
 @require_user
+@_store_errors
 def delete_obligation(obligation_id):
     ok = store.delete_obligation(request.compliance_user_id, obligation_id)
     if not ok:
@@ -212,6 +237,7 @@ def delete_obligation(obligation_id):
 
 @bp.get("/properties/<property_id>/obligations")
 @require_user
+@_store_errors
 def property_obligations(property_id):
     items = store.list_obligations(
         request.compliance_user_id,
@@ -256,6 +282,7 @@ def _read_upload_payload():
 
 @bp.post("/obligations/<obligation_id>/evidence")
 @require_user
+@_store_errors
 def upload_evidence(obligation_id):
     user_id = request.compliance_user_id
     parent = store.get_obligation(user_id, obligation_id)
@@ -298,6 +325,7 @@ def upload_evidence(obligation_id):
 
 @bp.get("/obligations/<obligation_id>/evidence")
 @require_user
+@_store_errors
 def list_evidence(obligation_id):
     item = store.get_obligation(request.compliance_user_id, obligation_id)
     if not item:
@@ -329,6 +357,7 @@ def download_evidence(obligation_id, evidence_id):
 
 @bp.get("/reminders")
 @require_user
+@_store_errors
 def list_reminders():
     items = store.list_reminders(
         request.compliance_user_id,
@@ -426,10 +455,15 @@ def dispatch_reminders():
 def register_compliance(app, limiter=None):
     """Attach the blueprint to the Flask app.
 
-    ``limiter`` is accepted for call-site compatibility with app.py.
-    Per-IP defaults already applied by Flask-Limiter on the parent app
-    (50/hour, 200/day) cover these routes; we do not wrap the shared
-    blueprint object so unit tests can register it on a mini Flask app.
+    ``limiter`` is accepted so production can exempt this blueprint from
+    the app-wide 50/hour per-IP default. The Next.js BFF shares a small
+    set of Vercel NAT IPs, so that default 429s dashboard/obligation
+    reads after catalogue (public) succeeded.
     """
     app.register_blueprint(bp)
+    if limiter is not None:
+        try:
+            limiter.exempt(bp)
+        except Exception as exc:  # pragma: no cover - version skew
+            print(f"[WARN] compliance limiter exempt failed: {exc}")
     return bp
