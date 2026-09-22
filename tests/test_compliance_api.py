@@ -18,6 +18,7 @@ from flask import Flask  # noqa: E402
 
 from compliance.blueprint import register_compliance  # noqa: E402
 from compliance.store import reset_memory_store  # noqa: E402
+from compliance import store  # noqa: E402
 from compliance.storage import reset_memory_blobs  # noqa: E402
 
 USER_A = "11111111-1111-1111-1111-111111111111"
@@ -348,3 +349,43 @@ def test_health_documents_evidence_prefix_and_channels(client):
     assert cat["overdueWeeklyDays"] == 7
     assert "in_app" in cat["channels"]
     assert cat["catalogue"] == cat["items"]
+
+
+def test_health_reports_memory_store_ready_in_tests(client):
+    health = client.get("/v1/compliance/health").get_json()
+    assert health["success"] is True
+    assert health["store"] == "memory"
+    assert health["storeProbe"]["ready"] is True
+    assert health["status"] == "ok"
+
+
+def test_dashboard_store_error_is_json_503(client, monkeypatch):
+    def boom(*args, **kwargs):
+        raise store.ComplianceStoreError(
+            "Apply supabase/migrations/20260914_compliance_cockpit.sql",
+            status_code=503,
+        )
+
+    monkeypatch.setattr(store, "list_obligations", boom)
+    resp = client.get("/v1/compliance/dashboard", headers=auth())
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["error"] == "compliance_store_unavailable"
+    assert "20260914_compliance_cockpit" in body["message"]
+
+
+def test_property_obligations_store_error_is_json_503(client, monkeypatch):
+    def boom(*args, **kwargs):
+        raise store.ComplianceStoreError(
+            "Apply supabase/migrations/20260914_compliance_cockpit.sql",
+            status_code=503,
+        )
+
+    monkeypatch.setattr(store, "list_obligations", boom)
+    resp = client.get(
+        f"/v1/compliance/properties/{PROPERTY_ID}/obligations",
+        headers=auth(),
+    )
+    assert resp.status_code == 503
+    assert "20260914" in resp.get_json()["message"]
+

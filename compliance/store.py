@@ -27,6 +27,24 @@ from compliance.status import compute_status
 
 logger = logging.getLogger("compliance.store")
 
+MIGRATION_HINT = (
+    "Apply supabase/migrations/20260914_compliance_cockpit.sql and "
+    "20260921_compliance_cockpit_grants.sql on the production Supabase "
+    "project, then confirm GET /v1/compliance/health storeProbe.ready is true."
+)
+
+
+class ComplianceStoreError(RuntimeError):
+    """Raised when the Supabase-backed store cannot serve obligations."""
+
+    def __init__(self, message: str, *, status_code: int = 503, body: str = ""):
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+logger = logging.getLogger("compliance.store")
+
 _lock = threading.Lock()
 _OBLIGATIONS: dict[str, dict] = {}
 _REMINDERS: dict[str, dict] = {}
@@ -75,6 +93,68 @@ def supabase_configured() -> bool:
     return bool(_SUPABASE_URL and _SUPABASE_KEY)
 
 
+def probe_store() -> dict:
+    """Check that env *and* compliance_* tables are actually queryable.
+
+    ``store: supabase`` only means credentials exist. Missing migrations
+    still 500 dashboard / property-obligation reads.
+    """
+    if not supabase_configured():
+        return {"backend": "memory", "tables": "ok", "ready": True}
+    try:
+        resp = _sb(
+            "GET",
+            "compliance_obligations",
+            params={"select": "id", "limit": "1"},
+            headers=_sb_headers(),
+        )
+    except requests.RequestException as exc:
+        return {
+            "backend": "supabase",
+            "tables": "unreachable",
+            "ready": False,
+            "message": str(exc)[:200],
+            "hint": MIGRATION_HINT,
+        }
+    if resp.status_code == 200:
+        return {"backend": "supabase", "tables": "ok", "ready": True}
+    return {
+        "backend": "supabase",
+        "tables": "missing",
+        "ready": False,
+        "http": resp.status_code,
+        "message": (resp.text or "")[:200],
+        "hint": MIGRATION_HINT,
+    }
+
+
+def _raise_store_failure(resp, table: str) -> None:
+    text = (resp.text or "")[:300]
+    lowered = text.lower()
+    schema_miss = any(
+        token in lowered
+        for token in (
+            "pgrst200",
+            "pgrst205",
+            "schema cache",
+            "does not exist",
+            "could not find the table",
+            table.lower(),
+        )
+    )
+    if resp.status_code in (401, 403, 404) or (resp.status_code == 400 and schema_miss) or schema_miss:
+        raise ComplianceStoreError(
+            f"compliance store query failed ({resp.status_code}) on {table}. {MIGRATION_HINT}",
+            status_code=503,
+            body=text,
+        )
+    raise ComplianceStoreError(
+        f"Failed to query {table}: {resp.status_code} {text}",
+        status_code=503,
+        body=text,
+    )
+
+
 def _sb_headers(prefer: Optional[str] = None) -> dict:
     headers = {
         "apikey": _SUPABASE_KEY,
@@ -98,28 +178,28 @@ def _sb(method: str, path: str, **kwargs):
 def _public_reminder(row: dict) -> dict:
     return {
         "id": row["id"],
-        "obligationId": row["obligation_id"],
-        "offsetCode": row["offset_code"],
-        "offsetDays": row["offset_days"],
-        "scheduledFor": row["scheduled_for"],
+        "obligationId": row.get("obligation_id") or row.get("obligationId"),
+        "offsetCode": row.get("offset_code") or row.get("offsetCode"),
+        "offsetDays": row.get("offset_days") if "offset_days" in row else row.get("offsetDays"),
+        "scheduledFor": row.get("scheduled_for") or row.get("scheduledFor"),
         "status": row["status"],
-        "channel": row["channel"],
-        "sentAt": row.get("sent_at"),
-        "lastError": row.get("last_error"),
-        "createdAt": row.get("created_at"),
+        "channel": row.get("channel") or "email",
+        "sentAt": row.get("sent_at") if "sent_at" in row else row.get("sentAt"),
+        "lastError": row.get("last_error") if "last_error" in row else row.get("lastError"),
+        "createdAt": row.get("created_at") or row.get("createdAt"),
     }
 
 
 def _public_evidence(row: dict) -> dict:
     return {
         "id": row["id"],
-        "obligationId": row["obligation_id"],
+        "obligationId": row.get("obligation_id") or row.get("obligationId"),
         "filename": row["filename"],
-        "contentType": row["content_type"],
-        "sizeBytes": row.get("size_bytes"),
-        "storageKey": row["storage_key"],
+        "contentType": row.get("content_type") or row.get("contentType"),
+        "sizeBytes": row.get("size_bytes") if "size_bytes" in row else row.get("sizeBytes"),
+        "storageKey": row.get("storage_key") or row.get("storageKey"),
         "url": row.get("url"),
-        "createdAt": row.get("created_at"),
+        "createdAt": row.get("created_at") or row.get("createdAt"),
     }
 
 
@@ -573,6 +653,34 @@ def _row_from_sb(data: dict) -> dict:
     }
 
 
+def _sb_related(table: str, obligation_ids: list[str]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {oid: [] for oid in obligation_ids}
+    if not obligation_ids:
+        return grouped
+    for i in range(0, len(obligation_ids), 50):
+        chunk = obligation_ids[i:i + 50]
+        resp = _sb(
+            "GET",
+            table,
+            params={
+                "obligation_id": f"in.({','.join(chunk)})",
+                "order": "created_at.asc",
+            },
+            headers=_sb_headers(),
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "[compliance] related fetch %s failed: %s %s",
+                table, resp.status_code, (resp.text or "")[:200],
+            )
+            continue
+        for row in resp.json() or []:
+            oid = row.get("obligation_id")
+            if oid in grouped:
+                grouped[oid].append(row)
+    return grouped
+
+
 def _sb_create_obligation(row: dict, as_of=None) -> dict:
     resp = _sb(
         "POST",
@@ -589,7 +697,7 @@ def _sb_create_obligation(row: dict, as_of=None) -> dict:
         headers=_sb_headers("return=representation"),
     )
     if resp.status_code not in (200, 201):
-        raise RuntimeError(f"Failed to persist obligation: {resp.status_code} {resp.text[:200]}")
+        _raise_store_failure(resp, "compliance_obligations")
     saved = resp.json()
     saved = saved[0] if isinstance(saved, list) else saved
     row = _row_from_sb(saved)
@@ -627,21 +735,23 @@ def _sb_get_obligation(user_id: str, obligation_id: str, as_of=None) -> Optional
         params={
             "id": f"eq.{obligation_id}",
             "user_id": f"eq.{user_id}",
-            "select": "*,compliance_reminders(*),compliance_evidence(*)",
+            "select": "*",
         },
         headers=_sb_headers(),
     )
     if resp.status_code != 200:
-        logger.warning("[compliance] get obligation failed: %s", resp.text[:200])
-        return None
+        _raise_store_failure(resp, "compliance_obligations")
     rows = resp.json()
     if not rows:
         return None
     data = rows[0]
+    related_ids = [data["id"]]
+    reminders = _sb_related("compliance_reminders", related_ids).get(data["id"], [])
+    evidence = _sb_related("compliance_evidence", related_ids).get(data["id"], [])
     return _public_obligation(
         _row_from_sb(data),
-        data.get("compliance_reminders") or [],
-        data.get("compliance_evidence") or [],
+        reminders,
+        evidence,
         as_of=as_of,
     )
 
@@ -649,7 +759,7 @@ def _sb_get_obligation(user_id: str, obligation_id: str, as_of=None) -> Optional
 def _sb_list_obligations(user_id: str, property_id=None, code=None):
     params = {
         "user_id": f"eq.{user_id}",
-        "select": "*,compliance_reminders(*),compliance_evidence(*)",
+        "select": "*",
         "order": "created_at.desc",
     }
     if property_id:
@@ -658,13 +768,18 @@ def _sb_list_obligations(user_id: str, property_id=None, code=None):
         params["code"] = f"eq.{code.strip().upper()}"
     resp = _sb("GET", "compliance_obligations", params=params, headers=_sb_headers())
     if resp.status_code != 200:
-        raise RuntimeError(f"Failed to list obligations: {resp.status_code}")
+        _raise_store_failure(resp, "compliance_obligations")
+    rows = resp.json() or []
+    ids = [data["id"] for data in rows]
+    reminders_by = _sb_related("compliance_reminders", ids)
+    evidence_by = _sb_related("compliance_evidence", ids)
     out = []
-    for data in resp.json():
+    for data in rows:
+        oid = data["id"]
         out.append((
             _row_from_sb(data),
-            data.get("compliance_reminders") or [],
-            data.get("compliance_evidence") or [],
+            reminders_by.get(oid) or [],
+            evidence_by.get(oid) or [],
         ))
     return out
 
@@ -691,7 +806,7 @@ def _sb_update_obligation(user_id, obligation_id, allowed, as_of=None):
         headers=_sb_headers("return=representation"),
     )
     if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Failed to update obligation: {resp.status_code}")
+        _raise_store_failure(resp, "compliance_obligations")
     expires_changed = "expires_on" in allowed
     if expires_changed:
         _sb(
@@ -768,7 +883,7 @@ def _sb_list_reminders(user_id, obligation_id=None, status=None, channel=None):
         params["channel"] = f"eq.{channel}"
     resp = _sb("GET", "compliance_reminders", params=params, headers=_sb_headers())
     if resp.status_code != 200:
-        raise RuntimeError(f"Failed to list reminders: {resp.status_code}")
+        _raise_store_failure(resp, "compliance_reminders")
     return [_public_reminder(r) for r in resp.json()]
 
 

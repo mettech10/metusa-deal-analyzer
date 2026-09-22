@@ -97,5 +97,40 @@ curl -s -X POST "$BASE/v1/compliance/reminders/dispatch" \
   -H "X-Cron-Secret: $COMPLIANCE_CRON_SECRET" | jq .
 ```
 
+## Metalyzi live checklist (P0 2026-09-21)
+
+`GET /v1/compliance/catalogue` is public. Dashboard and property files are
+not — they need a user JWT **and** `compliance_*` tables.
+
+Render env (do not invent values; copy from the existing Supabase project):
+
+| Key | Why |
+|---|---|
+| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST |
+| `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `GET /auth/v1/user` JWT check |
+| `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes (must be **service role**, not anon) |
+| `BREVO_API_KEY` (+ optional sender/reply-to) | Reminder emails; skip-sends fail-soft |
+| `COMPLIANCE_CRON_SECRET` or `BENCHMARK_CRON_SECRET` | `POST /reminders/dispatch` |
+| `CORS_ALLOWED_ORIGINS` | Preview hosts beyond metalyzi.co.uk |
+
+Supabase SQL (Dashboard → SQL, same project as auth):
+
+1. `supabase/migrations/20260914_compliance_cockpit.sql`
+2. `supabase/migrations/20260921_compliance_cockpit_grants.sql`
+
+Probe (no auth):
+
+```bash
+curl -s https://metusa-deal-analyzer.onrender.com/v1/compliance/health | jq '{status, store, storeProbe}'
+```
+
+`store: "supabase"` only means credentials exist. Obligations load only when
+`storeProbe.ready` is `true`. Missing tables used to 500 the dashboard after
+catalogue succeeded.
+
+Retest after migrate: Bearer dashboard 200 (empty list ok) → POST GAS on a
+portfolio UUID → `GET /properties/<id>/obligations` includes it → FE
+`/tools/compliance` counts move off 0. Reminders: cron dispatch + Brevo.
+
 Out of scope: Screener extension, MTD ledger, Ltd Co calc, licensing geo.
 In-app notification UI is frontend-owned.
