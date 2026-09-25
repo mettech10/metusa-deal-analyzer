@@ -13,6 +13,11 @@ from mtd.open_banking import OpenBankingNotAvailable
 from mtd.packs import DISCLAIMER
 from mtd.service import MtdService
 from mtd.store import Conflict, InMemoryMtdStore, NotFound
+from supabase_gotrue import (
+    GotrueAuthError,
+    auth_readiness,
+    fetch_gotrue_user,
+)
 
 mtd_bp = Blueprint("mtd", __name__, url_prefix="/v1/mtd")
 
@@ -78,7 +83,13 @@ def _resolve_ctx():
         return svc.ensure_org(user_id, email=email, org_id=org_hint or None)
 
     if token:
-        user = _supabase_user(token)
+        if _testing():
+            try:
+                user = _supabase_user(token)
+            except GotrueAuthError:
+                user = None
+        else:
+            user = _supabase_user(token)
         if user:
             return svc.ensure_org(
                 user["id"],
@@ -93,25 +104,14 @@ def _resolve_ctx():
 
 
 def _supabase_user(token: str) -> dict[str, Any] | None:
-    url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    anon = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-    if not url or not token:
-        return None
-    try:
-        import requests
+    """Validate the Bearer via shared GoTrue helper.
 
-        headers = {"Authorization": f"Bearer {token}"}
-        if anon:
-            headers["apikey"] = anon
-        resp = requests.get(f"{url.rstrip('/')}/auth/v1/user", headers=headers, timeout=8)
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        if not data.get("id"):
-            return None
-        return data
-    except Exception:
+    Raises GotrueAuthError (503 if URL/apikey missing, 401 if rejected).
+    Returns None only when the helper is skipped (empty token).
+    """
+    if not token:
         return None
+    return fetch_gotrue_user(token)
 
 
 def _auth():
@@ -119,6 +119,9 @@ def _auth():
         ctx = _resolve_ctx()
     except PermissionError as exc:
         return None, (jsonify({"error": str(exc)}), 403)
+    except GotrueAuthError as exc:
+        body = {"error": exc.message, "code": exc.code}
+        return None, (jsonify(body), exc.status)
     if ctx is None:
         return None, (jsonify({"error": "Unauthorised"}), 401)
     return ctx, None
@@ -149,6 +152,7 @@ def health():
             "hmrcSubmit": False,
             "openBanking": False,
             "disclaimer": DISCLAIMER,
+            "auth": auth_readiness(),
         }
     )
 

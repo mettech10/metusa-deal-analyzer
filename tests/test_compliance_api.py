@@ -357,6 +357,11 @@ def test_health_reports_memory_store_ready_in_tests(client):
     assert health["store"] == "memory"
     assert health["storeProbe"]["ready"] is True
     assert health["status"] == "ok"
+    assert health["auth"]["gotrue"] == "/auth/v1/user"
+    assert health["auth"]["apikeySource"] in ("service", "anon", "none")
+    assert health["auth"]["ready"] is False or health["auth"]["ready"] is True
+    assert "supabaseHost" in health["auth"]
+    assert "service-role-key" not in str(health["auth"])
 
 
 def test_dashboard_store_error_is_json_503(client, monkeypatch):

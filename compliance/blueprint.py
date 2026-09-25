@@ -29,6 +29,7 @@ from flask import Blueprint, jsonify, request, send_file
 from io import BytesIO
 
 from compliance.auth import require_cron, require_user
+from supabase_gotrue import auth_readiness
 from compliance.catalogue import CATALOGUE, CATALOGUE_CODES
 from compliance.email import provider_status, send_reminder_email
 from compliance.reminders import CHANNELS, OVERDUE_WEEKLY_DAYS, is_overdue_ping
@@ -92,6 +93,7 @@ def health():
         "service": "compliance",
         "store": probe.get("backend"),
         "storeProbe": probe,
+        "auth": auth_readiness(),
         "blobStore": blob_store.storage_backend(),
         "evidence": {
             "bucket": BUCKET,
