@@ -106,9 +106,9 @@ Render env (do not invent values; copy from the existing Supabase project):
 
 | Key | Why |
 |---|---|
-| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST. **Same project** as Vercel `NEXT_PUBLIC_SUPABASE_URL`. |
-| `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes **and** `/auth/v1/user` apikey (same as `/v1/deals`). Health `auth.apikeySource` should be `service`. |
-| `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Fallback apikey only. Must be the project's anon key — **not** the JWT secret. Flask does not use `SUPABASE_JWT_SECRET` or JWKS. |
+| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST. **Same project** as Vercel `NEXT_PUBLIC_SUPABASE_URL`. Health `auth.supabaseHost` must be `lftlugydvvcjtujalzwh.supabase.co` (cookie `sb-lftlugydvvcjtujalzwh-auth-token`). |
+| `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes **and** `/auth/v1/user` apikey (same as `/v1/deals` and `/v1/mtd`). Health `auth.apikeySource` should be `service`, `auth.ready` true. |
+| `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Fallback apikey only. Must be the project's anon key — **not** the JWT secret and **never** the user access token. Flask does not use `SUPABASE_JWT_SECRET` or JWKS. Missing both service and anon keys is HTTP **503** `auth not configured (missing anon key)`, not 401. |
 | `BREVO_API_KEY` (+ optional sender/reply-to) | Reminder emails; skip-sends fail-soft |
 | `COMPLIANCE_CRON_SECRET` or `BENCHMARK_CRON_SECRET` | `POST /reminders/dispatch` |
 | `CORS_ALLOWED_ORIGINS` | Preview hosts beyond metalyzi.co.uk |
@@ -122,13 +122,17 @@ Probe (no auth):
 
 ```bash
 curl -s https://metusa-deal-analyzer.onrender.com/v1/compliance/health | jq '{status, store, storeProbe, auth}'
+curl -s https://metusa-deal-analyzer.onrender.com/v1/mtd/health | jq '{status, auth}'
 ```
 
 `store: "supabase"` only means credentials exist. Obligations load only when
-`storeProbe.ready` is `true`. Fresh-login 401 `Invalid or expired token` is
-GoTrue rejecting the Bearer — almost always a wrong **apikey** (anon/JWT
-secret) or a different `SUPABASE_URL` than Vercel. `auth.apikeySource`
-must be `service`.
+`storeProbe.ready` is `true`. Fresh-login 401 `Invalid or expired token`
+(compliance) and 401 `Unauthorised` (MTD `/api/mtd/businesses` after a 200
+`/api/mtd/token`) are the same GoTrue rejection — missing/wrong **apikey**
+or a different `SUPABASE_URL` than the browser cookie project. After this
+patch: missing apikey is **503** `auth not configured (missing anon key)`;
+`auth.apikeySource` must be `service`; `auth.supabaseHost` must equal
+`lftlugydvvcjtujalzwh.supabase.co`.
 
 Retest after migrate: Bearer dashboard 200 (empty list ok) → POST GAS on a
 portfolio UUID → `GET /properties/<id>/obligations` includes it → FE

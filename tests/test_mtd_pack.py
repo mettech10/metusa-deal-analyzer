@@ -68,6 +68,10 @@ def test_health_and_no_hmrc_submit(client):
     data = res.get_json()
     assert data["hmrcSubmit"] is False
     assert data["openBanking"] is False
+    assert data["auth"]["gotrue"] == "/auth/v1/user"
+    assert data["auth"]["apikeySource"] in ("service", "anon", "none")
+    assert "supabaseHost" in data["auth"]
+    assert "ready" in data["auth"]
 
 
 def test_category_catalogue_sa105_and_residential_finance_separate(client):
@@ -106,6 +110,33 @@ def test_standard_quarters():
 def test_unauthorised_without_user(client):
     res = client.get("/v1/mtd/businesses")
     assert res.status_code == 401
+    assert res.get_json()["error"] == "Unauthorised"
+
+
+def test_bearer_without_apikey_is_503_not_401(monkeypatch):
+    """Production (not TESTING) + Bearer + missing apikey → 503, not 401."""
+    app = Flask(__name__)
+    app.config["TESTING"] = False
+    app.config["MTD_SERVICE"] = MtdService(InMemoryMtdStore())
+    configure_mtd(app)
+    app.register_blueprint(mtd_bp)
+    monkeypatch.delenv("FLASK_ENV", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvcjtujalzwh.supabase.co")
+    for name in (
+        "SUPABASE_SERVICE_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    res = app.test_client().get(
+        "/v1/mtd/businesses",
+        headers={"Authorization": "Bearer user-access-jwt"},
+    )
+    assert res.status_code == 503
+    body = res.get_json()
+    assert body["code"] == "auth_not_configured"
+    assert "missing anon key" in body["error"]
 
 
 def test_org_auto_provision_and_isolation(client):

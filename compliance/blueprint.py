@@ -28,7 +28,8 @@ from functools import wraps
 from flask import Blueprint, jsonify, request, send_file
 from io import BytesIO
 
-from compliance.auth import _auth_apikey, require_cron, require_user
+from compliance.auth import require_cron, require_user
+from supabase_gotrue import auth_readiness
 from compliance.catalogue import CATALOGUE, CATALOGUE_CODES
 from compliance.email import provider_status, send_reminder_email
 from compliance.reminders import CHANNELS, OVERDUE_WEEKLY_DAYS, is_overdue_ping
@@ -86,22 +87,13 @@ def _store_errors(f):
 @bp.get("/health")
 def health():
     probe = store.probe_store()
-    _key, auth_key_source = _auth_apikey()
     return jsonify({
         "success": True,
         "status": "ok" if probe.get("ready") else "degraded",
         "service": "compliance",
         "store": probe.get("backend"),
         "storeProbe": probe,
-        "auth": {
-            "gotrue": "/auth/v1/user",
-            "apikeySource": auth_key_source,
-            "note": (
-                "apikeySource should be 'service' (same as /v1/deals). "
-                "'anon' works only if it is the project's anon key, not the JWT secret. "
-                "'none' means Render is missing SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY."
-            ),
-        },
+        "auth": auth_readiness(),
         "blobStore": blob_store.storage_backend(),
         "evidence": {
             "bucket": BUCKET,
