@@ -14,6 +14,114 @@ DISCLAIMER = (
     "It does not submit quarterly updates or a tax return to HMRC."
 )
 
+RESIDENTIAL_FINANCE_PDF_NOTE = (
+    "Residential finance costs are a tax reducer, not a deductible expense. "
+    "They are excluded from working-papers net and reported on SA105 box 44 / 45, "
+    "separate from non-residential finance (box 26)."
+)
+
+
+def format_gbp_from_pence(pence: int) -> str:
+    n = int(pence or 0)
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    return f"{sign}£{n // 100:,}.{n % 100:02d}"
+
+
+def pounds_column(pence: int) -> str:
+    """Spreadsheet-friendly pounds (keep pence in a sibling column)."""
+    n = int(pence or 0)
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    return f"{sign}{n // 100}.{n % 100:02d}"
+
+
+def category_display_label(cat: dict[str, Any]) -> str:
+    name = str(cat.get("name") or cat.get("code") or "")
+    box = cat.get("sa105Box")
+    if box:
+        return f"{name} (box {box})"
+    return name
+
+
+def snapshot_to_pdf_lines(snapshot: dict[str, Any]) -> list[str]:
+    """Human-readable pack lines: pounds + SA105 labels, finance kept separate."""
+    period = snapshot.get("periodTotalsPence") or {}
+    ytd = snapshot.get("yearToDateTotalsPence") or {}
+    lines = [
+        snapshot.get("disclaimer") or DISCLAIMER,
+        "",
+        f"Business: {(snapshot.get('business') or {}).get('name')}",
+        (
+            f"Tax year: {snapshot.get('taxYear')}   "
+            f"Quarter: {snapshot.get('quarter')}   "
+            f"Basis: {snapshot.get('basis')}"
+        ),
+        f"Period: {snapshot.get('periodStart')} to {snapshot.get('periodEnd')}",
+        f"Deadline: {snapshot.get('filingDeadline')}",
+        "",
+        "SA105 category totals — period / year to date",
+    ]
+
+    def _append_kind(kind: str, heading: str) -> None:
+        cats = [c for c in CATEGORIES if c["kind"] == kind and not c.get("isResidentialFinance")]
+        rows = [
+            c
+            for c in cats
+            if int(period.get(c["code"], 0) or 0) or int(ytd.get(c["code"], 0) or 0)
+        ]
+        if not rows:
+            return
+        lines.append("")
+        lines.append(heading)
+        for cat in rows:
+            code = cat["code"]
+            lines.append(
+                f"{category_display_label(cat)}: "
+                f"{format_gbp_from_pence(period.get(code, 0))} / "
+                f"{format_gbp_from_pence(ytd.get(code, 0))}"
+            )
+
+    _append_kind("income", "Income")
+    _append_kind("income_adjustment", "Income adjustments")
+    _append_kind("expense", "Allowable expenses")
+    _append_kind("adjustment", "Adjustments")
+
+    finance_cats = [c for c in CATEGORIES if c.get("isResidentialFinance")]
+    finance_rows = [
+        c
+        for c in finance_cats
+        if int(period.get(c["code"], 0) or 0) or int(ytd.get(c["code"], 0) or 0)
+    ]
+    lines.append("")
+    lines.append("Residential finance (SA105 box 44 / 45)")
+    lines.append(RESIDENTIAL_FINANCE_PDF_NOTE)
+    if finance_rows:
+        for cat in finance_rows:
+            code = cat["code"]
+            lines.append(
+                f"{category_display_label(cat)}: "
+                f"{format_gbp_from_pence(period.get(code, 0))} / "
+                f"{format_gbp_from_pence(ytd.get(code, 0))}"
+            )
+    else:
+        lines.append("None recorded this period.")
+
+    rf = (snapshot.get("residentialFinance") or {}).get("period") or {}
+    lines.append(
+        "Residential finance total (excluded from profit): "
+        f"{format_gbp_from_pence(rf.get('totalPence', 0))}"
+    )
+    lines.append("")
+    lines.append(
+        "Working papers net (income minus allowable expenses, "
+        f"excluding residential finance): {format_gbp_from_pence(snapshot.get('periodNetPence', 0))}  "
+        f"YTD {format_gbp_from_pence(snapshot.get('yearToDateNetPence', 0))}"
+    )
+    lines.append(f"Entries in period: {snapshot.get('entryCount', 0)}")
+    lines.append("HMRC submit: no")
+    return lines
+
 
 def _sum_by_category(entries: Iterable[LedgerEntry]) -> dict[str, int]:
     totals = {c["code"]: 0 for c in CATEGORIES}
@@ -140,31 +248,65 @@ def snapshot_to_csv(snapshot: dict[str, Any]) -> str:
     writer.writerow(["periodStart", snapshot.get("periodStart")])
     writer.writerow(["periodEnd", snapshot.get("periodEnd")])
     writer.writerow([])
-    writer.writerow(["section", "categoryCode", "periodPence", "yearToDatePence", "isResidentialFinance"])
+    writer.writerow(
+        [
+            "section",
+            "categoryCode",
+            "sa105Box",
+            "categoryName",
+            "periodPence",
+            "periodPounds",
+            "yearToDatePence",
+            "yearToDatePounds",
+            "isResidentialFinance",
+        ]
+    )
     period = snapshot.get("periodTotalsPence") or {}
     ytd = snapshot.get("yearToDateTotalsPence") or {}
     for cat in CATEGORIES:
+        period_pence = int(period.get(cat["code"], 0) or 0)
+        ytd_pence = int(ytd.get(cat["code"], 0) or 0)
         writer.writerow(
             [
                 cat["kind"],
                 cat["code"],
-                period.get(cat["code"], 0),
-                ytd.get(cat["code"], 0),
+                cat.get("sa105Box") or "",
+                cat.get("name") or cat["code"],
+                period_pence,
+                pounds_column(period_pence),
+                ytd_pence,
+                pounds_column(ytd_pence),
                 str(bool(cat.get("isResidentialFinance"))).lower(),
             ]
         )
     writer.writerow([])
     writer.writerow(["entries"])
     writer.writerow(
-        ["date", "propertyId", "categoryCode", "amountPence", "description", "counterparty", "source", "isResidentialFinance"]
+        [
+            "date",
+            "propertyId",
+            "categoryCode",
+            "sa105Box",
+            "amountPence",
+            "amountPounds",
+            "description",
+            "counterparty",
+            "source",
+            "isResidentialFinance",
+        ]
     )
+    by_code = {c["code"]: c for c in CATEGORIES}
     for entry in snapshot.get("entries") or []:
+        pence = int(entry.get("amountPence") or 0)
+        cat = by_code.get(str(entry.get("categoryCode") or ""), {})
         writer.writerow(
             [
                 entry.get("date"),
                 entry.get("propertyId") or "",
                 entry.get("categoryCode"),
-                entry.get("amountPence"),
+                cat.get("sa105Box") or "",
+                pence,
+                pounds_column(pence),
                 entry.get("description") or "",
                 entry.get("counterparty") or "",
                 entry.get("source"),

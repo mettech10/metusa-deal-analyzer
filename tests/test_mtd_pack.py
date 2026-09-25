@@ -6,6 +6,7 @@ Uses a dedicated Flask app (does not import the deal-analyser app.py).
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,13 +15,28 @@ from flask import Flask
 
 from mtd.blueprint import configure_mtd, mtd_bp
 from mtd.categories import CATEGORIES, RESIDENTIAL_FINANCE_CODES, is_residential_finance
-from mtd.pdf import build_simple_pdf
+from mtd.packs import DISCLAIMER, RESIDENTIAL_FINANCE_PDF_NOTE, snapshot_to_pdf_lines
+from mtd.pdf import build_simple_pdf, wrap_text
 from mtd.quarters import resolve_quarter, tax_year_for_date
 from mtd.service import MtdService
 from mtd.store import InMemoryMtdStore
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_CSV = (ROOT / "tests" / "fixtures" / "mtd_sample.csv").read_text(encoding="utf-8")
+
+
+def _pdf_strings(blob: bytes) -> str:
+    parts = re.findall(rb"\((?:\\.|[^\\)])*\) Tj", blob)
+    texts: list[str] = []
+    for part in parts:
+        inner = part[1:-4]  # drop "(" and ") Tj"
+        texts.append(
+            inner.decode("latin-1")
+            .replace("\\(", "(")
+            .replace("\\)", ")")
+            .replace("\\\\", "\\")
+        )
+    return "\n".join(texts)
 
 
 def make_app(service: MtdService | None = None) -> Flask:
@@ -228,6 +244,9 @@ def test_csv_preview_and_idempotent_commit(client):
     pdata = preview.get_json()
     assert pdata["readyToCommit"] is True
     assert pdata["validCount"] == 4
+    assert pdata["alreadyImportedFile"] is False
+    assert pdata["alreadyImportedCount"] == 0
+    assert all(row["alreadyImported"] is False for row in pdata["rows"])
     codes = {row["mapped"]["categoryCode"] for row in pdata["rows"]}
     assert "residential_finance_costs" in codes
     assert "repairs_and_maintenance" in codes
@@ -253,6 +272,19 @@ def test_csv_preview_and_idempotent_commit(client):
     sdata = second.get_json()
     assert sdata["idempotent"] is True
     assert sdata["createdCount"] == 0
+
+    replay = client.post(
+        f"/v1/mtd/businesses/{biz['id']}/imports/preview",
+        headers=auth("alice"),
+        json={"csv": SAMPLE_CSV, "filename": "mtd_sample.csv"},
+    ).get_json()
+    assert replay["alreadyImportedFile"] is True
+    assert replay["alreadyImportedCount"] == 4
+    assert all(row["alreadyImported"] is True for row in replay["rows"])
+    assert all(
+        any("already imported" in w for w in (row.get("warnings") or []))
+        for row in replay["rows"]
+    )
 
     ledger = client.get(
         f"/v1/mtd/businesses/{biz['id']}/ledger", headers=auth("alice")
@@ -343,18 +375,83 @@ def test_quarter_pack_immutable_snapshot_and_exports(client):
     csv_body = csv_res.get_data(as_text=True)
     assert "residential_finance_costs" in csv_body
     assert "true" in csv_body.lower() or "residential" in csv_body.lower()
+    assert "periodPounds" in csv_body
+    assert "amountPounds" in csv_body
+    assert "1250.00" in csv_body
 
     pdf_res = client.get(f"/v1/mtd/packs/{pack['id']}/export.pdf", headers=auth("alice"))
     assert pdf_res.status_code == 200
     pdf_bytes = pdf_res.get_data()
     assert pdf_bytes.startswith(b"%PDF")
     assert b"%%EOF" in pdf_bytes
+    pdf_text = _pdf_strings(pdf_bytes)
+    assert "tax return to HMRC" in pdf_text
+    assert DISCLAIMER.replace(" ", "") in pdf_text.replace(" ", "").replace("\n", "")
+    assert "Rents and other income from UK property" in pdf_text
+    assert "box 20" in pdf_text
+    assert "£1,250.00" in pdf_text
+    assert "tax reducer, not a deductible expense" in pdf_text
+    assert "box 44" in pdf_text
+    assert "uk_rent_income: 125000" not in pdf_text
 
 
 def test_minimal_pdf_writer():
     blob = build_simple_pdf("Test", ["hello", "world"])
     assert blob.startswith(b"%PDF-1.4")
     assert b"Helvetica" in blob
+
+
+def test_pdf_wraps_disclaimer_on_every_page():
+    wrapped = wrap_text(DISCLAIMER, 40)
+    assert len(wrapped) >= 2
+    assert " ".join(wrapped) == DISCLAIMER
+    assert not any(line.endswith(" t") for line in wrapped)
+
+    many = [f"line {i} with payable amount {i}" for i in range(80)]
+    blob = build_simple_pdf("Metalyzi MTD Quarter Pack", many, disclaimer=DISCLAIMER)
+    text = _pdf_strings(blob)
+    assert text.count("tax return to HMRC") >= 2
+    assert "Page 1 of" in text
+    assert "Page 2 of" in text
+    collapsed = " ".join(text.split())
+    assert DISCLAIMER in collapsed
+
+
+def test_snapshot_pdf_lines_use_pounds_and_sa105_boxes():
+    lines = snapshot_to_pdf_lines(
+        {
+            "disclaimer": DISCLAIMER,
+            "business": {"name": "Alice UK property"},
+            "taxYear": "2026-27",
+            "quarter": 1,
+            "basis": "standard",
+            "periodStart": "2026-04-06",
+            "periodEnd": "2026-07-05",
+            "filingDeadline": "2026-08-07",
+            "periodTotalsPence": {
+                "uk_rent_income": 285000,
+                "residential_finance_costs": 32000,
+            },
+            "yearToDateTotalsPence": {
+                "uk_rent_income": 285000,
+                "residential_finance_costs": 32000,
+            },
+            "periodNetPence": 285000,
+            "yearToDateNetPence": 285000,
+            "residentialFinance": {"period": {"totalPence": 32000}},
+            "entryCount": 2,
+        }
+    )
+    joined = "\n".join(lines)
+    assert DISCLAIMER in joined
+    assert "Rents and other income from UK property (box 20): £2,850.00 / £2,850.00" in joined
+    assert "Residential finance costs (box 44): £320.00 / £320.00" in joined
+    assert RESIDENTIAL_FINANCE_PDF_NOTE in joined
+    assert "uk_rent_income: 285000" not in joined
+    blob = build_simple_pdf("Metalyzi MTD Quarter Pack", lines, disclaimer=DISCLAIMER)
+    text = _pdf_strings(blob)
+    assert "£2,850.00" in text
+    assert "tax return to HMRC" in text
 
 
 # ── share links ───────────────────────────────────────────────────────
