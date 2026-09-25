@@ -6,6 +6,10 @@ Local tests use `X-User-Id`. Reminder dispatch uses `X-Cron-Secret`
 
 Catalogue codes: `GAS`, `EICR`, `EPC`, `DEP`, `HTR`, `LIC_HMO`, `LIC_SEL`.
 Status engine: `valid` | `due_soon` | `overdue` (due-soon window = 90 days).
+Applicability (persisted): `required` | `not_applicable` | `unknown`.
+`applicable` is accepted as an alias of `required`. GAS may be
+`not_applicable` only with `applicabilityReason` (e.g. `no gas supply`).
+EICR and EPC cannot be N/A. N/A rows get no reminder stubs.
 Reminders: T-90, T-60, T-30, T-14, T-7, T-0, overdue (+1 day), then **weekly
 while still overdue**. Backend seeds `channel=email`. `channel=in_app` is a
 supported stub value for the frontend; dispatch does not email those rows.
@@ -38,8 +42,8 @@ No route renames. The Next.js page is `/tools/compliance`; the backend is:
 |---|---|
 | GET | `/v1/compliance/catalogue` (`items` and `catalogue` are the same list) |
 | GET | `/v1/compliance/dashboard` |
-| GET/POST | `/v1/compliance/obligations` |
-| GET/PATCH/DELETE | `/v1/compliance/obligations/<id>` |
+| GET/POST | `/v1/compliance/obligations` (`applicability`, `applicabilityReason`) |
+| GET/PATCH/DELETE | `/v1/compliance/obligations/<id>` (PATCH can set applicability) |
 | GET | `/v1/compliance/properties/<propertyId>/obligations` |
 | GET | `/v1/compliance/reminders` |
 | POST | `/v1/compliance/reminders/dispatch` (cron) |
@@ -115,8 +119,11 @@ Render env (do not invent values; copy from the existing Supabase project):
 
 Supabase SQL (Dashboard → SQL, same project as auth):
 
-1. `supabase/migrations/20260914_compliance_cockpit.sql`
-2. `supabase/migrations/20260921_compliance_cockpit_grants.sql`
+1. `supabase/migrations/20260914_compliance_cockpit.sql` (creates `compliance_obligations`)
+2. `supabase/migrations/20260921_compliance_cockpit_grants.sql` (table grants; they already cover columns added later)
+3. `supabase/migrations/20260925_compliance_obligation_applicability.sql` (applicability columns; idempotent, safe on existing rows, ends with `NOTIFY pgrst`)
+
+Run 3 only after 1. It can follow 2 immediately. Deploy may land before step 3: reads keep working, and POST/PATCH that write `applicability` return **503** `compliance_store_unavailable` (not 500) until the column exists.
 
 Probe (no auth):
 

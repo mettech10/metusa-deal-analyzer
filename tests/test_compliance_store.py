@@ -37,6 +37,21 @@ def test_raise_store_failure_mentions_migration_on_missing_table():
         _raise_store_failure(resp, "compliance_obligations")
     assert exc.value.status_code == 503
     assert "20260914_compliance_cockpit" in str(exc.value)
+    assert "20260925_compliance_obligation_applicability" in str(exc.value)
+
+
+def test_missing_applicability_column_is_503_not_unhandled():
+    """PostgREST PGRST204 when the migration has not run yet."""
+    resp = _Resp(
+        400,
+        '{"code":"PGRST204","message":"Could not find the \'applicability\' column '
+        'of \'compliance_obligations\' in the schema cache"}',
+    )
+    with pytest.raises(ComplianceStoreError) as exc:
+        _raise_store_failure(resp, "compliance_obligations")
+    assert exc.value.status_code == 503
+    assert "20260925_compliance_obligation_applicability" in str(exc.value)
+    assert "PGRST204" in exc.value.body
 
 
 def test_list_obligations_does_not_use_nested_embed(monkeypatch):
