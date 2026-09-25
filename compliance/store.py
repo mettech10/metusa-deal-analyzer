@@ -32,9 +32,11 @@ from compliance.status import compute_status
 logger = logging.getLogger("compliance.store")
 
 MIGRATION_HINT = (
-    "Apply supabase/migrations/20260914_compliance_cockpit.sql and "
-    "20260921_compliance_cockpit_grants.sql on the production Supabase "
-    "project, then confirm GET /v1/compliance/health storeProbe.ready is true."
+    "Apply supabase/migrations/20260914_compliance_cockpit.sql, "
+    "20260921_compliance_cockpit_grants.sql, and "
+    "20260925_compliance_obligation_applicability.sql on the production "
+    "Supabase project, then confirm GET /v1/compliance/health storeProbe.ready "
+    "is true."
 )
 
 
@@ -139,6 +141,7 @@ def _raise_store_failure(resp, table: str) -> None:
         token in lowered
         for token in (
             "pgrst200",
+            "pgrst204",
             "pgrst205",
             "schema cache",
             "does not exist",

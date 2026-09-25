@@ -119,8 +119,11 @@ Render env (do not invent values; copy from the existing Supabase project):
 
 Supabase SQL (Dashboard → SQL, same project as auth):
 
-1. `supabase/migrations/20260914_compliance_cockpit.sql`
-2. `supabase/migrations/20260921_compliance_cockpit_grants.sql`
+1. `supabase/migrations/20260914_compliance_cockpit.sql` (creates `compliance_obligations`)
+2. `supabase/migrations/20260921_compliance_cockpit_grants.sql` (table grants; they already cover columns added later)
+3. `supabase/migrations/20260925_compliance_obligation_applicability.sql` (applicability columns; idempotent, safe on existing rows, ends with `NOTIFY pgrst`)
+
+Run 3 only after 1. It can follow 2 immediately. Deploy may land before step 3: reads keep working, and POST/PATCH that write `applicability` return **503** `compliance_store_unavailable` (not 500) until the column exists.
 
 Probe (no auth):
 
