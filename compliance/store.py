@@ -16,6 +16,10 @@ from typing import Optional
 
 import requests
 
+from compliance.applicability import (
+    suppresses_reminders,
+    validate_applicability,
+)
 from compliance.catalogue import CATALOGUE_CODES, default_expires_on
 from compliance.reminders import (
     DEFAULT_CHANNEL,
@@ -211,15 +215,23 @@ def _public_obligation(
 ) -> dict:
     expires = _parse_date(row.get("expires_on"))
     issued = _parse_date(row.get("issued_on"))
-    status = compute_status(
-        expires, issued, as_of=_as_of(as_of), code=row.get("code"),
-    )
+    applicability = row.get("applicability") or "required"
+    if applicability == "not_applicable":
+        status = "not_applicable"
+    elif applicability == "unknown":
+        status = "unknown"
+    else:
+        status = compute_status(
+            expires, issued, as_of=_as_of(as_of), code=row.get("code"),
+        )
     return {
         "id": row["id"],
         "userId": row["user_id"],
         "propertyId": row["property_id"],
         "code": row["code"],
         "status": status,
+        "applicability": applicability,
+        "applicabilityReason": row.get("applicability_reason") or "",
         "issuedOn": row.get("issued_on"),
         "expiresOn": row.get("expires_on"),
         "notes": row.get("notes") or "",
@@ -253,6 +265,8 @@ def _mem_evidence_for(obligation_id: str) -> list[dict]:
 
 
 def _seed_reminders(obligation: dict, as_of: Optional[date]) -> list[dict]:
+    if suppresses_reminders(obligation.get("applicability") or "required"):
+        return []
     stubs = build_reminder_stubs(
         _parse_date(obligation.get("expires_on")),
         obligation["code"],
@@ -300,6 +314,8 @@ def create_obligation(
     issued_on=None,
     expires_on=None,
     notes: str = "",
+    applicability: str = "required",
+    applicability_reason: str = "",
     as_of=None,
 ) -> dict:
     code = (code or "").strip().upper()
@@ -316,6 +332,7 @@ def create_obligation(
     expires = _parse_date(expires_on)
     if expires is None:
         expires = default_expires_on(code, issued)
+    app, reason = validate_applicability(code, applicability, applicability_reason)
 
     now = _now_iso()
     row = {
@@ -326,6 +343,8 @@ def create_obligation(
         "issued_on": issued.isoformat() if issued else None,
         "expires_on": expires.isoformat() if expires else None,
         "notes": notes or "",
+        "applicability": app,
+        "applicability_reason": reason,
         "created_at": now,
         "updated_at": now,
     }
@@ -410,6 +429,34 @@ def update_obligation(user_id: str, obligation_id: str, fields: dict, as_of=None
         if code not in CATALOGUE_CODES:
             raise ValueError(f"Unknown catalogue code: {code}")
         allowed["code"] = code
+    if (
+        "applicability" in fields
+        or "applicabilityReason" in fields
+        or "applicability_reason" in fields
+    ):
+        existing_code = None
+        if supabase_configured():
+            current = _sb_get_obligation(user_id, obligation_id, as_of=as_of)
+            existing_code = (current or {}).get("code")
+        else:
+            current = _OBLIGATIONS.get(obligation_id)
+            existing_code = (current or {}).get("code")
+        code = allowed.get("code") or existing_code or ""
+        raw_app = fields.get("applicability")
+        if raw_app is None and current:
+            raw_app = (
+                current.get("applicability")
+                if isinstance(current, dict)
+                else "required"
+            )
+        raw_reason = fields.get("applicabilityReason", fields.get("applicability_reason"))
+        if raw_reason is None and isinstance(current, dict):
+            raw_reason = current.get("applicabilityReason") or current.get(
+                "applicability_reason"
+            ) or ""
+        app, reason = validate_applicability(code, raw_app or "required", raw_reason or "")
+        allowed["applicability"] = app
+        allowed["applicability_reason"] = reason
 
     if supabase_configured():
         return _sb_update_obligation(user_id, obligation_id, allowed, as_of=as_of)
@@ -424,6 +471,16 @@ def update_obligation(user_id: str, obligation_id: str, fields: dict, as_of=None
             and "expires_on" not in allowed
             and row.get("expires_on") is None
         )
+        became_na = (
+            "applicability" in allowed
+            and allowed["applicability"] == "not_applicable"
+            and row.get("applicability") != "not_applicable"
+        )
+        left_na = (
+            "applicability" in allowed
+            and allowed["applicability"] != "not_applicable"
+            and row.get("applicability") == "not_applicable"
+        )
         row.update(allowed)
         if issued_only:
             derived = default_expires_on(row["code"], _parse_date(row.get("issued_on")))
@@ -431,7 +488,7 @@ def update_obligation(user_id: str, obligation_id: str, fields: dict, as_of=None
                 row["expires_on"] = derived.isoformat()
                 expires_changed = True
         row["updated_at"] = _now_iso()
-        if expires_changed:
+        if expires_changed or became_na or left_na:
             _replace_unsent_reminders(row, as_of)
         reminders = _mem_reminders_for(obligation_id)
         return _public_obligation(row, reminders, _mem_evidence_for(obligation_id), as_of=as_of)
@@ -648,6 +705,8 @@ def _row_from_sb(data: dict) -> dict:
         "issued_on": data.get("issued_on"),
         "expires_on": data.get("expires_on"),
         "notes": data.get("notes") or "",
+        "applicability": data.get("applicability") or "required",
+        "applicability_reason": data.get("applicability_reason") or "",
         "created_at": data.get("created_at"),
         "updated_at": data.get("updated_at"),
     }
@@ -693,6 +752,8 @@ def _sb_create_obligation(row: dict, as_of=None) -> dict:
             "issued_on": row["issued_on"],
             "expires_on": row["expires_on"],
             "notes": row["notes"],
+            "applicability": row.get("applicability") or "required",
+            "applicability_reason": row.get("applicability_reason") or "",
         },
         headers=_sb_headers("return=representation"),
     )
@@ -701,8 +762,12 @@ def _sb_create_obligation(row: dict, as_of=None) -> dict:
     saved = resp.json()
     saved = saved[0] if isinstance(saved, list) else saved
     row = _row_from_sb(saved)
-    stubs = build_reminder_stubs(
-        _parse_date(row.get("expires_on")), row["code"], as_of=_as_of(as_of),
+    stubs = (
+        []
+        if suppresses_reminders(row.get("applicability") or "required")
+        else build_reminder_stubs(
+            _parse_date(row.get("expires_on")), row["code"], as_of=_as_of(as_of),
+        )
     )
     reminder_rows = []
     if stubs:
@@ -808,7 +873,13 @@ def _sb_update_obligation(user_id, obligation_id, allowed, as_of=None):
     if resp.status_code not in (200, 204):
         _raise_store_failure(resp, "compliance_obligations")
     expires_changed = "expires_on" in allowed
-    if expires_changed:
+    became_na = allowed.get("applicability") == "not_applicable"
+    left_na = (
+        "applicability" in allowed
+        and allowed["applicability"] != "not_applicable"
+        and (existing or {}).get("applicability") == "not_applicable"
+    )
+    if expires_changed or became_na or left_na:
         _sb(
             "DELETE",
             "compliance_reminders",
@@ -819,11 +890,16 @@ def _sb_update_obligation(user_id, obligation_id, allowed, as_of=None):
             headers=_sb_headers(),
         )
         updated = _sb_get_obligation(user_id, obligation_id, as_of=as_of) or existing
-        stubs = build_reminder_stubs(
-            _parse_date(updated.get("expiresOn")),
-            updated["code"],
-            as_of=_as_of(as_of),
-        )
+        if suppresses_reminders(
+            allowed.get("applicability") or updated.get("applicability") or "required"
+        ):
+            stubs = []
+        else:
+            stubs = build_reminder_stubs(
+                _parse_date(updated.get("expiresOn")),
+                updated["code"],
+                as_of=_as_of(as_of),
+            )
         if stubs:
             payload = [{
                 "obligation_id": obligation_id,

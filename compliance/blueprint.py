@@ -188,6 +188,10 @@ def create_obligation():
             issued_on=body.get("issuedOn") or body.get("issued_on"),
             expires_on=body.get("expiresOn") or body.get("expires_on"),
             notes=body.get("notes") or "",
+            applicability=body.get("applicability") or "required",
+            applicability_reason=(
+                body.get("applicabilityReason") or body.get("applicability_reason") or ""
+            ),
             as_of=_as_of_from_request(),
         )
     except store.ComplianceStoreError:
@@ -393,6 +397,18 @@ def dispatch_reminders():
     queued_weekly = []
     for rem in due:
         obligation = rem.get("obligation") or {}
+        if (obligation.get("applicability") or "required") == "not_applicable":
+            store.mark_reminder(rem["id"], status="skipped", last_error="not_applicable")
+            dispatched.append({
+                "id": rem["id"],
+                "status": "skipped",
+                "delivered": False,
+                "skipped": True,
+                "offsetCode": rem.get("offsetCode"),
+                "obligationId": rem.get("obligationId"),
+                "message": "not_applicable",
+            })
+            continue
         result = send_reminder_email(
             user_id=rem.get("userId") or "",
             obligation=obligation,
