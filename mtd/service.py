@@ -8,7 +8,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from mtd.categories import CATEGORIES, get_category
+from mtd.categories import get_category
 from mtd.csv_import import preview_rows, row_fingerprint, sha256_text
 from mtd.models import (
     AuthContext,
@@ -23,7 +23,7 @@ from mtd.models import (
     api_dict,
 )
 from mtd.open_banking import OpenBankingNotAvailable, StubOpenBankingProvider
-from mtd.packs import DISCLAIMER, build_snapshot, snapshot_to_csv
+from mtd.packs import DISCLAIMER, build_snapshot, snapshot_to_csv, snapshot_to_pdf_lines
 from mtd.pdf import build_simple_pdf
 from mtd.quarters import parse_tax_year_start, resolve_quarter, tax_year_label
 from mtd.store import Conflict, InMemoryMtdStore, NotFound
@@ -378,8 +378,43 @@ class MtdService:
         known = {p.id for p in self.store.list_properties(ctx.org_id, business_id)}
         known |= {p.property_id for p in self.store.list_properties(ctx.org_id, business_id) if p.property_id}
         result = preview_rows(csv_text, known_property_ids=known if known else None)
-        result["contentSha256"] = sha256_text(csv_text)
+        digest = sha256_text(csv_text)
+        result["contentSha256"] = digest
         result["businessId"] = business_id
+        existing_file = self.store.get_import_by_hash(ctx.org_id, business_id, digest)
+        already_file = bool(existing_file and existing_file.status == "committed")
+        result["alreadyImportedFile"] = already_file
+        already_count = 0
+        for row in result["rows"]:
+            mapped = row.get("mapped") or {}
+            already = False
+            if already_file:
+                already = True
+            elif (
+                row.get("valid")
+                and mapped.get("date")
+                and mapped.get("categoryCode")
+                and mapped.get("amountPence") is not None
+            ):
+                fp = row_fingerprint(
+                    business_id=business_id,
+                    entry_date=mapped["date"],
+                    property_id=mapped.get("propertyId"),
+                    category_code=mapped["categoryCode"],
+                    amount_pence=mapped["amountPence"],
+                    description=mapped.get("description"),
+                    source_row=row["rowNumber"],
+                    content_sha256=digest,
+                )
+                existing_entry = self.store.get_entry_by_fingerprint(fp)
+                already = bool(existing_entry and existing_entry.voided_at is None)
+            row["alreadyImported"] = already
+            if already:
+                already_count += 1
+                warnings = list(row.get("warnings") or [])
+                warnings.append("already imported — Flask will skip this row on commit")
+                row["warnings"] = warnings
+        result["alreadyImportedCount"] = already_count
         return result
 
     def commit_import(
@@ -551,31 +586,12 @@ class MtdService:
             return snapshot_to_csv(pack.snapshot).encode("utf-8"), "text/csv; charset=utf-8", filename
         if fmt == "pdf":
             snap = pack.snapshot
-            lines = [
-                DISCLAIMER,
-                f"Business: {snap.get('business', {}).get('name')}",
-                f"Tax year: {snap.get('taxYear')}   Quarter: {snap.get('quarter')}   Basis: {snap.get('basis')}",
-                f"Period: {snap.get('periodStart')} to {snap.get('periodEnd')}",
-                f"Deadline: {snap.get('filingDeadline')}",
-                "",
-                "Category totals (pence)   period / YTD",
-            ]
-            period = snap.get("periodTotalsPence") or {}
-            ytd = snap.get("yearToDateTotalsPence") or {}
-            for cat in CATEGORIES:
-                flag = " [residential finance]" if cat.get("isResidentialFinance") else ""
-                lines.append(
-                    f"{cat['code']}: {period.get(cat['code'], 0)} / {ytd.get(cat['code'], 0)}{flag}"
-                )
-            rf = (snap.get("residentialFinance") or {}).get("period") or {}
-            lines.append("")
-            lines.append(
-                f"Residential finance (excluded from profit): {rf.get('totalPence', 0)} pence"
-            )
-            lines.append(f"Entries in period: {snap.get('entryCount', 0)}")
-            lines.append("HMRC submit: no")
             return (
-                build_simple_pdf("Metalyzi MTD Quarter Pack", lines),
+                build_simple_pdf(
+                    "Metalyzi MTD Quarter Pack",
+                    snapshot_to_pdf_lines(snap),
+                    disclaimer=str(snap.get("disclaimer") or DISCLAIMER),
+                ),
                 "application/pdf",
                 filename,
             )
