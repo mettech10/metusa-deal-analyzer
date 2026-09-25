@@ -106,9 +106,9 @@ Render env (do not invent values; copy from the existing Supabase project):
 
 | Key | Why |
 |---|---|
-| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST |
-| `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `GET /auth/v1/user` JWT check |
-| `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes (must be **service role**, not anon) |
+| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST. **Same project** as Vercel `NEXT_PUBLIC_SUPABASE_URL`. |
+| `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes **and** `/auth/v1/user` apikey (same as `/v1/deals`). Health `auth.apikeySource` should be `service`. |
+| `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Fallback apikey only. Must be the project's anon key — **not** the JWT secret. Flask does not use `SUPABASE_JWT_SECRET` or JWKS. |
 | `BREVO_API_KEY` (+ optional sender/reply-to) | Reminder emails; skip-sends fail-soft |
 | `COMPLIANCE_CRON_SECRET` or `BENCHMARK_CRON_SECRET` | `POST /reminders/dispatch` |
 | `CORS_ALLOWED_ORIGINS` | Preview hosts beyond metalyzi.co.uk |
@@ -121,12 +121,14 @@ Supabase SQL (Dashboard → SQL, same project as auth):
 Probe (no auth):
 
 ```bash
-curl -s https://metusa-deal-analyzer.onrender.com/v1/compliance/health | jq '{status, store, storeProbe}'
+curl -s https://metusa-deal-analyzer.onrender.com/v1/compliance/health | jq '{status, store, storeProbe, auth}'
 ```
 
 `store: "supabase"` only means credentials exist. Obligations load only when
-`storeProbe.ready` is `true`. Missing tables used to 500 the dashboard after
-catalogue succeeded.
+`storeProbe.ready` is `true`. Fresh-login 401 `Invalid or expired token` is
+GoTrue rejecting the Bearer — almost always a wrong **apikey** (anon/JWT
+secret) or a different `SUPABASE_URL` than Vercel. `auth.apikeySource`
+must be `service`.
 
 Retest after migrate: Bearer dashboard 200 (empty list ok) → POST GAS on a
 portfolio UUID → `GET /properties/<id>/obligations` includes it → FE

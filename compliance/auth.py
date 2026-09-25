@@ -1,15 +1,13 @@
 """Auth for Compliance Cockpit APIs.
 
-Matches existing user-data APIs (portfolio / saved analyses): a Supabase
-user JWT in ``Authorization: Bearer <access_token>``.
+Matches ``/v1/deals`` (deals_api.fetch_supabase_user): validate the
+caller's Supabase *access* JWT via ``GET {SUPABASE_URL}/auth/v1/user``
+with the **service role** as ``apikey`` (then anon).
 
-Flask analysis endpoints are intentionally public + rate-limited; these
-routes persist landlord documents so they require the same identity check
-the Next.js BFF uses via ``supabase.auth.getUser()``.
-
-Testing (``FLASK_ENV=testing`` or Flask ``TESTING``): pass ``X-User-Id``.
-Cron dispatch: ``X-Cron-Secret`` matching ``COMPLIANCE_CRON_SECRET`` or
-``BENCHMARK_CRON_SECRET`` (same pattern as ``/api/benchmarks/update``).
+Live QA r3: using only ``SUPABASE_ANON_KEY`` (or the user token itself
+as apikey) made GoTrue return 401 ``Invalid or expired token`` for a
+freshly signed-in user whose JWT /v1/deals would accept. Do not set
+``SUPABASE_ANON_KEY`` to the JWT secret — that is not an apikey.
 """
 
 import os
@@ -17,17 +15,6 @@ from functools import wraps
 
 import requests
 from flask import current_app, jsonify, request
-
-_SUPABASE_URL = (
-    os.environ.get("SUPABASE_URL")
-    or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-    or ""
-).rstrip("/")
-_SUPABASE_ANON = (
-    os.environ.get("SUPABASE_ANON_KEY")
-    or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-    or ""
-)
 
 
 def is_testing() -> bool:
@@ -48,8 +35,43 @@ def cron_secret() -> str:
     )
 
 
+def _supabase_url() -> str:
+    return (
+        os.environ.get("SUPABASE_URL")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+        or ""
+    ).rstrip("/")
+
+
+def _auth_apikey() -> tuple[str, str]:
+    """Return (apikey, source). Same precedence as deals_api._supabase_config."""
+    service = (
+        os.environ.get("SUPABASE_SERVICE_KEY")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if service:
+        return service, "service"
+    anon = (
+        os.environ.get("SUPABASE_ANON_KEY")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    if anon:
+        return anon, "anon"
+    return "", "none"
+
+
 def _unauthorized(message: str = "Unauthorized"):
     return jsonify({"success": False, "message": message}), 401
+
+
+def _bearer_token() -> str | None:
+    header = request.headers.get("Authorization") or ""
+    if not header.lower().startswith("bearer "):
+        return None
+    token = header[7:].strip()
+    return token or None
 
 
 def resolve_user_id() -> tuple[str | None, tuple | None]:
@@ -60,14 +82,12 @@ def resolve_user_id() -> tuple[str | None, tuple | None]:
             return None, _unauthorized("X-User-Id required in testing")
         return user_id, None
 
-    header = request.headers.get("Authorization") or ""
-    if not header.startswith("Bearer "):
-        return None, _unauthorized("Authorization Bearer token required")
-    token = header[7:].strip()
+    token = _bearer_token()
     if not token:
         return None, _unauthorized("Authorization Bearer token required")
 
-    if not _SUPABASE_URL:
+    url = _supabase_url()
+    if not url:
         return None, (
             jsonify({
                 "success": False,
@@ -76,12 +96,26 @@ def resolve_user_id() -> tuple[str | None, tuple | None]:
             503,
         )
 
+    apikey, source = _auth_apikey()
+    if not apikey:
+        return None, (
+            jsonify({
+                "success": False,
+                "message": (
+                    "Auth is not configured (missing SUPABASE_SERVICE_KEY / "
+                    "SUPABASE_ANON_KEY). Use the service role, same as /v1/deals — "
+                    "not the JWT secret."
+                ),
+            }),
+            503,
+        )
+
     try:
         resp = requests.get(
-            f"{_SUPABASE_URL}/auth/v1/user",
+            f"{url}/auth/v1/user",
             headers={
                 "Authorization": f"Bearer {token}",
-                "apikey": _SUPABASE_ANON or token,
+                "apikey": apikey,
             },
             timeout=8,
         )
@@ -92,7 +126,13 @@ def resolve_user_id() -> tuple[str | None, tuple | None]:
         )
 
     if resp.status_code != 200:
-        return None, _unauthorized("Invalid or expired token")
+        return None, _unauthorized(
+            "Invalid or expired token. Flask GET {SUPABASE_URL}/auth/v1/user "
+            f"returned HTTP {resp.status_code} (apikey={source}). "
+            "Render SUPABASE_URL must be the same project as Vercel "
+            "NEXT_PUBLIC_SUPABASE_URL. Set SUPABASE_SERVICE_KEY (service role, "
+            "same as /v1/deals). Do not put the JWT secret in SUPABASE_ANON_KEY."
+        )
 
     try:
         payload = resp.json()

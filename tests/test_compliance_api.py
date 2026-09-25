@@ -357,6 +357,8 @@ def test_health_reports_memory_store_ready_in_tests(client):
     assert health["store"] == "memory"
     assert health["storeProbe"]["ready"] is True
     assert health["status"] == "ok"
+    assert health["auth"]["gotrue"] == "/auth/v1/user"
+    assert health["auth"]["apikeySource"] in ("service", "anon", "none")
 
 
 def test_dashboard_store_error_is_json_503(client, monkeypatch):
