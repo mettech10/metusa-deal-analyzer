@@ -138,7 +138,7 @@ def test_bearer_without_apikey_is_503_not_401(monkeypatch):
     configure_mtd(app)
     app.register_blueprint(mtd_bp)
     monkeypatch.delenv("FLASK_ENV", raising=False)
-    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvcjtujalzwh.supabase.co")
+    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvctjujalzwh.supabase.co")
     for name in (
         "SUPABASE_SERVICE_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
