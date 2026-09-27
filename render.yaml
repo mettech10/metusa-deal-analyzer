@@ -83,6 +83,10 @@ services:
 
   # Daily compliance reminder dispatch — T-90..overdue plus weekly overdue
   # re-queue. Email via Brevo when BREVO_API_KEY is set on the web service.
+  # NOTE: Render has no free cron jobs, so this service does not run on
+  # plan: free. The live trigger is the Vercel cron
+  # /api/cron/compliance-reminders (dealcheck-uk vercel.json). Dispatch is
+  # idempotent, so enabling this one too on a paid plan is harmless.
   - type: cron
     name: compliance-reminder-dispatch
     runtime: python

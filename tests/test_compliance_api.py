@@ -248,6 +248,39 @@ def test_reminder_dispatch_requires_cron_secret(client):
     assert bad.status_code == 401
 
 
+def test_reminder_dispatch_dry_run_sends_and_marks_nothing(client):
+    client.post("/v1/compliance/obligations", headers=auth(), json={
+        "propertyId": PROPERTY_ID,
+        "code": "GAS",
+        "expiresOn": "2026-09-01",
+    })
+    def counts():
+        return {
+            status: client.get(
+                f"/v1/compliance/reminders?status={status}", headers=auth(),
+            ).get_json()["count"]
+            for status in ("pending", "sent", "skipped", "failed")
+        }
+
+    before = counts()
+
+    dry = client.post(
+        "/v1/compliance/reminders/dispatch?asOf=2026-09-14&dryRun=1",
+        headers={"X-Cron-Secret": "test-cron-secret"},
+    )
+    assert dry.status_code == 200, dry.get_json()
+    body = dry.get_json()
+    assert body["dryRun"] is True
+    assert body["due"] >= 1
+    assert body["wouldDispatch"][0]["offsetCode"]
+    assert "dispatched" not in body
+
+    assert counts() == before  # nothing sent, skipped or re-queued
+
+    # Dry runs still require the cron secret.
+    assert client.post("/v1/compliance/reminders/dispatch?dryRun=1").status_code == 401
+
+
 def test_reminder_dispatch_skips_email_without_brevo_and_queues_weekly(client):
     client.post("/v1/compliance/obligations", headers=auth(), json={
         "propertyId": PROPERTY_ID,
