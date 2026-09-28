@@ -7609,9 +7609,14 @@ def ai_analyze():
 # Replaces the terse 2-3-sentence "area" field that came back from the
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
-def _area_cache_key(district: str, strategy: str) -> str:
-    # v6 = + Anchor proximity (universities/hospitals for HMO, transport hubs for SA) — Phase 3
-    return f'area_analysis::v6::{district.upper()}::{strategy.upper()}'
+def _area_cache_key(district: str, strategy: str, context: dict) -> str:
+    # The narrative contains deal-specific figures and source availability.
+    # A district/strategy key alone can return another property's analysis.
+    import hashlib
+    fingerprint = hashlib.sha256(
+        json.dumps(context, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+    ).hexdigest()
+    return f'area_analysis::v7::{district.upper()}::{strategy.upper()}::{fingerprint}'
 
 
 # ── Phase 3: anchor-proximity helpers ───────────────────────────────────────
@@ -8595,12 +8600,12 @@ def get_str_licensing_info(postcode: str, council: str) -> dict:
     return {'region': region, 'primary': primary, 'overlay': overlay}
 
 
-def _area_cache_get(district: str, strategy: str):
+def _area_cache_get(district: str, strategy: str, context: dict):
     """Return cached AI area analysis if <24h old, else None."""
     if not _SUPABASE_URL or not _SUPABASE_KEY:
         return None
     try:
-        key = _area_cache_key(district, strategy)
+        key = _area_cache_key(district, strategy, context)
         resp = requests.get(
             f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
             params={
@@ -8627,11 +8632,11 @@ def _area_cache_get(district: str, strategy: str):
         return None
 
 
-def _area_cache_put(district: str, strategy: str, payload: dict) -> None:
+def _area_cache_put(district: str, strategy: str, payload: dict, context: dict) -> None:
     if not _SUPABASE_URL or not _SUPABASE_KEY:
         return
     try:
-        key = _area_cache_key(district, strategy)
+        key = _area_cache_key(district, strategy, context)
         requests.post(
             f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
             json={
@@ -8775,7 +8780,10 @@ def area_analysis():
         council = a4.get('council') or 'Local Council'
 
         # Cache hit?
-        cached = _area_cache_get(district, strategy)
+        cache_context = {key: body.get(key) for key in (
+            'postcode', 'dealData', 'benchmark', 'articleFour', 'marketContext',
+        )}
+        cached = _area_cache_get(district, strategy, cache_context)
         if cached:
             app.logger.info(f'[area] cache hit {district}/{strategy}')
             return jsonify({'success': True, 'cached': True, **cached})
@@ -9135,7 +9143,7 @@ licensing/regulatory data above, QUOTE it directly — do not generalise:
                 'sources': ['Land Registry', 'VOA', 'PropertyData', 'Metalyzi DB'],
             },
         }
-        _area_cache_put(district, strategy, payload)
+        _area_cache_put(district, strategy, payload, cache_context)
         return jsonify({'success': True, 'cached': False, **payload})
 
     except Exception as e:
