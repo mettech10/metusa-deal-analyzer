@@ -19,6 +19,7 @@ import re
 import io
 from html import escape
 from ai_gateway import ai_gateway
+from regulatory_context import REGULATORY_CONTEXT
 
 # Import Land Registry API
 from land_registry import land_registry
@@ -7178,6 +7179,7 @@ Council:             {_a4p_cncl}
 Instruction:         {planning_hmo_instruction}
 
 == INSTRUCTIONS ==
+{REGULATORY_CONTEXT}
 Return ONLY a valid JSON object — no markdown, no code fences, no extra text.
 Be specific: reference actual figures, the specific postcode/area, and the strategy.
 Do NOT use generic filler. If a metric is weak, say so plainly.
@@ -8735,7 +8737,7 @@ def _area_section_template(strategy: str) -> list:
         ('This Deal in Context',
          "how the deal's purchase price, gross yield and cashflow compare to the area benchmark; is the price reasonable"),
         ('Risks Specific to BTL Here',
-         'Section 24 (interest relief), EPC C requirement (2028 target), Renters Reform Bill, local regulation, rate-rise sensitivity'),
+         'Section 24 (interest relief), dated energy standards and tenancy rules from the supplied regulatory context, local regulation, rate-rise sensitivity'),
         ('Investor Verdict',
          "one clear paragraph: does this area support the BTL thesis? reference yield, cashflow and key risks"),
     ]
@@ -9085,6 +9087,8 @@ LIVE COMPARABLES:
 
 THIS DEAL:
 {deal_block}
+
+{REGULATORY_CONTEXT}
 
 Return ONLY a valid JSON object — no markdown, no code fences. Use the
 EXACT section titles below (they are calibrated for {strategy}-specific
