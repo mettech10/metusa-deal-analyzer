@@ -13,6 +13,7 @@
     "SDLT: England and Northern Ireland only (not Welsh LTT or Scottish LBTT).",
     "Corporation tax: Financial Year 2026 (from 1 April 2026) rates, 12-month AP.",
     "Section 24 reducer uses the property basic rate (20% in 2026/27).",
+    "Capital gains: £3,000 annual exempt amount; 18% within the basic rate band, 24% above.",
     "Not HMRC-authoritative. Not tax, legal or financial advice."
   ],
   "incomeTax": {
@@ -39,6 +40,11 @@
     "ordinaryRate": 0.1075,
     "upperRate": 0.3575,
     "additionalRate": 0.3935
+  },
+  "capitalGains": {
+    "annualExemptAmount": 3000,
+    "residentialBasicRate": 0.18,
+    "residentialHigherRate": 0.24
   },
   "corporationTax": {
     "financialYear": 2026,

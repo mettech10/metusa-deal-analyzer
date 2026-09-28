@@ -42,6 +42,10 @@ def _make_blueprint(name: str, url_prefix: str) -> Blueprint:
     def post_compare():
         return _handle("compare")
 
+    @bp.post("/incorporation")
+    def post_incorporation():
+        return _handle("incorporation")
+
     @bp.post("/section-24")
     def post_section24():
         return _handle("section-24")

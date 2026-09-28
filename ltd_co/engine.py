@@ -7,6 +7,7 @@ from typing import Any
 from ltd_co.compare import compare_paths
 from ltd_co.corporation_tax import compute_corporation_tax
 from ltd_co.dividends import extract_dividends
+from ltd_co.incorporation import compare_incorporation
 from ltd_co.money import D, clamp0
 from ltd_co.rates import DEFAULT_PACK_ID, RatePack, RatePackError, list_pack_ids, load_rate_pack
 from ltd_co.sdlt import compare_sdlt, compute_sdlt
@@ -165,4 +166,7 @@ def dispatch(action: str, payload: dict[str, Any] | None = None) -> dict[str, An
         return dividends(payload)
     if action in ("compare", "paths"):
         return compare(payload)
+    if action in ("incorporation", "incorporate", "existing-property"):
+        packs = _pack(payload)
+        return _envelope(compare_incorporation(payload, packs), packs)
     raise RatePackError(f"Unknown action: {action}")
