@@ -1,7 +1,12 @@
 """
 England / NI / Wales income tax for the Ltd Co calculator.
 
-Stacking order (ITA 2007 s16): non-savings, then savings, then dividends.
+Stacking order (ITA 2007 s16): other non-savings, then property, then
+savings, then dividends. Personal allowance sits at the bottom of the stack,
+so it is used against other income (employment, trading, pension) first —
+the 2027/28 ordering rule. Before 2027/28 property is ordinary non-savings
+income, so a pack without ``propertyIncome`` taxes it at the main rates and
+the split changes nothing.
 Personal allowance is tapered by £1 per £2 of adjusted net income above £100,000.
 Dividend allowance uses band width at 0%.
 
@@ -51,12 +56,14 @@ class IncomeTaxResult:
     income_tax: Decimal
     breakdown: list[BandCharge] = field(default_factory=list)
     notes: tuple[str, ...] = ()
+    property_income: Decimal = ZERO
 
     def to_dict(self) -> dict:
         from ltd_co.money import to_float
 
         return {
             "nonSavingsIncome": to_float(self.non_savings_income),
+            "propertyIncome": to_float(self.property_income),
             "savingsIncome": to_float(self.savings_income),
             "dividendIncome": to_float(self.dividend_income),
             "adjustedNetIncome": to_float(self.adjusted_net_income),
@@ -115,8 +122,23 @@ def _div_rate(band: str, packs: RatePack) -> Decimal:
     }[band]
 
 
+def _slice_rate(rates, band: str, packs: RatePack) -> Decimal:
+    if rates is None:
+        return _ns_rate(band, packs)
+    return {
+        "personal_allowance": ZERO,
+        "basic": rates.basic_rate,
+        "higher": rates.higher_rate,
+        "additional": rates.additional_rate,
+    }[band]
+
+
+def _prop_rate(band: str, packs: RatePack) -> Decimal:
+    return _slice_rate(packs.property_income, band, packs)
+
+
 def _sav_rate(band: str, packs: RatePack) -> Decimal:
-    return _ns_rate(band, packs)
+    return _slice_rate(packs.savings.rates, band, packs)
 
 
 def _remaining_in_band(gross_pos: Decimal, pa: Decimal, packs: RatePack) -> Decimal:
@@ -138,11 +160,15 @@ def compute_income_tax(
     savings_income: Decimal = ZERO,
     dividend_income: Decimal = ZERO,
     section24_reducer: Decimal = ZERO,
+    property_income: Decimal = ZERO,
 ) -> IncomeTaxResult:
+    """``non_savings_income`` excludes property; pass rental profit as
+    ``property_income`` so 2027/28+ packs can apply property rates."""
     ns = clamp0(non_savings_income)
+    prop = clamp0(property_income)
     sav = clamp0(savings_income)
     div = clamp0(dividend_income)
-    ani = money(ns + sav + div)
+    ani = money(ns + prop + sav + div)
     pa = personal_allowance(ani, packs)
 
     breakdown: list[BandCharge] = []
@@ -219,9 +245,11 @@ def compute_income_tax(
     # Savings: starting rate of 0% on up to £5,000 of savings if non-savings
     # taxable income is below that limit. PSA then applies at 0% by band.
     tax_ns = consume(ns, "non_savings", _ns_rate)
+    tax_prop = consume(prop, "property", _prop_rate) if prop > 0 else ZERO
 
     # Taxable non-savings (after PA) for starting-rate eligibility.
-    taxable_ns = ns - pa
+    # Property income is non-savings income for this test in every year.
+    taxable_ns = ns + prop - pa
     if taxable_ns < 0:
         taxable_ns = ZERO
     starting_left = packs.savings.starting_rate_limit - taxable_ns
@@ -253,7 +281,7 @@ def compute_income_tax(
         # the taxpayer falls into after this income. Use ANI vs thresholds.
         it = packs.income_tax
         # Highest rate on non-dividend income (ns+sav) determines PSA.
-        top = money(ns + sav)
+        top = money(ns + prop + sav)
         if top > it.additional_rate_threshold:
             psa = packs.savings.psa_additional
         elif top > (pa + it.basic_rate_band):
@@ -280,7 +308,7 @@ def compute_income_tax(
 
     tax_div = consume(div, "dividend", _div_rate, allowance_left=packs.dividends.allowance) if div > 0 else ZERO
 
-    tax_before = money(tax_ns + tax_sav + tax_div)
+    tax_before = money(tax_ns + tax_prop + tax_sav + tax_div)
     reducer = clamp0(section24_reducer)
     applied = reducer if reducer < tax_before else tax_before
     if reducer > tax_before and reducer > 0:
@@ -303,4 +331,5 @@ def compute_income_tax(
         income_tax=income_tax,
         breakdown=breakdown,
         notes=tuple(notes),
+        property_income=prop,
     )

@@ -36,11 +36,22 @@ class IncomeTaxRates:
 
 
 @dataclass(frozen=True)
+class BandRates:
+    """Basic / higher / additional rates for a separately-rated income slice."""
+
+    basic_rate: Decimal
+    higher_rate: Decimal
+    additional_rate: Decimal
+
+
+@dataclass(frozen=True)
 class SavingsRates:
     starting_rate_limit: Decimal
     psa_basic: Decimal
     psa_higher: Decimal
     psa_additional: Decimal
+    # From 2027/28 savings have their own rates; None = main income tax rates.
+    rates: BandRates | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +110,14 @@ class RatePack:
     corporation_tax: CorporationTaxRates
     sdlt: SdltRates
     raw: dict[str, Any]
+    # From 2027/28 property income has its own rates (22/42/47) and is taxed
+    # after other non-savings income. None = taxed as ordinary non-savings.
+    property_income: BandRates | None = None
+
+    @property
+    def start_year(self) -> int:
+        """First calendar year of the tax year, e.g. 2026 for "2026/27"."""
+        return int(self.tax_year[:4])
 
     def pin(self) -> dict[str, Any]:
         return {
@@ -125,6 +144,43 @@ def _pack_path(pack_id: str) -> Path:
 
 def list_pack_ids() -> list[str]:
     return sorted(p.stem for p in PACK_DIR.glob("*.json"))
+
+
+def _band_rates(block: dict[str, Any] | None) -> BandRates | None:
+    if not block:
+        return None
+    return BandRates(
+        basic_rate=D(block["basicRate"]),
+        higher_rate=D(block["higherRate"]),
+        additional_rate=D(block["additionalRate"]),
+    )
+
+
+def resolve_year_packs(start: RatePack, horizon: int, *, policy: str = "legislated") -> list[RatePack]:
+    """Rate pack for each operating year 1..horizon.
+
+    ``legislated``: year n uses the pack for the tax year start+n-1, or the
+    latest earlier pack when none is published (thresholds are frozen to
+    2031, so the newest pack is the best available estimate).
+    ``pinned``: every year uses ``start`` (the pre-2027 behaviour).
+    """
+    if policy not in ("legislated", "pinned"):
+        raise ValueError("ratePolicy must be 'legislated' or 'pinned'")
+    if policy == "pinned":
+        return [start] * horizon
+    by_year: dict[int, RatePack] = {start.start_year: start}
+    for pack_id in list_pack_ids():
+        pack = load_rate_pack(pack_id)
+        if pack.jurisdiction != start.jurisdiction or pack.start_year <= start.start_year:
+            continue
+        by_year.setdefault(pack.start_year, pack)
+    years = sorted(by_year)
+    out: list[RatePack] = []
+    for i in range(horizon):
+        target = start.start_year + i
+        best = max(y for y in years if y <= target)
+        out.append(by_year[best])
+    return out
 
 
 def load_rate_pack(pack_id: str | None = None) -> RatePack:
@@ -182,7 +238,9 @@ def load_rate_pack(pack_id: str | None = None) -> RatePack:
             psa_basic=money(sav["psaBasic"]),
             psa_higher=money(sav["psaHigher"]),
             psa_additional=money(sav["psaAdditional"]),
+            rates=_band_rates(sav.get("rates")),
         ),
+        property_income=_band_rates(data.get("propertyIncome")),
         dividends=DividendRates(
             allowance=money(div["allowance"]),
             ordinary_rate=D(div["ordinaryRate"]),

@@ -1,0 +1,81 @@
+{
+  "id": "uk-2027-28-illustrative-v1",
+  "label": "UK 2027/28 illustrative",
+  "status": "illustrative",
+  "taxYear": "2027/28",
+  "jurisdiction": "england-ni",
+  "effectiveFrom": "2027-04-06",
+  "effectiveTo": "2028-04-05",
+  "pinned": true,
+  "notes": [
+    "Illustrative rate pack. Used for year 2 onwards of a Ltd Co Calculator run, and for later years until a newer pack is published.",
+    "Property income: separate rates of 22% / 42% / 47% from 6 April 2027 (England, Wales and Northern Ireland), taxed after other non-savings income and before savings and dividends.",
+    "Section 24 finance cost relief at the property basic rate (22%).",
+    "Savings income: 22% / 42% / 47% from 6 April 2027. Dividend rates unchanged from 2026/27 (10.75% / 35.75% / 39.35%).",
+    "Personal allowance is used against employment, trading and pension income before property, savings and dividends.",
+    "Personal allowance and band thresholds frozen until April 2031. Corporation tax and SDLT unchanged from 2026/27.",
+    "Source: HMRC, Change to tax rates for property, savings and dividend income (technical note, Budget 2025).",
+    "Not HMRC-authoritative. Not tax, legal or financial advice."
+  ],
+  "incomeTax": {
+    "personalAllowance": 12570,
+    "paTaperStart": 100000,
+    "paTaperEnd": 125140,
+    "paTaperPoundPerPounds": [1, 2],
+    "basicRate": 0.2,
+    "higherRate": 0.4,
+    "additionalRate": 0.45,
+    "basicRateBand": 37700,
+    "higherRateThreshold": 50270,
+    "additionalRateThreshold": 125140,
+    "propertyFinanceReducerRate": 0.22
+  },
+  "propertyIncome": {
+    "basicRate": 0.22,
+    "higherRate": 0.42,
+    "additionalRate": 0.47
+  },
+  "savings": {
+    "startingRateLimit": 5000,
+    "psaBasic": 1000,
+    "psaHigher": 500,
+    "psaAdditional": 0,
+    "rates": {
+      "basicRate": 0.22,
+      "higherRate": 0.42,
+      "additionalRate": 0.47
+    }
+  },
+  "dividends": {
+    "allowance": 500,
+    "ordinaryRate": 0.1075,
+    "upperRate": 0.3575,
+    "additionalRate": 0.3935
+  },
+  "corporationTax": {
+    "financialYear": 2027,
+    "smallProfitsRate": 0.19,
+    "mainRate": 0.25,
+    "lowerLimit": 50000,
+    "upperLimit": 250000,
+    "marginalReliefNumerator": 3,
+    "marginalReliefDenominator": 200,
+    "effectiveMarginalRate": 0.265
+  },
+  "sdlt": {
+    "jurisdiction": "england-ni",
+    "minimumConsideration": 40000,
+    "residentialBands": [
+      { "upTo": 125000, "rate": 0.0 },
+      { "upTo": 250000, "rate": 0.02 },
+      { "upTo": 925000, "rate": 0.05 },
+      { "upTo": 1500000, "rate": 0.1 },
+      { "upTo": null, "rate": 0.12 }
+    ],
+    "additionalDwellingSurcharge": 0.05,
+    "corporateEnvelopeFlatRate": 0.17,
+    "corporateEnvelopeThreshold": 500000,
+    "corporateEnvelopeThresholdInclusive": false,
+    "rentalBusinessReliefDefault": true
+  }
+}

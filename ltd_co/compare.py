@@ -19,7 +19,7 @@ from ltd_co.dividends import extract_dividends
 from ltd_co.income_tax import compute_income_tax
 from ltd_co.money import D, ZERO, clamp0, money, to_float
 from ltd_co.npv import break_even_year, cumulative, npv
-from ltd_co.rates import RatePack
+from ltd_co.rates import RatePack, resolve_year_packs
 from ltd_co.sdlt import compute_sdlt
 from ltd_co.section24 import compute_section24
 
@@ -119,7 +119,7 @@ def _soft_lean(
         "breakEvenYear": break_even,
         "rationale": rationale,
         "disclaimers": [
-            "Illustrative calculation using a pinned rate pack. Not tax, legal or financial advice.",
+            "Illustrative calculation using pinned rate packs: 2026/27 for year 1, then 2027/28 (property income at 22/42/47%, finance cost relief at 22%) for later years. Not tax, legal or financial advice.",
             "Section 24, CT, dividend and SDLT rules are simplified for a single UK residential let in England/NI.",
             "Does not model CGT on sale, incorporation of an existing portfolio, ATED, non-resident surcharges, Scotland/Wales, or MTD.",
             "A soft lean is a numerical hint, not a product verdict and not a recommendation to incorporate or not.",
@@ -147,6 +147,10 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
     if horizon < 1 or horizon > 40:
         raise ValueError("horizonYears must be between 1 and 40")
     discount = D(payload.get("discountRate", "0.05"))
+    rate_policy = str(payload.get("ratePolicy") or "legislated")
+    # Year 1 uses the requested pack; later years use each tax year's pack
+    # (e.g. 2027/28 property income rates) unless ratePolicy is "pinned".
+    year_packs = resolve_year_packs(packs, horizon, policy=rate_policy)
 
     personal_rate = D(financing.get("personalInterestRate", "0.045"))
     company_rate = D(financing.get("companyInterestRate", "0.055"))
@@ -233,6 +237,7 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
     extraction_lens_year1: dict[str, Any] | None = None
 
     for y in range(1, horizon + 1):
+        yp = year_packs[y - 1]
         rent = _growth(rent0, rent_g, y)
         opex = _growth(opex0, opex_g, y)
 
@@ -240,7 +245,7 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
             rental_income=rent,
             allowable_non_finance_expenses=opex,
             finance_costs=interest_a,
-            packs=packs,
+            packs=yp,
             other_non_savings_income=other_income,
             savings_income=savings_income,
             dividend_income=other_dividends,
@@ -248,18 +253,19 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
             property_losses_brought_forward=loss_carry,
         )
         it_a = compute_income_tax(
-            non_savings_income=money(other_income + s24.property_profit),
+            non_savings_income=other_income,
+            property_income=s24.property_profit,
             savings_income=savings_income,
             dividend_income=other_dividends,
             section24_reducer=s24.tax_reducer,
-            packs=packs,
+            packs=yp,
         )
         # Tax attributable to the property is total tax minus tax on other income alone.
         it_other = compute_income_tax(
             non_savings_income=other_income,
             savings_income=savings_income,
             dividend_income=other_dividends,
-            packs=packs,
+            packs=yp,
         )
         property_it = money(it_a.income_tax - it_other.income_tax)
         if property_it < 0:
@@ -276,6 +282,8 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
                 cash_to_individual=cash_path_a,
                 extra={
                     "label": "operating",
+                    "ratePack": yp.id,
+                    "taxYear": yp.tax_year,
                     "propertyProfit": to_float(s24.property_profit),
                     "section24": {
                         "bindingLimb": s24.binding_limb,
@@ -297,7 +305,7 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
         ct_profit = money(rent - opex - interest_b - compliance)
         ct: CorporationTaxResult = compute_corporation_tax(
             taxable_profits=ct_profit,
-            packs=packs,
+            packs=yp,
             associated_companies=associated,
             losses_brought_forward=ct_loss_carry,
         )
@@ -306,7 +314,7 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
             distributable = ZERO
         extraction = extract_dividends(
             distributable=distributable,
-            packs=packs,
+            packs=yp,
             other_non_savings_income=other_income,
             savings_income=savings_income,
             other_dividend_income=other_dividends,
@@ -324,7 +332,7 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
         if y == 1:
             retained_alt = extract_dividends(
                 distributable=distributable,
-                packs=packs,
+                packs=yp,
                 other_non_savings_income=other_income,
                 savings_income=savings_income,
                 other_dividend_income=other_dividends,
@@ -354,6 +362,8 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
                 cash_to_individual=cash_path_b,
                 extra={
                     "label": "operating",
+                    "ratePack": yp.id,
+                    "taxYear": yp.tax_year,
                     "complianceCost": to_float(compliance),
                     "ctProfit": to_float(ct.taxable_profits),
                     "corporationTax": to_float(ct.corporation_tax),
@@ -416,6 +426,10 @@ def compare_paths(payload: dict[str, Any], packs: RatePack) -> dict[str, Any]:
         },
         "horizonYears": horizon,
         "discountRate": to_float(discount, places=4),
+        "ratePolicy": rate_policy,
+        "ratePacksUsed": [
+            p.pin() for i, p in enumerate(year_packs) if p.id not in {q.id for q in year_packs[:i]}
+        ],
         "npv": {
             "pathA": to_float(npv_a),
             "pathB": to_float(npv_b),

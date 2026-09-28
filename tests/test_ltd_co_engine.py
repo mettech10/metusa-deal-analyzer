@@ -227,8 +227,19 @@ def test_path_ab_compare_pins_pack_and_soft_lean(packs):
     assert "corporationTax" in y1b
     assert out["extractionLens"]["extractAll"]["extracted"] > 0
     # Higher-rate landlord: extra company interest + compliance outweigh s24 drag here.
-    assert out["npv"]["pathA"] == pytest.approx(-74025.21, abs=0.05)
+    # Years 2-10 use 2027/28 property rates: +£71.25 tax a year (42% on £12,000
+    # less 22% relief on £8,437.50 = £3,183.75 vs £3,112.50), NPV -£482.32.
+    assert out["ratePolicy"] == "legislated"
+    assert [p["id"] for p in out["ratePacksUsed"]] == [
+        "uk-2026-27-illustrative-v1",
+        "uk-2027-28-illustrative-v1",
+    ]
+    assert out["paths"]["A"]["years"][2]["tax"] == pytest.approx(3183.75, abs=0.01)
+    assert out["paths"]["A"]["years"][2]["taxYear"] == "2027/28"
+    assert out["npv"]["pathA"] == pytest.approx(-74507.53, abs=0.05)
     assert out["npv"]["pathB"] == pytest.approx(-76492.30, abs=0.05)
+    pinned = compare({**payload, "ratePolicy": "pinned"})
+    assert pinned["npv"]["pathA"] == pytest.approx(-74025.21, abs=0.05)  # pre-2027 behaviour
     assert out["metadata"]["lean"] == "path_a_personal"
     assert out["breakEven"]["year"] is None
     y1a_ops = out["paths"]["A"]["years"][1]
@@ -323,3 +334,40 @@ def test_flask_blueprint_compare_and_rates():
     assert data["metadata"]["leanStrength"] == "soft"
     assert data["ratePack"]["sha256"]
     assert data["breakEven"]["year"] is None or isinstance(data["breakEven"]["year"], int)
+
+
+# ── 2027/28 property income rates ─────────────────────────────────────
+def test_hmrc_2027_28_worked_example():
+    """HMRC technical note: £30k employment, £3k property income, £1k finance costs."""
+    p27 = load_rate_pack("uk-2027-28-illustrative-v1")
+    reducer = money(D("1000") * p27.income_tax.property_finance_reducer_rate)
+    assert reducer == D("220.00")
+    res = compute_income_tax(
+        non_savings_income=D("30000"),
+        property_income=D("3000"),
+        section24_reducer=reducer,
+        packs=p27,
+    )
+    # 17,430 x 20% = 3,486; 3,000 x 22% = 660; less 220 relief.
+    assert res.income_tax == D("3926.00")
+    prop_rows = [b for b in res.breakdown if b.kind == "property"]
+    assert [(b.band, b.rate) for b in prop_rows] == [("basic", D("0.22"))]
+
+
+def test_personal_allowance_used_against_other_income_first():
+    p27 = load_rate_pack("uk-2027-28-illustrative-v1")
+    # £10k salary uses £10k of PA; the remaining £2,570 PA shelters property.
+    res = compute_income_tax(non_savings_income=D("10000"), property_income=D("20000"), packs=p27)
+    assert res.income_tax == money((D("20000") - D("2570")) * D("0.22"))
+
+
+@pytest.mark.parametrize("other,prop", [(0, 12000), (25000, 9000), (60000, 12000), (110000, 30000)])
+def test_property_split_changes_nothing_before_2027(packs, other, prop):
+    lumped = compute_income_tax(non_savings_income=D(other + prop), packs=packs)
+    split = compute_income_tax(non_savings_income=D(other), property_income=D(prop), packs=packs)
+    assert split.income_tax == lumped.income_tax
+
+
+def test_compare_rejects_unknown_rate_policy():
+    with pytest.raises(ValueError, match="ratePolicy"):
+        compare({"property": {"purchasePrice": 200000, "annualRent": 12000}, "ratePolicy": "future"})
