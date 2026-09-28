@@ -54,7 +54,10 @@ def test_health_and_catalogue_are_public(client):
     assert cat.status_code == 200
     payload = cat.get_json()
     codes = {item["code"] for item in payload["items"]}
-    assert codes == {"GAS", "EICR", "EPC", "DEP", "HTR", "LIC_HMO", "LIC_SEL"}
+    assert codes == {
+        "GAS", "EICR", "EPC", "DEP", "HTR", "LIC_HMO", "LIC_SEL",
+        "SMOKE_CO", "RTR", "TERMS", "RRA_INFO", "EPC_2030", "PRS_DB",
+    }
     assert payload["catalogue"] == payload["items"]
 
 

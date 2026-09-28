@@ -4,7 +4,9 @@ Auth matches user-data APIs: `Authorization: Bearer <supabase access token>`.
 Local tests use `X-User-Id`. Reminder dispatch uses `X-Cron-Secret`
 (same pattern as `/api/benchmarks/update`).
 
-Catalogue codes: `GAS`, `EICR`, `EPC`, `DEP`, `HTR`, `LIC_HMO`, `LIC_SEL`.
+Catalogue codes: `GAS`, `EICR`, `EPC`, `DEP`, `SMOKE_CO`, `RTR`, `TERMS`, `RRA_INFO`, `HTR` (tenancies before 1 May 2026), `LIC_HMO`, `LIC_SEL`, `EPC_2030`, `PRS_DB`.
+Deadline items (`RRA_INFO` by 31 May 2026, `EPC_2030` by 1 Oct 2030) default `expiresOn` to the statutory date and are `valid` once `issuedOn` is recorded.
+The `code` check constraint is widened by `supabase/migrations/20260928_compliance_catalogue_2026.sql` (apply before deploying).
 Status engine: `valid` | `due_soon` | `overdue` (due-soon window = 90 days).
 Applicability (persisted): `required` | `not_applicable` | `unknown`.
 `applicable` is accepted as an alias of `required`. GAS may be

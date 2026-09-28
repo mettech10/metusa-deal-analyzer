@@ -21,16 +21,20 @@ def compute_status(
     Rules (MVP):
     - No issue date and no expiry → overdue (nothing on file).
     - Issued, no expiry (DEP / HTR style) → valid.
+    - Deadline items (catalogue fixedDueDate) → valid once done (issued).
     - as_of > expires_on → overdue.
     - 0 <= days remaining <= due_soon window → due_soon.
     - days remaining > window → valid.
     """
     today = as_of or date.today()
+    item = get_catalogue_item(code) if code else None
+    if item and item.get("fixedDueDate") and issued_on is not None:
+        # Deadline items (RRA_INFO by 31 May 2026, EPC C by 1 Oct 2030): the date
+        # is when to act by, not a certificate expiry. Recorded as done = compliant.
+        return "valid"
     window = due_soon_days
-    if window is None and code:
-        item = get_catalogue_item(code)
-        if item:
-            window = item.get("dueSoonDays")
+    if window is None and item:
+        window = item.get("dueSoonDays")
     if window is None:
         window = DEFAULT_DUE_SOON_DAYS
 
