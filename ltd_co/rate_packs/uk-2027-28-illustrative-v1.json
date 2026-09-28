@@ -15,6 +15,7 @@
     "Personal allowance is used against employment, trading and pension income before property, savings and dividends.",
     "Personal allowance and band thresholds frozen until April 2031. Corporation tax and SDLT unchanged from 2026/27.",
     "Source: HMRC, Change to tax rates for property, savings and dividend income (technical note, Budget 2025).",
+    "Capital gains: £3,000 annual exempt amount; 18% within the basic rate band, 24% above.",
     "Not HMRC-authoritative. Not tax, legal or financial advice."
   ],
   "incomeTax": {
@@ -51,6 +52,11 @@
     "ordinaryRate": 0.1075,
     "upperRate": 0.3575,
     "additionalRate": 0.3935
+  },
+  "capitalGains": {
+    "annualExemptAmount": 3000,
+    "residentialBasicRate": 0.18,
+    "residentialHigherRate": 0.24
   },
   "corporationTax": {
     "financialYear": 2027,

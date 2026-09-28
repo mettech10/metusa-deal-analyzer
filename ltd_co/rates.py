@@ -63,6 +63,13 @@ class DividendRates:
 
 
 @dataclass(frozen=True)
+class CapitalGainsRates:
+    annual_exempt_amount: Decimal
+    residential_basic_rate: Decimal
+    residential_higher_rate: Decimal
+
+
+@dataclass(frozen=True)
 class CorporationTaxRates:
     financial_year: int
     small_profits_rate: Decimal
@@ -113,6 +120,7 @@ class RatePack:
     # From 2027/28 property income has its own rates (22/42/47) and is taxed
     # after other non-savings income. None = taxed as ordinary non-savings.
     property_income: BandRates | None = None
+    capital_gains: CapitalGainsRates | None = None
 
     @property
     def start_year(self) -> int:
@@ -241,6 +249,15 @@ def load_rate_pack(pack_id: str | None = None) -> RatePack:
             rates=_band_rates(sav.get("rates")),
         ),
         property_income=_band_rates(data.get("propertyIncome")),
+        capital_gains=(
+            CapitalGainsRates(
+                annual_exempt_amount=money(data["capitalGains"]["annualExemptAmount"]),
+                residential_basic_rate=D(data["capitalGains"]["residentialBasicRate"]),
+                residential_higher_rate=D(data["capitalGains"]["residentialHigherRate"]),
+            )
+            if data.get("capitalGains")
+            else None
+        ),
         dividends=DividendRates(
             allowance=money(div["allowance"]),
             ordinary_rate=D(div["ordinaryRate"]),
