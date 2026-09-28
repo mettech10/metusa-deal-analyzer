@@ -27,7 +27,7 @@ from licensing.models import (
     disclaimer_payload,
     fee_from_range,
     hook,
-    parse_iso,
+    utcnow,
 )
 
 DATA_PATH = Path(__file__).parent / "data" / "priority_schemes.json"
@@ -39,6 +39,15 @@ DATA_PATH = Path(__file__).parent / "data" / "priority_schemes.json"
 def _norm(name: str) -> str:
     text = (name or "").lower()
     text = re.sub(r"\b(city|metropolitan|borough|council|london borough of|royal borough of)\b", " ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+def _ward_key(name: str) -> str:
+    """Normalise ward names across councils and postcodes.io
+    ("St Edward's" == "St Edwards", "Rainham & Wennington" == "Rainham and Wennington")."""
+    text = (name or "").lower().replace("&", " and ")
+    text = re.sub(r"['\u2019]", "", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
 
@@ -56,15 +65,18 @@ def stale_after_days_for_tier(tier: str) -> int:
 @dataclass
 class SchemeCoverage:
     kind: str  # citywide | designated_areas | unknown
-    spatial_resolution: str  # none | la | named_areas
+    spatial_resolution: str  # none | la | named_areas | wards
     named_areas: list[str] = field(default_factory=list)
     notes: Optional[str] = None
+    # Wards added to a designation later than the scheme itself: {ward: YYYY-MM-DD}.
+    ward_start_dates: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
             "spatial_resolution": self.spatial_resolution,
             "named_areas": list(self.named_areas),
+            "ward_start_dates": dict(self.ward_start_dates),
             "boundary_geojson": None,
             "notes": self.notes,
         }
@@ -145,6 +157,7 @@ def _parse_scheme(raw: dict[str, Any]) -> Optional[LicenceScheme]:
             spatial_resolution=cov.get("spatial_resolution") or "none",
             named_areas=list(cov.get("named_areas") or []),
             notes=cov.get("notes"),
+            ward_start_dates=dict(cov.get("ward_start_dates") or {}),
         ),
         confidence=float(raw.get("confidence") or 0.5),
         last_verified_at=raw.get("last_verified_at"),
@@ -269,8 +282,19 @@ def scheme_flags(
         )
         return flags
 
+    today = utcnow().date().isoformat()
     for scheme in schemes:
-        flags.append(_flag_for_scheme(scheme, occupants=occupants, rentalish=rentalish, admin_ward=admin_ward))
+        if scheme.end_date and scheme.end_date < today:
+            continue  # designation has ended
+        flags.append(
+            _flag_for_scheme(
+                scheme,
+                occupants=occupants,
+                rentalish=rentalish,
+                admin_ward=admin_ward,
+                single_household=use in ("btl", "sa", "str"),
+            )
+        )
     return flags
 
 
@@ -280,15 +304,29 @@ def _flag_for_scheme(
     occupants: Optional[int],
     rentalish: bool,
     admin_ward: Optional[str],
+    single_household: bool = False,
 ) -> Flag:
     slo = scheme.stale_after_days()
     citywide = scheme.coverage.kind == "citywide"
     designated = scheme.coverage.kind == "designated_areas"
+    by_ward = designated and scheme.coverage.spatial_resolution == "wards"
+    ward_match: Optional[bool] = None
+    if by_ward and admin_ward:
+        ward_match = _ward_key(admin_ward) in {_ward_key(n) for n in scheme.coverage.named_areas}
+
+    if scheme.status == "proposed":
+        return _proposed_scheme_flag(scheme, slo)
 
     if citywide:
         applies = "yes" if rentalish else "possible"
         spatial = "local_authority"
         confidence = min(scheme.confidence, 0.70)
+    elif ward_match is not None:
+        # Council designations are by ward and postcodes.io gives the current
+        # ward, so this is an address-level answer (not a named-area guess).
+        applies = ("yes" if rentalish else "possible") if ward_match else "no"
+        spatial = "ward"
+        confidence = min(scheme.confidence, 0.8) if ward_match else min(scheme.confidence, 0.65)
     elif designated:
         applies = "possible"
         spatial = "named_areas_only"
@@ -344,7 +382,16 @@ def _flag_for_scheme(
     if scheme.scheme_type == "additional":
         flag_id = "additional_hmo_licence"
         title = f"Additional HMO licensing — {scheme.la_name}"
-        if occupants is not None and occupants >= 5:
+        if single_household and (occupants is None or occupants < 3):
+            # Additional licensing only covers HMOs. A single-household let or
+            # holiday let is outside it unless it becomes a shared house.
+            summary_extra = (
+                " Not needed for a single-household let or holiday let. It applies if "
+                "you let to 3+ people from 2+ households."
+            )
+            severity = "info"
+            applies = "no"
+        elif occupants is not None and occupants >= 5:
             summary_extra = (
                 " Occupancy is already at/above the mandatory threshold; additional "
                 "licensing is secondary to the mandatory HMO licence."
@@ -363,11 +410,7 @@ def _flag_for_scheme(
         area_bit = (
             "citywide / borough-wide designation"
             if citywide
-            else (
-                "designated areas only"
-                + (f" ({', '.join(scheme.coverage.named_areas[:8])})" if scheme.coverage.named_areas else "")
-                + " — address-level membership is not resolved (no official boundary in this seed)"
-            )
+            else _designated_area_bit(scheme, admin_ward, ward_match)
         )
         summary = (
             f"Curated additional HMO licensing scheme for {scheme.la_name} "
@@ -393,11 +436,7 @@ def _flag_for_scheme(
         area_bit = (
             "covers all private rented properties in the LA (citywide / borough-wide)"
             if citywide
-            else (
-                "designated areas only"
-                + (f" ({', '.join(scheme.coverage.named_areas[:8])})" if scheme.coverage.named_areas else "")
-                + " — address-level membership is not resolved"
-            )
+            else _designated_area_bit(scheme, admin_ward, ward_match)
         )
         summary = (
             f"Curated selective licensing scheme for {scheme.la_name}: {area_bit}. "
@@ -417,10 +456,15 @@ def _flag_for_scheme(
         if designated:
             hooks.append(hook("verify.scheme_boundary", "verify", "soft_warning"))
 
+    today = utcnow().date().isoformat()
+    if scheme.start_date and scheme.start_date > today:
+        summary += f" Designated but not yet in force: licences are required from {scheme.start_date}."
+    if ward_match and admin_ward:
+        ward_start = {_ward_key(k): v for k, v in scheme.coverage.ward_start_dates.items()}.get(_ward_key(admin_ward))
+        if ward_start and ward_start > today:
+            summary += f" {admin_ward} ward joins the scheme on {ward_start}; licences are required from then."
     if scheme.end_date:
-        end = parse_iso(scheme.end_date)
-        summary += f" Published designation end date (if still current): {scheme.end_date}."
-        _ = end
+        summary += f" Designation runs until {scheme.end_date}."
 
     if scheme.fee_range:
         summary += f" Seed fee range (unverified): {scheme.fee_range}."
@@ -477,3 +521,63 @@ def seed_inventory() -> dict[str, Any]:
             {"la_code": code, "scheme_types": types} for code, types in sorted(by_la.items())
         ],
     }
+
+
+def _designated_area_bit(
+    scheme: LicenceScheme,
+    admin_ward: Optional[str],
+    ward_match: Optional[bool],
+) -> str:
+    areas = scheme.coverage.named_areas
+    listed = f" ({', '.join(areas[:16])}{', ...' if len(areas) > 16 else ''})" if areas else ""
+    if ward_match is True:
+        return f"designated wards{listed}; this address is in {admin_ward} ward, which is covered"
+    if ward_match is False:
+        return f"designated wards{listed}; this address is in {admin_ward} ward, which is not covered"
+    return (
+        f"designated areas only{listed} — address-level membership is not resolved "
+        "(no official boundary in this seed)"
+    )
+
+
+def _proposed_scheme_flag(scheme: LicenceScheme, slo: int) -> Flag:
+    kind = "Additional HMO" if scheme.scheme_type == "additional" else "Selective"
+    flag_id = "additional_hmo_licence" if scheme.scheme_type == "additional" else "selective_licence"
+    fee = fee_from_range(
+        kind="hmo_licence" if scheme.scheme_type == "additional" else "selective_licence",
+        range_text=scheme.fee_range,
+        term_years=scheme.term_years,
+        include_in_cashflow=False,  # not in force yet
+        confidence=0.3 if scheme.fee_range else 0.0,
+    )
+    area = "borough-wide" if scheme.coverage.kind == "citywide" else "in named areas"
+    summary = (
+        f"{scheme.la_name} has proposed {kind.lower()} licensing {area}. It is not in force"
+        + (f"; proposed fee {scheme.fee_range}" if scheme.fee_range else "")
+        + ". If approved it would apply to lets in the scheme, so check the council's "
+        "decision before you buy."
+    )
+    return Flag(
+        id=flag_id,
+        category="licensing",
+        title=f"{kind} licensing proposed — {scheme.la_name}",
+        summary=summary,
+        detail=scheme.curator_notes,
+        severity="soft_warning",
+        deal_impact="soft_warning",
+        applies="possible",
+        confidence=min(scheme.confidence, 0.5),
+        sources=list(scheme.sources),
+        analyse_hooks=[
+            hook(f"licence.{'additional_hmo' if scheme.scheme_type == 'additional' else 'selective'}", "licence", "soft_warning", fee=fee),
+            hook("verify.lpa", "verify", "info"),
+        ],
+        last_verified_at=scheme.last_verified_at,
+        freshness=component_freshness(
+            scheme.last_verified_at,
+            stale_after_days=slo,
+            basis="curated_seed",
+            notes=scheme.verification_method,
+        ),
+        spatial_resolution="local_authority" if scheme.coverage.kind == "citywide" else "named_areas_only",
+    )

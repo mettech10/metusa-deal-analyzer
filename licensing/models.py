@@ -22,6 +22,7 @@ SourceKind = Literal[
     "planning_data",
     "curated_seed",
     "district_index",
+    "verified_register",
     "geo",
 ]
 HookKind = Literal[
@@ -41,6 +42,8 @@ STATUTE_VERIFIED_AT = "2018-10-01T00:00:00+00:00"  # 2018 HMO prescribed-descrip
 SCHEME_STALE_AFTER_DAYS_PRIORITY = 30
 SCHEME_STALE_AFTER_DAYS_COVERED = 90
 ARTICLE4_STALE_AFTER_DAYS = 90
+# Verified register rows are re-checked monthly; 45 days means a refresh was missed.
+ARTICLE4_REGISTER_STALE_AFTER_DAYS = 45
 GEO_STALE_AFTER_DAYS = 30
 
 DISCLAIMER_VERSION = "licensing-checker-disclaimer-v1"

@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 import requests
 
 from licensing.models import (
+    ARTICLE4_REGISTER_STALE_AFTER_DAYS,
     ARTICLE4_STALE_AFTER_DAYS,
     Flag,
     Source,
@@ -449,73 +450,178 @@ def _district_fallback_flags(
     conversion_from_c3: Optional[bool] = None,
     conversion_play: bool = False,
 ) -> list[Flag]:
-    """Optional postcode-district index — not a legal boundary.
+    """District-level Article 4 evidence — never an address-level boundary.
 
-    Article 4 district index only. Must never be fed HMO_LICENSING_LOOKUP / Wales rows.
+    Two sources, labelled for what they are:
+    - ``verified_register``: Supabase ``article4_areas``, council-checked and
+      refreshed monthly. Carries a real last_verified_at.
+    - ``static``: the legacy in-repo outward-code list. Unverified, so it can
+      only raise a soft warning, never a deal killer.
+    Must never be fed HMO_LICENSING_LOOKUP / Wales rows.
     """
-    from licensing.models import hook
-
     if not fallback.get("known"):
         return []
     if fallback.get("tier") or fallback.get("rent_smart_wales") or fallback.get("scope"):
         return []
-    active = bool(fallback.get("is_article_4") or fallback.get("isArticle4"))
-    council = fallback.get("council") or "Local planning authority"
-    note = fallback.get("note") or fallback.get("advice") or ""
-    if planning_result.hmo_hits and active:
-        applies: str = "yes"
-        severity = "info"
-        confidence = 0.55
-        title = "District index corroborates HMO Article 4"
-        summary = (
-            f"In-repo postcode-district index also marks this outward code as Article 4 "
-            f"({council}). Spatial resolution is district, not the property."
-        )
-    elif planning_result.hmo_hits:
-        return []
-    elif active:
-        applies = "possible"
-        severity = "deal_killer" if conversion_play else "compliance_cost"
-        confidence = 0.55
-        title = "District index indicates HMO Article 4 (not address-level)"
-        summary = (
-            f"The in-repo postcode-district index marks this outward code as Article 4 "
-            f"for {council}. This is not a polygon boundary and must not be treated as "
-            f"address-level proof. {note}"
-        ).strip()
-    else:
-        return []
+    if fallback.get("source") == "verified_register":
+        return _register_flags(fallback, planning_result, conversion_play=conversion_play)
+    return _legacy_list_flags(fallback, planning_result)
 
-    impact = "deal_killer" if conversion_play and active and not planning_result.hmo_hits else severity
-    return [
-        Flag(
-            id="article4_hmo_district_index",
-            category="planning",
-            title=title,
-            summary=summary,
-            severity=severity,
-            deal_impact=impact,
-            applies=applies,  # type: ignore[arg-type]
-            confidence=confidence,
-            sources=[
-                Source(
-                    name="Metalyzi postcode-district Article 4 index",
-                    kind="district_index",
-                    note="District-level only. Not a legal boundary. Do not invent polygons from this.",
-                )
-            ],
-            analyse_hooks=[
-                hook("planning.article4_hmo", "planning", impact),  # type: ignore[arg-type]
-                hook("verify.lpa", "verify", "info"),
-                hook("verify.scheme_boundary", "verify", "soft_warning"),
-            ],
-            last_verified_at=None,
-            freshness=component_freshness(
-                None,
-                stale_after_days=ARTICLE4_STALE_AFTER_DAYS,
-                basis="curated_index",
-                notes="No last_verified_at on the district index — treat as stale until curator-confirmed.",
+
+def _district_flag(
+    *,
+    title: str,
+    summary: str,
+    severity: str,
+    impact: str,
+    applies: str,
+    confidence: float,
+    source: Source,
+    last_verified_at: Optional[str],
+    stale_after_days: int,
+    basis: str,
+    freshness_note: str,
+) -> Flag:
+    from licensing.models import hook
+
+    return Flag(
+        id="article4_hmo_district_index",
+        category="planning",
+        title=title,
+        summary=summary,
+        severity=severity,  # type: ignore[arg-type]
+        deal_impact=impact,  # type: ignore[arg-type]
+        applies=applies,  # type: ignore[arg-type]
+        confidence=confidence,
+        sources=[source],
+        analyse_hooks=[
+            hook("planning.article4_hmo", "planning", impact),  # type: ignore[arg-type]
+            hook("verify.lpa", "verify", "info"),
+            hook("verify.scheme_boundary", "verify", "soft_warning"),
+        ],
+        last_verified_at=last_verified_at,
+        freshness=component_freshness(
+            last_verified_at,
+            stale_after_days=stale_after_days,
+            basis=basis,
+            notes=freshness_note,
+        ),
+        spatial_resolution="postcode_district",
+    )
+
+
+def _register_flags(
+    fb: dict[str, Any],
+    planning_result: Article4Result,
+    *,
+    conversion_play: bool,
+) -> list[Flag]:
+    council = fb.get("council") or "Local planning authority"
+    district = fb.get("district") or "this district"
+    status = str(fb.get("status") or "unknown")
+    verified_on = str(fb.get("last_verified_at") or "")[:10] or "unknown date"
+    confidence = 0.7 if fb.get("verified") else 0.5
+    source = Source(
+        name="Metalyzi verified Article 4 register",
+        kind="verified_register",
+        url=fb.get("url"),
+        note="Council-checked monthly. District-level only, not a legal boundary.",
+    )
+    common = dict(
+        source=source,
+        last_verified_at=fb.get("last_verified_at"),
+        stale_after_days=ARTICLE4_REGISTER_STALE_AFTER_DAYS,
+        basis="verified_register",
+        freshness_note=f"Council register row last verified {verified_on}; refreshed monthly.",
+    )
+    if status == "active" and fb.get("district_listed"):
+        if planning_result.hmo_hits:
+            return [_district_flag(
+                title="Verified register corroborates HMO Article 4",
+                summary=(
+                    f"{council}'s HMO Article 4 area includes {district} (register verified "
+                    f"{verified_on}). District-level, not the property itself."
+                ),
+                severity="info", impact="info", applies="yes", confidence=confidence, **common,
+            )]
+        impact = "deal_killer" if conversion_play else "compliance_cost"
+        return [_district_flag(
+            title="HMO Article 4 covers this postcode district",
+            summary=(
+                f"{council} has an HMO Article 4 direction that includes {district} "
+                f"(register verified {verified_on}). C3→C4 conversion needs full planning "
+                "permission. The register is district-level, so confirm the exact boundary "
+                "for this address with the council."
             ),
-            spatial_resolution="postcode_district",
-        )
-    ]
+            severity=impact, impact=impact, applies="possible", confidence=confidence, **common,
+        )]
+    if planning_result.hmo_hits:
+        return []  # a Planning Data polygon hit outranks district-level evidence
+    if status == "active":
+        return [_district_flag(
+            title="District is outside the council's HMO Article 4 area",
+            summary=(
+                f"{council}'s HMO Article 4 direction lists specific districts, and {district} "
+                f"is not one of them (register verified {verified_on}). Boundaries are "
+                "district-level, so confirm with the council before relying on this."
+            ),
+            severity="info", impact="info", applies="no", confidence=min(confidence, 0.6), **common,
+        )]
+    if status == "none":
+        return [_district_flag(
+            title="No HMO Article 4 direction for this council",
+            summary=(
+                f"{council} has no HMO Article 4 direction in force (register verified "
+                f"{verified_on}). C3→C4 conversion is permitted development, subject to "
+                "licensing and building regulations."
+            ),
+            severity="info", impact="info", applies="no", confidence=confidence, **common,
+        )]
+    if status in ("proposed", "consultation"):
+        return [_district_flag(
+            title="HMO Article 4 direction proposed",
+            summary=(
+                f"{council} has proposed an HMO Article 4 direction (register verified "
+                f"{verified_on}). It is not yet in force, but a conversion may need planning "
+                "permission by the time you complete. Check the council's timetable."
+            ),
+            severity="soft_warning", impact="soft_warning", applies="possible",
+            confidence=min(confidence, 0.6), **common,
+        )]
+    return []
+
+
+def _legacy_list_flags(fb: dict[str, Any], planning_result: Article4Result) -> list[Flag]:
+    active = bool(fb.get("is_article_4") or fb.get("isArticle4"))
+    if not active:
+        return []  # unverified data never asserts "no Article 4"
+    council = fb.get("council") or "Local planning authority"
+    source = Source(
+        name="Legacy in-repo Article 4 list (unverified)",
+        kind="district_index",
+        note="Outward-code list last edited in 2025. Not verified against council records.",
+    )
+    common = dict(
+        source=source,
+        last_verified_at=None,
+        stale_after_days=ARTICLE4_STALE_AFTER_DAYS,
+        basis="unverified_legacy_list",
+        freshness_note="Unverified legacy list with no verification date.",
+    )
+    if planning_result.hmo_hits:
+        return [_district_flag(
+            title="Legacy list also marks this district as HMO Article 4",
+            summary=(
+                f"An unverified in-repo list also marks this outward code as Article 4 ({council})."
+            ),
+            severity="info", impact="info", applies="yes", confidence=0.35, **common,
+        )]
+    return [_district_flag(
+        title="Unverified list suggests HMO Article 4 (check with the council)",
+        summary=(
+            f"An unverified in-repo list marks this outward code as Article 4 for {council}. "
+            "It has not been checked against council records, so treat it as a prompt to "
+            "check rather than a finding."
+        ),
+        severity="soft_warning", impact="soft_warning", applies="possible", confidence=0.35, **common,
+    )]
