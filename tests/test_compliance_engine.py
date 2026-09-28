@@ -20,6 +20,7 @@ from compliance.status import compute_status
 def test_catalogue_has_required_codes():
     assert CATALOGUE_CODES == {
         "GAS", "EICR", "EPC", "DEP", "HTR", "LIC_HMO", "LIC_SEL",
+        "SMOKE_CO", "RTR", "TERMS", "RRA_INFO", "EPC_2030", "PRS_DB",
     }
     for code in CATALOGUE_CODES:
         item = get_catalogue_item(code.lower())
@@ -138,3 +139,31 @@ def test_in_app_channel_can_be_seeded_without_email():
     )
     assert stubs
     assert all(s["channel"] == "in_app" for s in stubs)
+
+
+
+# ── 2026 catalogue: Renters' Rights Act, alarms, Right to Rent, EPC 2030 ──
+
+def test_deadline_items_default_to_their_statutory_date():
+    assert default_expires_on("EPC_2030", None) == date(2030, 10, 1)
+    assert default_expires_on("RRA_INFO", date(2026, 5, 20)) == date(2026, 5, 31)
+    assert default_expires_on("TERMS", date(2026, 6, 1)) is None
+
+
+def test_deadline_item_is_compliant_once_done_even_after_the_date():
+    from compliance.status import compute_status
+
+    served_on_time = compute_status(date(2026, 5, 31), date(2026, 5, 20), as_of=date(2026, 9, 28), code="RRA_INFO")
+    assert served_on_time == "valid"
+    not_served = compute_status(date(2026, 5, 31), None, as_of=date(2026, 9, 28), code="RRA_INFO")
+    assert not_served == "overdue"
+    # EPC C 2030 sits in "due soon" for its final year, then overdue if not done.
+    assert compute_status(date(2030, 10, 1), None, as_of=date(2030, 1, 1), code="EPC_2030") == "due_soon"
+
+
+def test_how_to_rent_is_marked_as_replaced():
+    from compliance.catalogue import get_catalogue_item
+
+    htr = get_catalogue_item("HTR")
+    assert "1 May 2026" in htr["description"]
+    assert "TERMS" in htr["description"] and "RRA_INFO" in htr["description"]
