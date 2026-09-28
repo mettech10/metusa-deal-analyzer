@@ -393,6 +393,26 @@ def dispatch_reminders():
             return _bad_request("asOf must be YYYY-MM-DD")
 
     due = store.due_reminders(as_of=as_of, channel="email")
+    dry_run = str(request.args.get("dryRun") or body.get("dryRun") or "").lower() in ("1", "true", "yes")
+    if dry_run:
+        # Same auth + query as a real run, but nothing is sent or marked.
+        # Lets operators verify the cron wiring without emailing users.
+        return jsonify({
+            "success": True,
+            "dryRun": True,
+            "asOf": (as_of or date.today()).isoformat(),
+            "due": len(due),
+            "wouldDispatch": [
+                {
+                    "id": rem["id"],
+                    "offsetCode": rem.get("offsetCode"),
+                    "obligationId": rem.get("obligationId"),
+                    "scheduledFor": rem.get("scheduledFor"),
+                }
+                for rem in due
+            ],
+            "email": provider_status(),
+        })
     dispatched = []
     queued_weekly = []
     for rem in due:
