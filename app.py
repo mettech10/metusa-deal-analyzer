@@ -1674,6 +1674,8 @@ def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
       the £125k–£250k @ 2% band was reinstated.
     - Additional-property surcharge was already 5% (correct for Apr 2025).
     """
+    if price < 40000:
+        return 0
     if first_time_buyer:
         # First-time buyer relief (England/NI, Apr-2025+)
         # 0% up to £300,000
@@ -2617,7 +2619,9 @@ def analyze_deal(data):
     # Frontend sends "first-time" (hyphen) — normalise to match
     is_first_time = buyer_type in ('first-time', 'first_time', 'first-time-buyer')
     is_additional = buyer_type in ('additional', 'second_home', 'investor')
-    stamp_duty = calculate_stamp_duty(purchase_price, second_property=is_additional, first_time_buyer=is_first_time)
+    # This endpoint analyses investments, not occupation as a main residence.
+    # First purchase investors pay standard rates without FTB relief.
+    stamp_duty = calculate_stamp_duty(purchase_price, second_property=is_additional, first_time_buyer=False)
     print(f"[SDLT] buyerType={buyer_type}, is_first_time={is_first_time}, is_additional={is_additional}, price={purchase_price}, sdlt={stamp_duty}")
     legal_fees = float(data.get('legalFees', 1500))
     valuation_fee = float(data.get('valuationFee', 500))
@@ -3644,7 +3648,7 @@ def analyze_deal(data):
         sdlt_d = calculate_stamp_duty(
             land_price,
             second_property=is_additional,
-            first_time_buyer=is_first_time,
+            first_time_buyer=False,
         )
         total_acquisition_d = (
             land_price + sdlt_d + legal_purchase_d + survey_d
