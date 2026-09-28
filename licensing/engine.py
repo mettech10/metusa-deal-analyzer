@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from licensing.article4 import article4_flags, ingest_article4_for_point
+from licensing.article4_register import lookup_verified_article4
 from licensing.geo import GeoError, Location, geo_sources, resolve_postcode
 from licensing.mandatory import england_mandatory_and_sui_generis_flags, out_of_scope_nation_flag
 from licensing.models import (
@@ -30,6 +31,13 @@ from licensing.models import (
 from licensing.schemes import match_schemes, scheme_flags, schemes_meta
 
 DistrictFallback = Callable[[str], dict[str, Any]]
+VerifiedArticle4Lookup = Callable[[str, Optional[str]], Optional[dict[str, Any]]]
+
+# A property needs one licence: an HMO licence (Part 2: mandatory or
+# additional) or a selective licence (Part 3). Part 3 excludes HMOs that
+# need a Part 2 licence (Housing Act 2004 s79(3)).
+_HMO_LICENCE_FLAGS = {"mandatory_hmo_licence", "additional_hmo_licence"}
+_SELECTIVE_FLAGS = {"selective_licence"}
 
 
 def run_licensing_check(
@@ -38,6 +46,7 @@ def run_licensing_check(
     geo_fetcher=None,
     article4_fetcher=None,
     district_fallback: Optional[DistrictFallback] = None,
+    verified_article4_lookup: Optional[VerifiedArticle4Lookup] = None,
     skip_article4: bool = False,
     now=None,
 ) -> dict[str, Any]:
@@ -99,11 +108,20 @@ def run_licensing_check(
             )
         )
 
+        # District-level Article 4: the verified council register first, then
+        # the unverified legacy list. Never an LLM answer.
         fallback_payload = None
-        if district_fallback is not None:
+        lookup = verified_article4_lookup or lookup_verified_article4
+        try:
+            fallback_payload = _sanitize_article4_fallback(lookup(location.postcode, location.la_code))
+        except Exception:
+            fallback_payload = None
+        if fallback_payload is None and district_fallback is not None:
             try:
                 raw_fb = district_fallback(location.postcode)
                 fallback_payload = _sanitize_article4_fallback(raw_fb)
+                if fallback_payload is not None:
+                    fallback_payload["source"] = "static"
             except Exception:
                 fallback_payload = None
 
@@ -151,6 +169,7 @@ def run_licensing_check(
                 admin_ward=location.admin_ward,
             )
         )
+        _apply_one_licence_rule(flags)
 
     freshness = _overall_freshness(flags, location)
     deal_impact = _roll_up_deal_impact(flags)
@@ -204,12 +223,44 @@ def _sanitize_article4_fallback(raw: Any) -> Optional[dict[str, Any]]:
         return None
     if raw.get("tier") or raw.get("rent_smart_wales") or raw.get("scope"):
         return None
-    return {
+    out = {
         "is_article_4": bool(raw.get("is_article_4") or raw.get("isArticle4")),
         "known": bool(raw.get("known")),
         "council": raw.get("council"),
         "note": raw.get("note") or raw.get("advice"),
     }
+    if raw.get("source") == "verified_register":
+        for key in (
+            "source", "status", "district", "district_listed", "verified",
+            "last_verified_at", "effective_date", "url",
+        ):
+            out[key] = raw.get(key)
+    return out
+
+
+def _apply_one_licence_rule(flags: list[Flag]) -> None:
+    """Once an HMO licence is certain, selective licensing cannot also apply,
+    and additional licensing is covered by the mandatory licence."""
+    mandatory_yes = any(f.id == "mandatory_hmo_licence" and f.applies == "yes" for f in flags)
+    if not mandatory_yes:
+        return
+    for f in flags:
+        if f.id in _SELECTIVE_FLAGS and f.applies != "no":
+            f.applies = "no"
+            f.severity = "info"
+            f.deal_impact = "info"
+            f.summary += (
+                " Not needed here: a property that needs an HMO licence is outside "
+                "selective licensing (Housing Act 2004 s79(3))."
+            )
+        elif f.id == "additional_hmo_licence" and f.applies != "no":
+            f.applies = "no"
+            f.severity = "info"
+            f.deal_impact = "info"
+            f.summary += (
+                " Covered by the mandatory HMO licence, so no separate additional licence. "
+                "The council's HMO fee range is used for the fee estimate."
+            )
 
 
 def _optional_bool(value: Any, *, field: str) -> Optional[bool]:
@@ -268,30 +319,38 @@ def _roll_up_deal_impact(flags: list[Flag]) -> dict[str, Any]:
     capex_lines: list[dict[str, Any]] = []
     risk_notes: list[dict[str, Any]] = []
     seen_fees: set[tuple[str, str]] = set()
-    seen_notes: set[tuple[str, str]] = set()
-    min_total = 0
-    max_total = 0
-    any_known_fee = False
+    seen_notes: set[str] = set()
+    mandatory_yes = any(f.id == "mandatory_hmo_licence" and f.applies == "yes" for f in flags)
+    hmo_licence_certain = mandatory_yes or any(
+        f.id == "additional_hmo_licence" and f.applies == "yes" for f in flags
+    )
+
+    def fee_counts(f: Flag) -> bool:
+        if f.id in _SELECTIVE_FLAGS and hmo_licence_certain:
+            return False
+        if f.id == "additional_hmo_licence" and mandatory_yes:
+            return True  # council HMO fee schedule stands in for the mandatory fee
+        return f.applies in {"yes", "possible", "conditional"}
 
     for f in flags:
         for h in f.analyse_hooks:
             payload = h.to_dict()
-            note_key = (f.id, h.id)
             if h.kind in {"blocker", "planning", "licence", "cost", "verify", "scope"} and h.deal_impact in {
                 "deal_killer",
                 "compliance_cost",
                 "soft_warning",
-            }:
-                if note_key not in seen_notes:
-                    seen_notes.add(note_key)
+            } and f.applies != "no":
+                text = h.summary or f.summary
+                if text and text not in seen_notes:
+                    seen_notes.add(text)
                     risk_notes.append({
                         "id": h.id,
                         "flag_id": f.id,
                         "kind": h.kind,
                         "deal_impact": h.deal_impact,
-                        "summary": h.summary or f.summary,
+                        "summary": text,
                     })
-            if h.fee and h.fee.include_in_cashflow:
+            if h.fee and h.fee.include_in_cashflow and fee_counts(f):
                 fee_hooks.append({"flag_id": f.id, **payload})
                 fee_key = (f.id, h.fee.kind)
                 if fee_key in seen_fees:
@@ -310,12 +369,12 @@ def _roll_up_deal_impact(flags: list[Flag]) -> dict[str, Any]:
                     "currency": h.fee.currency,
                 }
                 capex_lines.append(line)
-                if h.fee.min_gbp is not None:
-                    min_total += h.fee.min_gbp
-                    any_known_fee = True
-                if h.fee.max_gbp is not None:
-                    max_total += h.fee.max_gbp
-                    any_known_fee = True
+
+    # One licence per property: the estimate is the range across the licences
+    # that could apply, not their sum.
+    mins = [line["min_gbp"] for line in capex_lines if line["min_gbp"] is not None]
+    maxes = [line["max_gbp"] for line in capex_lines if line["max_gbp"] is not None]
+    any_known_fee = bool(mins or maxes)
 
     return {
         "level": level,
@@ -325,9 +384,14 @@ def _roll_up_deal_impact(flags: list[Flag]) -> dict[str, Any]:
         "fee_hooks": fee_hooks,
         "estimated_licence_fees_gbp": {
             "currency": "GBP",
-            "min": min_total if any_known_fee else None,
-            "max": max_total if any_known_fee else None,
+            "min": min(mins) if mins else None,
+            "max": max(maxes) if maxes else None,
             "known": any_known_fee,
+            "basis": "one_licence",
+            "note": (
+                "A property needs one licence (HMO or selective), not several. "
+                "The range covers whichever applies."
+            ),
             "items": capex_lines,
         },
         "analyse_hooks": {

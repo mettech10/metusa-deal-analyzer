@@ -1961,12 +1961,14 @@ def get_strategy_recommendations(deal_type, gross_yield, cash_on_cash, monthly_c
     return recommendations
 
 
-def check_article_4(postcode):
+def check_article_4(postcode, use_ai=True):
     """
     Check if area is under Article 4 direction for HMO conversions (C3→C4).
 
     Uses Claude AI as the primary source to research Article 4 status for any postcode.
     Falls back to the built-in UK-wide database when AI is unavailable.
+    use_ai=False skips the AI step (the licensing checker must not present an
+    LLM answer as index data).
     Returns dict with article_4 status and details.
     """
     postcode_clean = postcode.strip().upper()
@@ -1976,7 +1978,7 @@ def check_article_4(postcode):
     # AI-powered Article 4 research (primary source)                      #
     # Claude researches current planning policy for the given postcode.   #
     # ------------------------------------------------------------------ #
-    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip() if use_ai else ''
     if api_key:
         try:
             prompt = (
@@ -5639,7 +5641,9 @@ def v1_licensing_check():
     from licensing.api import handle_check
 
     def _article4_district_only(postcode: str) -> dict:
-        info = check_article_4(postcode) or {}
+        # Static in-repo list only. The engine checks the verified register
+        # first and labels this list as unverified.
+        info = check_article_4(postcode, use_ai=False) or {}
         return {
             "is_article_4": bool(info.get("is_article_4")),
             "known": bool(info.get("known")),

@@ -2,11 +2,11 @@
   "meta": {
     "version": 2,
     "nation": "England",
-    "updated_at": "2026-09-14",
-    "purpose": "Curator-edited additional and selective licensing schemes for 25 priority English LAs.",
-    "spatial_policy": "Do not invent boundaries. citywide means the published designation is LA-wide. designated_areas lists named wards/neighbourhoods as text only. boundary_geojson is always null until an official geometry is attached.",
+    "updated_at": "2026-09-28",
+    "purpose": "Curator-edited additional and selective licensing schemes for priority English LAs.",
+    "spatial_policy": "Do not invent boundaries. citywide means the published designation is LA-wide. designated_areas with spatial_resolution 'wards' means the designation is made of whole wards, matched against the postcodes.io ward for the address. Other designated_areas list named neighbourhoods or part-wards as text only. boundary_geojson is always null until an official geometry is attached.",
     "confidence_policy": "Seeds are not live scrapes. Confidence is capped. A miss in this file is not evidence of no scheme.",
-    "verification_method": "Existing rows seeded from in-repo notes (not HMO_LICENSING_LOOKUP at runtime). New priority LAs are unknown placeholders.",
+    "verification_method": "Rows marked council_website_checked were checked against council licensing pages on 2026-09-28 (fees from secondary sources are named in sources). Older rows were seeded from in-repo notes.",
     "stale_slo_days": {
       "priority": 30,
       "covered": 90
@@ -829,172 +829,511 @@
       "coverage_tier": "priority"
     },
     {
-      "la_code": "E08000006",
-      "la_name": "Salford",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "la_code": "E09000008",
+      "la_name": "Croydon",
+      "scheme_type": "selective",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
-        "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "kind": "designated_areas",
+        "spatial_resolution": "wards",
+        "named_areas": [
+          "Addiscombe East",
+          "Addiscombe West",
+          "Bensham Manor",
+          "Broad Green",
+          "Fairfield",
+          "Norbury and Pollards Hill",
+          "Norbury Park",
+          "Selhurst",
+          "South Croydon",
+          "South Norwood",
+          "Thornton Heath",
+          "Waddon",
+          "West Thornton",
+          "Woodside"
+        ],
+        "notes": "Selective Licensing Scheme 2026: privately rented homes in 14 wards."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a3800",
+      "confidence": 0.75,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Salford Council",
+          "name": "Croydon Council \u2014 Selective Licensing Scheme 2026",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
-        }
-      ]
-    },
-    {
-      "la_code": "E06000016",
-      "la_name": "Leicester",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
-      "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
-        "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
-      },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
-      "sources": [
+          "url": "https://www.croydon.gov.uk/housing/landlords/selective-and-additional-hmo-licensing-schemes-2026/selective-licensing-scheme-2026"
+        },
         {
-          "name": "Leicester Council",
+          "name": "Kamma \u2014 Croydon licensing guide (fees)",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.kammadata.com/uk-property-guide/property-licensing-guide-for-croydon/"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "start_date": "2026-09-25",
+      "curator_notes": "Five-year licence \u00a3800 (Part A \u00a3480 + Part B \u00a3320); one-year licence \u00a3544."
     },
     {
       "la_code": "E09000008",
       "la_name": "Croydon",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "scheme_type": "additional",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
+        "kind": "citywide",
+        "spatial_resolution": "la",
         "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "notes": "Additional HMO Licensing Scheme 2026: smaller HMOs across the borough."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a31,250",
+      "confidence": 0.72,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Croydon Council",
+          "name": "Croydon Council \u2014 Additional HMO licensing scheme 2026",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.croydon.gov.uk/housing/landlords/selective-and-additional-hmo-licensing-schemes-2026/additional-hmo-licensing-scheme-2026"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)",
+      "start_date": "2026-09-25"
+    },
+    {
+      "la_code": "E09000016",
+      "la_name": "Havering",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "wards",
+        "named_areas": [
+          "Beam Park",
+          "Harold Wood",
+          "Rainham and Wennington",
+          "Rush Green and Crowlands",
+          "Squirrels Heath",
+          "St Albans",
+          "St Edwards"
+        ],
+        "notes": "Scheme 2: single family or 1-2 unrelated occupants in seven wards."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3950",
+      "confidence": 0.8,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "London Borough of Havering \u2014 private rented property licensing",
+          "kind": "curated_seed",
+          "url": "https://www.havering.gov.uk/information-landlords/private-rented-property-licensing"
+        }
+      ],
+      "coverage_tier": "priority",
+      "start_date": "2026-03-18",
+      "end_date": "2031-03-17",
+      "curator_notes": "\u00a3950 = Part A \u00a3570 + Part B \u00a3380, before discounts."
+    },
+    {
+      "la_code": "E09000016",
+      "la_name": "Havering",
+      "scheme_type": "additional",
+      "status": "active",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "Scheme 3: all wards in the borough."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,400",
+      "confidence": 0.8,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "London Borough of Havering \u2014 private rented property licensing",
+          "kind": "curated_seed",
+          "url": "https://www.havering.gov.uk/information-landlords/private-rented-property-licensing"
+        }
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)",
+      "start_date": "2026-03-18",
+      "end_date": "2031-03-17",
+      "curator_notes": "\u00a31,400 = Part A \u00a3840 + Part B \u00a3560, before discounts."
+    },
+    {
+      "la_code": "E08000001",
+      "la_name": "Bolton",
+      "scheme_type": "additional",
+      "status": "proposed",
+      "coverage": {
+        "kind": "citywide",
+        "spatial_resolution": "la",
+        "named_areas": [],
+        "notes": "Proposed borough-wide additional licensing for s254 HMOs of 3-4 people and some s257 HMOs."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,211",
+      "confidence": 0.6,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "Bolton Council \u2014 additional licensing scheme for HMOs (consultation)",
+          "kind": "curated_seed",
+          "url": "https://www.bolton.gov.uk/directory-record/6850/additional-licensing-scheme-for-houses-in-multiple-occupation"
+        },
+        {
+          "name": "Property118 \u2014 Bolton consults on HMO licensing (proposed fee)",
+          "kind": "curated_seed",
+          "url": "https://www.property118.com/bolton-council-consults-on-hmo-licensing-scheme/"
+        }
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)",
+      "curator_notes": "Consultation closed 19 April 2026 and a findings report is published; no designation made as of 28 Sep 2026. No selective licensing."
+    },
+    {
+      "la_code": "E08000006",
+      "la_name": "Salford",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Eccles",
+          "Barton",
+          "Winton",
+          "Broughton",
+          "Kersal",
+          "Broughton Park"
+        ],
+        "notes": "Two designations: Eccles, Barton and Winton (1 Sep 2022 to 31 Aug 2027); Broughton, Kersal and Broughton Park (21 Jan 2026 to 20 Jan 2031). Designations cover parts of these areas, not whole wards."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3609",
+      "confidence": 0.72,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "Salford City Council \u2014 areas covered by selective licensing",
+          "kind": "curated_seed",
+          "url": "https://www.salford.gov.uk/housing/information-for-landlords/landlord-licensing/areas-covered-by-selective-licensing/"
+        },
+        {
+          "name": "Salford City Council \u2014 additional HMO licensing (ended)",
+          "kind": "curated_seed",
+          "url": "https://www.salford.gov.uk/housing/information-for-landlords/additional-hmo-licensing/"
+        }
+      ],
+      "coverage_tier": "priority",
+      "curator_notes": "\u00a3609 is the Broughton/Kersal/Broughton Park fee (\u00a3390 accredited, early). The additional HMO scheme ended on 19 July 2026 and was not renewed."
+    },
+    {
+      "la_code": "E06000016",
+      "la_name": "Leicester",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "named_areas",
+        "named_areas": [
+          "Braunstone Park and Rowley Fields",
+          "Fosse",
+          "Westcotes",
+          "Stoneygate",
+          "Saffron"
+        ],
+        "notes": "Parts of these wards (council map has exact boundaries). Covers small HMOs of up to 4 people too."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a31,290",
+      "confidence": 0.75,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "Leicester City Council \u2014 selective licensing",
+          "kind": "curated_seed",
+          "url": "https://www.leicester.gov.uk/housing/landlords/property-licensing/selective-licensing"
+        }
+      ],
+      "coverage_tier": "priority",
+      "start_date": "2022-10-10",
+      "end_date": "2027-10-09",
+      "curator_notes": "\u00a31,290 = \u00a31,032 on application + \u00a3258 on issue. No additional HMO licensing scheme."
     },
     {
       "la_code": "E09000009",
       "la_name": "Ealing",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "scheme_type": "additional",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
+        "kind": "citywide",
+        "spatial_resolution": "la",
         "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "notes": "Borough-wide (all 24 wards), 1 Apr 2022 to 31 Mar 2027."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a31,300",
+      "confidence": 0.65,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Ealing Council",
+          "name": "London Property Licensing \u2014 Ealing",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.londonpropertylicensing.co.uk/ealing/"
+        },
+        {
+          "name": "Ealing Council \u2014 licensing fees 2025-26",
+          "kind": "curated_seed",
+          "url": "https://www.ealing.gov.uk/download/downloads/id/19500/licensing_fees_2025_to_2026.pdf"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)",
+      "start_date": "2022-04-01",
+      "end_date": "2027-03-31"
+    },
+    {
+      "la_code": "E09000009",
+      "la_name": "Ealing",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "wards",
+        "named_areas": [
+          "East Acton",
+          "North Acton",
+          "Norwood Green",
+          "Southall Broadway",
+          "Southall Green",
+          "Southall West",
+          "Southfield",
+          "Central Greenford",
+          "Dormers Wells",
+          "Ealing Common",
+          "Greenford Broadway",
+          "Hanger Hill",
+          "Lady Margaret",
+          "North Greenford",
+          "North Hanwell",
+          "Northolt Mandeville",
+          "Northolt West End",
+          "Perivale",
+          "South Acton"
+        ],
+        "notes": "Two designations: 7 wards 1 Apr 2022 to 31 Mar 2027; 15 wards 3 Jan 2023 to 2 Jan 2028 (overlapping wards listed once)."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3750",
+      "confidence": 0.65,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "London Property Licensing \u2014 Ealing",
+          "kind": "curated_seed",
+          "url": "https://www.londonpropertylicensing.co.uk/ealing/"
+        },
+        {
+          "name": "Kamma \u2014 Ealing licensing guide",
+          "kind": "curated_seed",
+          "url": "https://www.kammadata.com/uk-property-guide/property-licensing-guide-for-ealing/"
+        }
+      ],
+      "coverage_tier": "priority"
     },
     {
       "la_code": "E09000033",
       "la_name": "Westminster",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "scheme_type": "additional",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
+        "kind": "citywide",
+        "spatial_resolution": "la",
         "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "notes": "Renewed additional HMO designation across the whole City of Westminster (3+ people, 2+ households)."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a31,540",
+      "confidence": 0.75,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Westminster Council",
+          "name": "Westminster City Council \u2014 additional licensing scheme renewal",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.westminster.gov.uk/housing/private-sector-housing/houses-multiple-occupation-hmo/additional-licensing-scheme-renewal"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3+ people in 2+ households sharing amenities",
+      "start_date": "2026-08-31",
+      "end_date": "2031-08-30"
+    },
+    {
+      "la_code": "E09000033",
+      "la_name": "Westminster",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "wards",
+        "named_areas": [
+          "Abbey Road",
+          "Bayswater",
+          "Church Street",
+          "Harrow Road",
+          "Hyde Park",
+          "Knightsbridge and Belgravia",
+          "Lancaster Gate",
+          "Little Venice",
+          "Maida Vale",
+          "Marylebone",
+          "Pimlico North",
+          "Queen's Park",
+          "Regent's Park",
+          "West End",
+          "Westbourne"
+        ],
+        "notes": "Single household or two unrelated sharers, in 15 wards; in force from 24 Nov 2025."
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3995",
+      "confidence": 0.75,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "Westminster City Council \u2014 selective licence fees",
+          "kind": "curated_seed",
+          "url": "https://www.westminster.gov.uk/housing/private-sector-housing/selective-property-licensing/licence-fees-and-discounts"
+        }
+      ],
+      "coverage_tier": "priority",
+      "start_date": "2025-11-24",
+      "curator_notes": "\u00a3995 = \u00a3543 on application + \u00a3452 on approval."
     },
     {
       "la_code": "E09000007",
       "la_name": "Camden",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "scheme_type": "additional",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
+        "kind": "citywide",
+        "spatial_resolution": "la",
         "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "notes": "Borough-wide additional HMO licensing, renewed December 2025. Camden has no selective licensing."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a31,531-\u00a31,570",
+      "confidence": 0.65,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Camden Council",
+          "name": "Camden Council \u2014 additional HMO licensing designation",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.camden.gov.uk/hmo-consultation"
+        },
+        {
+          "name": "Camden Council \u2014 HMO licensing fees 2025/26",
+          "kind": "curated_seed",
+          "url": "https://www.camden.gov.uk/documents/d/guest/hmo-licensing-application-fees_v1"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)"
     },
     {
       "la_code": "E09000019",
       "la_name": "Islington",
-      "scheme_type": "unknown",
-      "status": "unknown",
-      "coverage_tier": "priority",
+      "scheme_type": "additional",
+      "status": "active",
       "coverage": {
-        "kind": "unknown",
-        "spatial_resolution": "none",
+        "kind": "citywide",
+        "spatial_resolution": "la",
         "named_areas": [],
-        "notes": "Priority LA placeholder. Additional/selective designations not curated \u2014 do not invent."
+        "notes": "Borough-wide additional HMO licensing for homes shared by 3-4 unrelated people."
       },
-      "confidence": 0.3,
-      "last_verified_at": "2026-09-14T00:00:00Z",
-      "verification_method": "priority_placeholder",
-      "curator_notes": "Aligned onto the P0\u2013P2 priority list. Curator should replace this row with additional and/or selective schemes from the LA designation order. No boundaries.",
+      "term_years": 5,
+      "fee_range": "\u00a3864-\u00a31,152",
+      "confidence": 0.7,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
       "sources": [
         {
-          "name": "Islington Council",
+          "name": "Islington Council \u2014 property licensing",
           "kind": "curated_seed",
-          "note": "Placeholder only \u2014 no scheme asserted."
+          "url": "https://www.islington.gov.uk/housing/private-sector-housing/landlords/property-licensing"
         }
-      ]
+      ],
+      "coverage_tier": "priority",
+      "occupants_threshold": "3-4 people in 2+ households sharing amenities (smaller HMOs)",
+      "start_date": "2026-02-01",
+      "end_date": "2031-01-31",
+      "curator_notes": "Fee is \u00a3288 per bedroom; the range shown is for 3-4 bedroom HMOs."
+    },
+    {
+      "la_code": "E09000019",
+      "la_name": "Islington",
+      "scheme_type": "selective",
+      "status": "active",
+      "coverage": {
+        "kind": "designated_areas",
+        "spatial_resolution": "wards",
+        "named_areas": [
+          "Finsbury Park",
+          "Hillrise",
+          "Tollington",
+          "Barnsbury",
+          "Caledonian",
+          "Tufnell Park",
+          "Mildmay",
+          "Highbury",
+          "Junction",
+          "Laycock"
+        ],
+        "notes": "Finsbury Park, Hillrise and Tollington already licensed; seven more wards join on 23 Nov 2026.",
+        "ward_start_dates": {
+          "Barnsbury": "2026-11-23",
+          "Caledonian": "2026-11-23",
+          "Tufnell Park": "2026-11-23",
+          "Mildmay": "2026-11-23",
+          "Highbury": "2026-11-23",
+          "Junction": "2026-11-23",
+          "Laycock": "2026-11-23"
+        }
+      },
+      "term_years": 5,
+      "fee_range": "\u00a3850",
+      "confidence": 0.7,
+      "last_verified_at": "2026-09-28T00:00:00Z",
+      "verification_method": "council_website_checked",
+      "sources": [
+        {
+          "name": "Islington Council \u2014 property licensing",
+          "kind": "curated_seed",
+          "url": "https://www.islington.gov.uk/housing/private-sector-housing/landlords/property-licensing"
+        },
+        {
+          "name": "Islington Council news \u2014 licensing scheme expands",
+          "kind": "curated_seed",
+          "url": "https://www.islington.media/news/thousands-more-renters-to-benefit-as-landlord-licensing-scheme-expands"
+        }
+      ],
+      "coverage_tier": "priority"
     }
   ]
 }

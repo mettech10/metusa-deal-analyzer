@@ -173,7 +173,8 @@ def test_mandatory_hmo_applies_at_five_occupants_two_households():
         purpose_built_flat_in_block_of_3_plus=False,
     )}
     assert flags["mandatory_hmo_licence"].applies == "yes"
-    assert flags["mandatory_hmo_licence"].severity == "deal_killer"
+    # A licence to budget for, not a reason to walk away.
+    assert flags["mandatory_hmo_licence"].severity == "compliance_cost"
     assert flags["mandatory_hmo_licence"].confidence >= 0.99
     assert "licence.mandatory_hmo" in _hook_ids(flags["mandatory_hmo_licence"])
     assert "cost.hmo_licence_fee" in _hook_ids(flags["mandatory_hmo_licence"])
@@ -207,7 +208,7 @@ def test_purpose_built_flat_miss_when_block_too_small():
         self_contained_flats_in_block=2,
     )}
     assert flags["mandatory_hmo_licence"].applies == "yes"
-    assert flags["mandatory_hmo_licence"].severity == "deal_killer"
+    assert flags["mandatory_hmo_licence"].severity == "compliance_cost"
 
 
 def test_purpose_built_flat_via_flats_in_block_kwarg():
@@ -374,23 +375,35 @@ def test_engine_manchester_hmo_flags_include_hooks_and_freshness():
     assert "article4_hmo" in flag_ids
     mandatory = next(f for f in result["flags"] if f["id"] == "mandatory_hmo_licence")
     assert mandatory["applies"] == "yes"
-    assert mandatory["severity"] == "deal_killer"
-    assert mandatory["deal_impact"] == "deal_killer"
+    assert mandatory["severity"] == "compliance_cost"
+    assert mandatory["deal_impact"] == "compliance_cost"
     assert "licence.mandatory_hmo" in _hook_ids(mandatory)
     fee_hook = next(h for h in mandatory["analyse_hooks"] if h["id"] == "cost.hmo_licence_fee")
     assert fee_hook["fee"]["include_in_cashflow"] is True
+    # One licence per property: mandatory covers additional; selective excluded (s79(3)).
     additional = next(f for f in result["flags"] if f["id"] == "additional_hmo_licence")
-    assert additional["applies"] == "possible"
+    assert additional["applies"] == "no"
+    assert "Covered by the mandatory HMO licence" in additional["summary"]
+    selective = next(f for f in result["flags"] if f["id"] == "selective_licence")
+    assert selective["applies"] == "no"
+    assert "s79(3)" in selective["summary"]
+    fees = result["deal_impact"]["estimated_licence_fees_gbp"]
+    assert fees["basis"] == "one_licence"
+    assert (fees["min"], fees["max"]) == (700, 1300)  # Manchester HMO fee range, not a sum
+    notes = [n["summary"] for n in result["deal_impact"]["analyse_hooks"]["add_risk_notes"]]
+    assert len(notes) == len(set(notes))
     assert additional["spatial_resolution"] == "named_areas_only"
     assert additional["freshness"]["stale_after_days"] == 30
-    assert additional["severity_class"] == "soft_warning"
+    assert additional["severity_class"] == "info"  # covered by the mandatory licence
     sel_fee = next(h for h in additional["analyse_hooks"] if h["id"] == "cost.hmo_licence_fee")
     assert sel_fee["fee"]["range_text"]
     assert "severity_class" in mandatory
     impact = result["deal_impact"]
     assert impact["verdict"] == impact["level"]
     assert isinstance(impact["killers"], list)
-    assert any(k["flag_id"] == "mandatory_hmo_licence" for k in impact["killers"])
+    # Mandatory licensing is a cost line, not a deal killer.
+    assert not any(k["flag_id"] == "mandatory_hmo_licence" for k in impact["killers"])
+    assert any(line["flag_id"] == "mandatory_hmo_licence" for line in impact["analyse_hooks"]["add_capex_lines"])
     assert "add_capex_lines" in impact["analyse_hooks"]
     assert "add_risk_notes" in impact["analyse_hooks"]
     assert isinstance(impact["estimated_licence_fees_gbp"], dict)
@@ -447,13 +460,102 @@ def test_engine_conversion_from_c3_false_is_not_a_blocker():
     assert "blocker.planning_permission" not in _hook_ids(a4)
 
 
-def test_engine_conversion_from_c3_elevates_possible_district_article4():
+def _register(status="active", districts=("M14",), verified_at=None, verified=True):
+    from datetime import datetime, timedelta, timezone
+
+    stamp = verified_at or (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+
+    def lookup(postcode, la_code):
+        from licensing.article4_register import lookup_verified_article4
+
+        return lookup_verified_article4(
+            postcode,
+            la_code,
+            fetch_rows=lambda _code: [{
+                "council_name": "Manchester City Council",
+                "council_code": la_code,
+                "status": status,
+                "direction_type": "HMO C4",
+                "verified": verified,
+                "last_verified_at": stamp,
+                "postcode_districts": list(districts),
+                "council_planning_url": "https://www.manchester.gov.uk/article4",
+            }],
+        )
+
+    return lookup
+
+
+def _no_register(_postcode, _la_code):
+    return None
+
+
+def test_engine_verified_register_elevates_district_article4_for_conversion():
+    import licensing.article4_register as reg
+
+    reg._cache.clear()
+    result = run_licensing_check(
+        {"postcode": "M14 6LT", "intended_use": "hmo", "conversion_from_c3": True},
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+        verified_article4_lookup=_register(),
+    )
+    district = next(f for f in result["flags"] if f["id"] == "article4_hmo_district_index")
+    assert district["applies"] == "possible"
+    assert district["deal_impact"] == "deal_killer"
+    assert district["severity_class"] == "deal_killer"
+    assert district["freshness"]["stale"] is False  # real verification date
+    assert "article4_hmo_district_index" not in result["freshness"]["stale_components"]
+    assert district["sources"][0]["kind"] == "verified_register"
+
+
+def test_engine_verified_register_district_not_listed_or_no_direction():
+    import licensing.article4_register as reg
+
+    reg._cache.clear()
+    outside = run_licensing_check(
+        {"postcode": "M14 6LT", "intended_use": "hmo", "conversion_from_c3": True},
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+        verified_article4_lookup=_register(districts=("M1", "M13")),
+    )
+    flag = next(f for f in outside["flags"] if f["id"] == "article4_hmo_district_index")
+    assert flag["applies"] == "no"
+    assert flag["deal_impact"] == "info"
+
+    reg._cache.clear()
+    none = run_licensing_check(
+        {"postcode": "M14 6LT", "intended_use": "hmo"},
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+        verified_article4_lookup=_register(status="none"),
+    )
+    flag = next(f for f in none["flags"] if f["id"] == "article4_hmo_district_index")
+    assert flag["applies"] == "no"
+    assert "No HMO Article 4 direction" in flag["title"]
+
+
+def test_engine_verified_register_row_past_refresh_window_is_stale():
+    import licensing.article4_register as reg
+
+    reg._cache.clear()
+    result = run_licensing_check(
+        {"postcode": "M14 6LT", "intended_use": "hmo"},
+        geo_fetcher=_geo_stub(M14_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+        verified_article4_lookup=_register(verified_at="2026-07-01T03:35:27+00:00"),
+        now=__import__("datetime").datetime(2026, 9, 28, tzinfo=__import__("datetime").timezone.utc),
+    )
+    assert "article4_hmo_district_index" in result["freshness"]["stale_components"]
+
+
+def test_engine_unverified_legacy_list_never_a_deal_killer():
     def fallback(_postcode):
         return {
             "is_article_4": True,
             "known": True,
             "council": "Manchester City Council",
-            "note": "district index",
+            "note": "legacy list",
         }
 
     result = run_licensing_check(
@@ -461,11 +563,13 @@ def test_engine_conversion_from_c3_elevates_possible_district_article4():
         geo_fetcher=_geo_stub(M14_POSTCODES_IO),
         article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
         district_fallback=fallback,
+        verified_article4_lookup=_no_register,
     )
     district = next(f for f in result["flags"] if f["id"] == "article4_hmo_district_index")
     assert district["applies"] == "possible"
-    assert district["deal_impact"] == "deal_killer"
-    assert district["severity_class"] == "deal_killer"
+    assert district["deal_impact"] == "soft_warning"
+    assert "Unverified" in district["title"]
+    assert district["sources"][0]["name"].startswith("Legacy in-repo")
 
 
 def test_engine_liverpool_citywide_selective_fee_hook():
@@ -567,3 +671,87 @@ def test_engine_rejects_missing_postcode():
     with pytest.raises(GeoError) as exc:
         run_licensing_check({})
     assert exc.value.code == "invalid_postcode"
+
+
+def test_engine_single_let_btl_is_outside_additional_hmo_licensing():
+    """A one-household BTL needs selective licensing (if designated), never an
+    additional HMO licence, and the fee estimate is one licence."""
+    import licensing.article4_register as reg
+
+    reg._cache.clear()
+    hits = match_schemes(la_code="E09000025", la_name="Newham")
+    assert {s.scheme_type for s in hits} >= {"additional", "selective"}
+    from licensing.schemes import scheme_flags
+
+    flags = {f.id: f for f in scheme_flags(hits, occupants=None, intended_use="btl", admin_ward=None)}
+    assert flags["additional_hmo_licence"].applies == "no"
+    assert flags["selective_licence"].applies == "yes"
+
+
+def test_out_of_england_is_not_covered_rather_than_a_deal_killer():
+    from licensing.mandatory import out_of_scope_nation_flag
+
+    flag = out_of_scope_nation_flag("Wales")
+    assert flag.severity == "soft_warning"
+    assert flag.deal_impact == "soft_warning"
+
+
+# ── Curated council data (checked 2026-09-28) ───────────────────────────────
+
+def _scheme_flags_for(la_code, la_name, *, ward=None, use="btl", occupants=None):
+    from licensing.schemes import scheme_flags
+
+    hits = match_schemes(la_code=la_code, la_name=la_name)
+    return {f.id: f for f in scheme_flags(hits, occupants=occupants, intended_use=use, admin_ward=ward)}
+
+
+def test_croydon_2026_selective_matches_on_ward():
+    inside = _scheme_flags_for("E09000008", "Croydon", ward="Fairfield")
+    assert inside["selective_licence"].applies == "yes"
+    assert inside["selective_licence"].spatial_resolution == "ward"
+    assert inside["additional_hmo_licence"].applies == "no"  # single-household let
+    outside = _scheme_flags_for("E09000008", "Croydon", ward="Coulsdon Town")
+    assert outside["selective_licence"].applies == "no"
+    assert "not covered" in outside["selective_licence"].summary
+
+
+def test_havering_ward_names_normalise_punctuation():
+    # postcodes.io says "Rainham & Wennington" / "St Edward's"; the council says "and" / "Edwards".
+    assert _scheme_flags_for("E09000016", "Havering", ward="Rainham & Wennington")["selective_licence"].applies == "yes"
+    assert _scheme_flags_for("E09000016", "Havering", ward="St Edward's")["selective_licence"].applies == "yes"
+
+
+def test_islington_ward_joining_later_says_when():
+    flags = _scheme_flags_for("E09000019", "Islington", ward="Barnsbury")
+    assert flags["selective_licence"].applies == "yes"
+    assert "joins the scheme on 2026-11-23" in flags["selective_licence"].summary
+
+
+def test_bolton_proposed_scheme_is_a_warning_with_no_fee_in_cashflow():
+    flags = _scheme_flags_for("E08000001", "Bolton", use="hmo", occupants=4)
+    flag = flags["additional_hmo_licence"]
+    assert flag.severity == "soft_warning"
+    assert "not in force" in flag.summary
+    assert all(not (h.fee and h.fee.include_in_cashflow) for h in flag.analyse_hooks)
+
+
+def test_no_placeholder_councils_left_in_seed():
+    from licensing.schemes import load_priority_schemes
+
+    assert [s.la_name for s in load_priority_schemes() if s.scheme_type == "unknown"] == []
+
+
+def test_ended_designation_is_not_flagged():
+    from licensing.schemes import LicenceScheme, SchemeCoverage, scheme_flags
+
+    ended = LicenceScheme(
+        la_code="E08000006",
+        la_name="Salford",
+        scheme_type="additional",
+        coverage=SchemeCoverage(kind="citywide", spatial_resolution="la"),
+        confidence=0.7,
+        last_verified_at="2026-09-28T00:00:00Z",
+        sources=[],
+        end_date="2026-07-19",
+    )
+    assert scheme_flags([ended], occupants=4, intended_use="hmo", admin_ward=None) == []

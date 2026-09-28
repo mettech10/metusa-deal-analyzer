@@ -320,10 +320,19 @@ def _mandatory_hmo_flag(
                 f"{hh} households sharing amenities (threshold is 5+ people in 2+ households)."
                 + extra_note
             ),
-            severity="deal_killer",
+            # A licence to apply for (fee + HMO standards), not a reason to walk
+            # away. Planning blockers (Article 4, sui generis) stay deal killers.
+            severity="compliance_cost",
             applies="yes",
-            analyse_hooks=_mandatory_hooks(impact="deal_killer", include_fee=True)
-            + [hook("blocker.unlicensed_hmo", "blocker", "deal_killer")],
+            analyse_hooks=_mandatory_hooks(impact="compliance_cost", include_fee=True)
+            + [
+                hook(
+                    "blocker.unlicensed_hmo",
+                    "blocker",
+                    "compliance_cost",
+                    summary="Letting a licensable HMO without a licence is a criminal offence; budget for the licence before letting.",
+                )
+            ],
         )
 
     if occ is not None and occ >= 5 and hh is None:
@@ -336,9 +345,9 @@ def _mandatory_hmo_flag(
                 "If they form 2 or more households and share amenities, a mandatory "
                 "HMO licence is required in England (subject to the purpose-built-flat carve-out)."
             ),
-            severity="deal_killer",
+            severity="compliance_cost",
             applies="conditional",
-            analyse_hooks=_mandatory_hooks(impact="deal_killer", include_fee=True)
+            analyse_hooks=_mandatory_hooks(impact="compliance_cost", include_fee=True)
             + [hook("analyse.need_households", "analyse", "soft_warning")],
         )
 
@@ -537,13 +546,14 @@ def out_of_scope_nation_flag(country: str) -> Flag:
             "English additional/selective schemes only. Do not apply England rules here. "
             "Legacy HMO_LICENSING_LOOKUP rows (including Wales/Scotland) are not used."
         ),
-        severity="deal_killer",
-        deal_impact="deal_killer",
+        # Not covered is not the same as blocked: check the nation's own regime.
+        severity="soft_warning",
+        deal_impact="soft_warning",
         applies="yes",
         confidence=0.95,
         sources=list(LEGISLATION_SOURCES[:1]),
         analyse_hooks=[
-            hook("scope.not_england", "scope", "deal_killer"),
+            hook("scope.not_england", "scope", "soft_warning"),
             hook("verify.lpa", "verify", "info"),
         ],
         last_verified_at=STATUTE_VERIFIED_AT,
