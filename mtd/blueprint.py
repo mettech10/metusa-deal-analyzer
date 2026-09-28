@@ -12,7 +12,8 @@ from mtd.categories import CATEGORIES, load_catalogue
 from mtd.open_banking import OpenBankingNotAvailable
 from mtd.packs import DISCLAIMER
 from mtd.service import MtdService
-from mtd.store import Conflict, InMemoryMtdStore, NotFound
+from mtd.store import Conflict, InMemoryMtdStore, MtdStoreError, NotFound
+from mtd.supabase_store import SupabaseMtdStore, supabase_store_configured
 from supabase_gotrue import (
     GotrueAuthError,
     auth_readiness,
@@ -21,14 +22,43 @@ from supabase_gotrue import (
 
 mtd_bp = Blueprint("mtd", __name__, url_prefix="/v1/mtd")
 
+_STORAGE_UNAVAILABLE = (
+    "MTD storage is not configured on this server, so records would not be "
+    "saved. Nothing was changed. Set SUPABASE_URL and SUPABASE_SERVICE_KEY."
+)
+
 
 def configure_mtd(app) -> MtdService:
-    """Attach a process-local MTD service (in-memory). Tests may overwrite."""
+    """Attach the MTD service. Supabase when configured, else in-memory.
+
+    Tests (and local dev) inject ``MTD_SERVICE`` or run without Supabase env.
+    """
     service = app.config.get("MTD_SERVICE")
     if service is None:
-        service = MtdService(InMemoryMtdStore())
+        store = SupabaseMtdStore() if supabase_store_configured() else InMemoryMtdStore()
+        service = MtdService(store)
         app.config["MTD_SERVICE"] = service
     return service
+
+
+@mtd_bp.errorhandler(MtdStoreError)
+def _store_unavailable(exc: MtdStoreError):
+    return jsonify({"error": str(exc), "code": "storage_unavailable"}), 503
+
+
+def _store_backend() -> str:
+    return getattr(_service().store, "backend", "memory")
+
+
+def _memory_store_refused() -> bool:
+    """In-memory records vanish on restart. Only dev/test may use them."""
+    if _store_backend() != "memory":
+        return False
+    if current_app.config.get("TESTING") or current_app.config.get("MTD_ALLOW_MEMORY_STORE"):
+        return False
+    if os.environ.get("MTD_ALLOW_MEMORY_STORE") == "1":
+        return False
+    return os.environ.get("FLASK_ENV", "").lower() not in ("development", "testing", "test")
 
 
 def _service() -> MtdService:
@@ -115,6 +145,8 @@ def _supabase_user(token: str) -> dict[str, Any] | None:
 
 
 def _auth():
+    if _memory_store_refused():
+        return None, (jsonify({"error": _STORAGE_UNAVAILABLE, "code": "storage_unavailable"}), 503)
     try:
         ctx = _resolve_ctx()
     except PermissionError as exc:
@@ -122,12 +154,16 @@ def _auth():
     except GotrueAuthError as exc:
         body = {"error": exc.message, "code": exc.code}
         return None, (jsonify(body), exc.status)
+    except MtdStoreError as exc:
+        return None, (jsonify({"error": str(exc), "code": "storage_unavailable"}), 503)
     if ctx is None:
         return None, (jsonify({"error": "Unauthorised"}), 401)
     return ctx, None
 
 
 def _err(exc: Exception):
+    if isinstance(exc, MtdStoreError):
+        return jsonify({"error": str(exc), "code": "storage_unavailable"}), 503
     if isinstance(exc, NotFound):
         return jsonify({"error": str(exc)}), 404
     if isinstance(exc, Conflict):
@@ -145,14 +181,22 @@ def _err(exc: Exception):
 
 @mtd_bp.get("/health")
 def health():
+    store = _service().store
+    backend = _store_backend()
+    probe = store.probe() if hasattr(store, "probe") else {"backend": backend, "ready": True, "tables": "n/a"}
+    refused = _memory_store_refused()
     return jsonify(
         {
-            "status": "ok",
+            "status": "ok" if probe.get("ready") and not refused else "degraded",
             "pack": "mtd-v1",
             "hmrcSubmit": False,
             "openBanking": False,
             "disclaimer": DISCLAIMER,
             "auth": auth_readiness(),
+            "store": backend,
+            "persistent": backend == "supabase",
+            "storeProbe": probe,
+            "writesAccepted": bool(probe.get("ready")) and not refused,
         }
     )
 

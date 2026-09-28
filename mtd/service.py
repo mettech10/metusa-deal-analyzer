@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -73,6 +74,9 @@ class MtdService:
     ) -> None:
         self.store = store or InMemoryMtdStore()
         self.open_banking = open_banking or StubOpenBankingProvider()
+        # A new user's first page load fires several requests at once; without
+        # this they could each auto-provision a separate organisation.
+        self._provision_lock = threading.Lock()
 
     # ── auth / orgs ───────────────────────────────────────────────────
     def ensure_org(self, user_id: str, email: str | None = None, org_id: str | None = None) -> AuthContext:
@@ -81,15 +85,28 @@ class MtdService:
             if not member:
                 raise PermissionError("not a member of this organisation")
             return AuthContext(user_id=user_id, org_id=org_id, role=member.role, email=email)
+        ctx = self._existing_ctx(user_id, email)
+        if ctx:
+            return ctx
+        with self._provision_lock:
+            ctx = self._existing_ctx(user_id, email)
+            if ctx:
+                return ctx
+            return self._provision_org(user_id, email)
+
+    def _existing_ctx(self, user_id: str, email: str | None) -> AuthContext | None:
         existing = self.store.default_org_id(user_id)
-        if existing:
-            member = self.store.get_member(existing, user_id)
-            return AuthContext(
-                user_id=user_id,
-                org_id=existing,
-                role=member.role if member else "member",
-                email=email,
-            )
+        if not existing:
+            return None
+        member = self.store.get_member(existing, user_id)
+        return AuthContext(
+            user_id=user_id,
+            org_id=existing,
+            role=member.role if member else "member",
+            email=email,
+        )
+
+    def _provision_org(self, user_id: str, email: str | None) -> AuthContext:
         org = Organisation(
             id=_new_id(),
             name=(email.split("@")[0] + " organisation") if email else "Personal organisation",

@@ -133,6 +133,7 @@ def test_bearer_without_apikey_is_503_not_401(monkeypatch):
     """Production (not TESTING) + Bearer + missing apikey → 503, not 401."""
     app = Flask(__name__)
     app.config["TESTING"] = False
+    app.config["MTD_ALLOW_MEMORY_STORE"] = True  # isolate the auth path
     app.config["MTD_SERVICE"] = MtdService(InMemoryMtdStore())
     configure_mtd(app)
     app.register_blueprint(mtd_bp)

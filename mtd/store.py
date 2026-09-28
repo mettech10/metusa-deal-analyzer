@@ -1,4 +1,8 @@
-"""In-memory MTD store used by tests and local Flask without a database."""
+"""In-memory MTD store used by tests and local Flask without a database.
+
+Production uses ``mtd.supabase_store.SupabaseMtdStore`` (same interface);
+``mtd.blueprint.configure_mtd`` picks the backend.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +34,13 @@ class Forbidden(Exception):
     pass
 
 
+class MtdStoreError(RuntimeError):
+    """The persistent store could not serve the request (maps to HTTP 503)."""
+
+
 class InMemoryMtdStore:
+    backend = "memory"
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self.orgs: dict[str, Organisation] = {}
