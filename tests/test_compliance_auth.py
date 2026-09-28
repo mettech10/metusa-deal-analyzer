@@ -51,7 +51,7 @@ def test_auth_apikey_none_when_unset(monkeypatch):
 
 
 def test_missing_apikey_is_503_not_401(monkeypatch):
-    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvcjtujalzwh.supabase.co")
+    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvctjujalzwh.supabase.co")
     for name in (
         "SUPABASE_SERVICE_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
@@ -83,7 +83,7 @@ def test_missing_url_is_503(monkeypatch):
 
 
 def test_never_sends_user_token_as_apikey(monkeypatch):
-    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvcjtujalzwh.supabase.co")
+    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvctjujalzwh.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-role-key")
     token = "user-access-jwt"
     captured = {}
@@ -106,13 +106,13 @@ def test_never_sends_user_token_as_apikey(monkeypatch):
 
 
 def test_auth_readiness_exposes_host_not_secrets(monkeypatch):
-    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvcjtujalzwh.supabase.co")
+    monkeypatch.setenv("SUPABASE_URL", "https://lftlugydvvctjujalzwh.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-role-key")
     ready = auth_readiness()
     assert ready["ready"] is True
     assert ready["apikeySource"] == "service"
-    assert ready["supabaseHost"] == "lftlugydvvcjtujalzwh.supabase.co"
+    assert ready["supabaseHost"] == "lftlugydvvctjujalzwh.supabase.co"
     assert ready["gotrue"] == "/auth/v1/user"
     dumped = str(ready)
     assert "service-role-key" not in dumped
-    assert supabase_host() == "lftlugydvvcjtujalzwh.supabase.co"
+    assert supabase_host() == "lftlugydvvctjujalzwh.supabase.co"

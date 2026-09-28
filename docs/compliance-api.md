@@ -110,7 +110,7 @@ Render env (do not invent values; copy from the existing Supabase project):
 
 | Key | Why |
 |---|---|
-| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST. **Same project** as Vercel `NEXT_PUBLIC_SUPABASE_URL`. Health `auth.supabaseHost` must be `lftlugydvvcjtujalzwh.supabase.co` (cookie `sb-lftlugydvvcjtujalzwh-auth-token`). |
+| `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` | Auth + PostgREST. **Same project** as Vercel `NEXT_PUBLIC_SUPABASE_URL`. Health `auth.supabaseHost` must be `lftlugydvvctjujalzwh.supabase.co` (cookie `sb-lftlugydvvctjujalzwh-auth-token`). |
 | `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` | Store writes **and** `/auth/v1/user` apikey (same as `/v1/deals` and `/v1/mtd`). Health `auth.apikeySource` should be `service`, `auth.ready` true. |
 | `SUPABASE_ANON_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Fallback apikey only. Must be the project's anon key — **not** the JWT secret and **never** the user access token. Flask does not use `SUPABASE_JWT_SECRET` or JWKS. Missing both service and anon keys is HTTP **503** `auth not configured (missing anon key)`, not 401. |
 | `BREVO_API_KEY` (+ optional sender/reply-to) | Reminder emails; skip-sends fail-soft |
@@ -139,7 +139,7 @@ curl -s https://metusa-deal-analyzer.onrender.com/v1/mtd/health | jq '{status, a
 or a different `SUPABASE_URL` than the browser cookie project. After this
 patch: missing apikey is **503** `auth not configured (missing anon key)`;
 `auth.apikeySource` must be `service`; `auth.supabaseHost` must equal
-`lftlugydvvcjtujalzwh.supabase.co`.
+`lftlugydvvctjujalzwh.supabase.co`.
 
 Retest after migrate: Bearer dashboard 200 (empty list ok) → POST GAS on a
 portfolio UUID → `GET /properties/<id>/obligations` includes it → FE
