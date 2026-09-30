@@ -19,6 +19,7 @@ import re
 import io
 from html import escape
 from ai_gateway import ai_gateway
+from regulatory_context import REGULATORY_CONTEXT
 
 # Import Land Registry API
 from land_registry import land_registry
@@ -1674,6 +1675,8 @@ def calculate_stamp_duty(price, second_property=True, first_time_buyer=False):
       the £125k–£250k @ 2% band was reinstated.
     - Additional-property surcharge was already 5% (correct for Apr 2025).
     """
+    if price < 40000:
+        return 0
     if first_time_buyer:
         # First-time buyer relief (England/NI, Apr-2025+)
         # 0% up to £300,000
@@ -2617,7 +2620,9 @@ def analyze_deal(data):
     # Frontend sends "first-time" (hyphen) — normalise to match
     is_first_time = buyer_type in ('first-time', 'first_time', 'first-time-buyer')
     is_additional = buyer_type in ('additional', 'second_home', 'investor')
-    stamp_duty = calculate_stamp_duty(purchase_price, second_property=is_additional, first_time_buyer=is_first_time)
+    # This endpoint analyses investments, not occupation as a main residence.
+    # First purchase investors pay standard rates without FTB relief.
+    stamp_duty = calculate_stamp_duty(purchase_price, second_property=is_additional, first_time_buyer=False)
     print(f"[SDLT] buyerType={buyer_type}, is_first_time={is_first_time}, is_additional={is_additional}, price={purchase_price}, sdlt={stamp_duty}")
     legal_fees = float(data.get('legalFees', 1500))
     valuation_fee = float(data.get('valuationFee', 500))
@@ -3644,7 +3649,7 @@ def analyze_deal(data):
         sdlt_d = calculate_stamp_duty(
             land_price,
             second_property=is_additional,
-            first_time_buyer=is_first_time,
+            first_time_buyer=False,
         )
         total_acquisition_d = (
             land_price + sdlt_d + legal_purchase_d + survey_d
@@ -7174,6 +7179,7 @@ Council:             {_a4p_cncl}
 Instruction:         {planning_hmo_instruction}
 
 == INSTRUCTIONS ==
+{REGULATORY_CONTEXT}
 Return ONLY a valid JSON object — no markdown, no code fences, no extra text.
 Be specific: reference actual figures, the specific postcode/area, and the strategy.
 Do NOT use generic filler. If a metric is weak, say so plainly.
@@ -7605,9 +7611,14 @@ def ai_analyze():
 # Replaces the terse 2-3-sentence "area" field that came back from the
 # main analyze_deal AI prompt.
 # ────────────────────────────────────────────────────────────────────────
-def _area_cache_key(district: str, strategy: str) -> str:
-    # v6 = + Anchor proximity (universities/hospitals for HMO, transport hubs for SA) — Phase 3
-    return f'area_analysis::v6::{district.upper()}::{strategy.upper()}'
+def _area_cache_key(district: str, strategy: str, context: dict) -> str:
+    # The narrative contains deal-specific figures and source availability.
+    # A district/strategy key alone can return another property's analysis.
+    import hashlib
+    fingerprint = hashlib.sha256(
+        json.dumps(context, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+    ).hexdigest()
+    return f'area_analysis::v7::{district.upper()}::{strategy.upper()}::{fingerprint}'
 
 
 # ── Phase 3: anchor-proximity helpers ───────────────────────────────────────
@@ -8591,12 +8602,12 @@ def get_str_licensing_info(postcode: str, council: str) -> dict:
     return {'region': region, 'primary': primary, 'overlay': overlay}
 
 
-def _area_cache_get(district: str, strategy: str):
+def _area_cache_get(district: str, strategy: str, context: dict):
     """Return cached AI area analysis if <24h old, else None."""
     if not _SUPABASE_URL or not _SUPABASE_KEY:
         return None
     try:
-        key = _area_cache_key(district, strategy)
+        key = _area_cache_key(district, strategy, context)
         resp = requests.get(
             f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
             params={
@@ -8623,11 +8634,11 @@ def _area_cache_get(district: str, strategy: str):
         return None
 
 
-def _area_cache_put(district: str, strategy: str, payload: dict) -> None:
+def _area_cache_put(district: str, strategy: str, payload: dict, context: dict) -> None:
     if not _SUPABASE_URL or not _SUPABASE_KEY:
         return
     try:
-        key = _area_cache_key(district, strategy)
+        key = _area_cache_key(district, strategy, context)
         requests.post(
             f'{_SUPABASE_URL}/rest/v1/propertydata_cache',
             json={
@@ -8726,7 +8737,7 @@ def _area_section_template(strategy: str) -> list:
         ('This Deal in Context',
          "how the deal's purchase price, gross yield and cashflow compare to the area benchmark; is the price reasonable"),
         ('Risks Specific to BTL Here',
-         'Section 24 (interest relief), EPC C requirement (2028 target), Renters Reform Bill, local regulation, rate-rise sensitivity'),
+         'Section 24 (interest relief), dated energy standards and tenancy rules from the supplied regulatory context, local regulation, rate-rise sensitivity'),
         ('Investor Verdict',
          "one clear paragraph: does this area support the BTL thesis? reference yield, cashflow and key risks"),
     ]
@@ -8771,7 +8782,10 @@ def area_analysis():
         council = a4.get('council') or 'Local Council'
 
         # Cache hit?
-        cached = _area_cache_get(district, strategy)
+        cache_context = {key: body.get(key) for key in (
+            'postcode', 'dealData', 'benchmark', 'articleFour', 'marketContext',
+        )}
+        cached = _area_cache_get(district, strategy, cache_context)
         if cached:
             app.logger.info(f'[area] cache hit {district}/{strategy}')
             return jsonify({'success': True, 'cached': True, **cached})
@@ -9074,6 +9088,8 @@ LIVE COMPARABLES:
 THIS DEAL:
 {deal_block}
 
+{REGULATORY_CONTEXT}
+
 Return ONLY a valid JSON object — no markdown, no code fences. Use the
 EXACT section titles below (they are calibrated for {strategy}-specific
 investor questions). Where the prompt context includes verified
@@ -9131,7 +9147,7 @@ licensing/regulatory data above, QUOTE it directly — do not generalise:
                 'sources': ['Land Registry', 'VOA', 'PropertyData', 'Metalyzi DB'],
             },
         }
-        _area_cache_put(district, strategy, payload)
+        _area_cache_put(district, strategy, payload, cache_context)
         return jsonify({'success': True, 'cached': False, **payload})
 
     except Exception as e:
