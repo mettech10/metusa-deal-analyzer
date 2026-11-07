@@ -5,6 +5,7 @@ No live HTTP: postcodes.io and planning.data.gov.uk are stubbed.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -14,10 +15,51 @@ from licensing.article4 import classify_hmo_relevance, ingest_article4_for_point
 from licensing.engine import run_licensing_check
 from licensing.geo import GeoError, normalise_postcode
 from licensing.mandatory import england_mandatory_and_sui_generis_flags
-from licensing.models import DISCLAIMER_VERSION, SCHEME_STALE_AFTER_DAYS_COVERED, SCHEME_STALE_AFTER_DAYS_PRIORITY
+from licensing.models import (
+    DISCLAIMER_VERSION,
+    SCHEME_STALE_AFTER_DAYS_COVERED,
+    SCHEME_STALE_AFTER_DAYS_PRIORITY,
+    parse_iso,
+)
 from licensing.schemes import _flag_for_scheme, load_priority_schemes, match_schemes, schemes_meta
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# The checker reads the clock to decide whether a seed row is past its
+# re-check window (30 days for priority councils). Pin it so these tests
+# don't start failing as the calendar moves on. 1 Oct 2026 is inside the
+# window for every seed row (last verified 14 and 28 Sep 2026). Tests that
+# need a stale row use an old date or move the clock with `licensing_clock`.
+FROZEN_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+
+# Every licensing module that calls utcnow(). Each imported it by name, so
+# each needs patching.
+_CLOCK_MODULES = (
+    "licensing.models",
+    "licensing.engine",
+    "licensing.schemes",
+    "licensing.geo",
+    "licensing.article4",
+)
+
+
+@pytest.fixture(autouse=True)
+def licensing_clock(monkeypatch):
+    def set_clock(when: datetime) -> None:
+        for module in _CLOCK_MODULES:
+            monkeypatch.setattr(f"{module}.utcnow", lambda: when)
+
+    set_clock(FROZEN_NOW)
+    return set_clock
+
+
+def test_clock_fixture_covers_every_module_that_reads_the_clock():
+    readers = {
+        f"licensing.{path.stem}"
+        for path in (ROOT / "licensing").glob("*.py")
+        if "utcnow(" in path.read_text() or "datetime.now(" in path.read_text()
+    }
+    assert readers <= set(_CLOCK_MODULES), f"add to _CLOCK_MODULES: {readers - set(_CLOCK_MODULES)}"
 
 M14_POSTCODES_IO = {
     "status": 200,
@@ -461,9 +503,7 @@ def test_engine_conversion_from_c3_false_is_not_a_blocker():
 
 
 def _register(status="active", districts=("M14",), verified_at=None, verified=True):
-    from datetime import datetime, timedelta, timezone
-
-    stamp = verified_at or (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    stamp = verified_at or (FROZEN_NOW - timedelta(days=10)).isoformat()
 
     def lookup(postcode, la_code):
         from licensing.article4_register import lookup_verified_article4
@@ -584,6 +624,23 @@ def test_engine_liverpool_citywide_selective_fee_hook():
     fee = next(h for h in sel["analyse_hooks"] if h["id"] == "cost.selective_licence_fee")
     assert fee["fee"]["known"] is True
     assert fee["fee"]["min_gbp"] == 400
+
+
+def test_engine_seed_past_check_window_downgrades_to_soft_warning(licensing_clock):
+    # What the live app shows once the seed's last_verified_at is over 30 days old.
+    load_priority_schemes.cache_clear()
+    verified = parse_iso(match_schemes(la_code="E08000012", la_name="Liverpool")[0].last_verified_at)
+    licensing_clock(verified + timedelta(days=SCHEME_STALE_AFTER_DAYS_PRIORITY + 1))
+    result = run_licensing_check(
+        {"postcode": "L1 8JQ", "occupants": 3, "households": 2, "intended_use": "btl"},
+        geo_fetcher=_geo_stub(L1_POSTCODES_IO),
+        article4_fetcher=_a4_stub(EMPTY_ARTICLE4),
+    )
+    sel = next(f for f in result["flags"] if f["id"] == "selective_licence")
+    assert sel["applies"] == "yes"
+    assert sel["freshness"]["stale"] is True
+    assert sel["severity"] == "soft_warning"
+    assert "selective_licence" in result["freshness"]["stale_components"]
 
 
 def test_engine_scotland_is_out_of_scope():
